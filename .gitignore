@@ -1,0 +1,77 @@
+# ===============================
+# Build 결과물
+# ===============================
+/build/
+/.gradle/
+/target/
+/out/
+
+# ===============================
+# IDE 설정 (개인 로컬용)
+# ===============================
+.idea/
+*.iml
+.settings/
+.classpath
+.project
+.vscode/
+.metadata/
+
+# ===============================
+# OS 파일
+# ===============================
+.DS_Store
+Thumbs.db
+
+# ===============================
+# 로그 파일
+# ===============================
+*.log
+logs/
+
+# ===============================
+# 민감 정보 (절대 커밋 금지)
+# ===============================
+application-local.yml
+application-local.properties
+application-dev.yml
+application-dev.properties
+application-prod.yml
+application-prod.properties
+.env
+aws.env
+.env.local
+jwt-secret.txt
+oauth-secret.json
+*.p12
+*.key
+*.pem
+
+# ===============================
+# DB / 캐시 / 업로드 파일
+# ===============================
+*.mv.db
+*.trace.db
+dump.rdb
+uploads/
+AI/output_docs/
+
+# ===============================
+# 테스트 & 커버리지
+# ===============================
+/coverage/
+*.lcov
+
+# ===============================
+# Docker (필요 시)
+# ===============================
+docker-compose.override.yml
+.env.docker
+
+# ===============================
+# Node (프론트 같이 있을 경우 대비)
+# ===============================
+node_modules/
+dist/
+# application 관련 파일/폴더 무시
+.application/
