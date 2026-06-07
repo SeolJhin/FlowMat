@@ -7,6 +7,8 @@ import jakarta.persistence.Table;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import org.myweb.flowmat.global.common.BaseTimeEntity;
 
 @Getter
@@ -32,4 +34,40 @@ public class User extends BaseTimeEntity {
 
     @Column(name = "user_status")
     private String userStatus;
+    
+    @Column(name = "user_birth")
+    private LocalDate userBirth;
+
+    @Column(name = "user_tel")
+    private String userTel;
+
+    @Column(name = "lastlogin_at")
+    private OffsetDateTime lastLoginAt;
+
+    @Column(name = "pwd_updated_at")
+    private OffsetDateTime pwdUpdatedAt;
+
+    @Column(name = "delete_yn")
+    private String deleteYn;
+
+    @Column(name = "avatar_url")
+    private String avatarUrl;
+
+    @Column(name = "dormant_at")
+    private OffsetDateTime dormantAt;
+
+    @Column(name = "withdrawn_at")
+    private OffsetDateTime withdrawnAt;
+
+    @Column(name = "email_verified_yn")
+    private String emailVerifiedYn;
+
+    @Column(name = "email_verified_at")
+    private OffsetDateTime emailVerifiedAt;
+
+    @Column(name = "failed_login_count")
+    private Integer failedLoginCount;
+
+    @Column(name = "locked_at")
+    private OffsetDateTime lockedAt;
 }
