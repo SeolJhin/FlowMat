@@ -1,8 +1,9 @@
-package org.myweb.flowmat.domain.workflow.domain.entity;
+﻿package org.myweb.flowmat.domain.workflow.domain.entity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import lombok.Getter;
 import lombok.Setter;
 import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
@@ -18,7 +19,12 @@ public class ProcessIo extends CreatedUpdatedAuditEntity {
 
     private String processId;
     private String itemId;
+    private String ioName;
     private String direction;
     private String ioType;
+    private BigDecimal quantity;
     private String unit;
+    private String formula;
+    private String requiredYn;
+    private String allowShortageYn;
 }

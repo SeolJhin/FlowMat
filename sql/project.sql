@@ -504,32 +504,24 @@ CREATE TABLE IF NOT EXISTS "inventory" (
 );
 
 CREATE TABLE IF NOT EXISTS "inventory_transaction" (
+    "inventory_transaction_id" varchar(50) NOT NULL,
     "inventory_id" varchar(50) NOT NULL,
     "project_id" varchar(50) NOT NULL,
     "item_id" varchar(50) NOT NULL,
     "lot_id" varchar(50),
-    "quantity" numeric(14,4) DEFAULT 0.0 NOT NULL,
-    "reserved_quantity" numeric(14,4) DEFAULT 0.0,
-    "available_quantity" numeric(14,4) DEFAULT 0.0,
-    "inbound_expected_qty" numeric(14,4) DEFAULT 0.0,
-    "outbound_expected_qty" numeric(14,4) DEFAULT 0.0,
-    "min_threshold" numeric(14,4) DEFAULT 0.0,
-    "max_threshold" numeric(14,4),
-    "inventory_status" varchar(20) DEFAULT 'available',
-    "location" varchar(100),
-    "warehouse_code" varchar(50),
-    "zone" varchar(50),
-    "lot_no" varchar(100),
-    "expiry_date" date,
-    "locked_yn" char(1) DEFAULT 'N',
-    "last_checked_at" timestamptz,
-    "last_checked_by" varchar(50),
+    "transaction_type" varchar(30) NOT NULL,
+    "quantity_delta" numeric(14,4) NOT NULL,
+    "reserved_delta" numeric(14,4) DEFAULT 0.0,
+    "available_delta" numeric(14,4) DEFAULT 0.0,
+    "quantity_after" numeric(14,4),
+    "reserved_after" numeric(14,4),
+    "available_after" numeric(14,4),
+    "reference_type" varchar(30),
+    "reference_id" varchar(50),
+    "note" text,
     "created_by" varchar(50),
-    "updated_by" varchar(50),
     "created_at" timestamptz DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" timestamptz DEFAULT CURRENT_TIMESTAMP,
-    "deleted_yn" char(1) DEFAULT 'N',
-    CONSTRAINT "pk_inventory_transaction" PRIMARY KEY ("inventory_id")
+    CONSTRAINT "pk_inventory_transaction" PRIMARY KEY ("inventory_transaction_id")
 );
 
 CREATE TABLE IF NOT EXISTS "bom_header" (
@@ -703,6 +695,18 @@ CREATE TABLE IF NOT EXISTS "production_run_item" (
     "quantity_source" varchar(30) DEFAULT 'bom',
     "created_at" timestamptz DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "pk_production_run_item" PRIMARY KEY ("production_run_item_id")
+);
+
+CREATE TABLE IF NOT EXISTS "run_state_snapshot" (
+    "run_state_snapshot_id" varchar(50) NOT NULL,
+    "production_run_id" varchar(50) NOT NULL,
+    "snapshot_name" varchar(100),
+    "snapshot_type" varchar(30) DEFAULT 'manual',
+    "snapshot_data" jsonb DEFAULT '{}'::jsonb NOT NULL,
+    "note" text,
+    "created_by" varchar(50),
+    "created_at" timestamptz DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "pk_run_state_snapshot" PRIMARY KEY ("run_state_snapshot_id")
 );
 
 CREATE TABLE IF NOT EXISTS "stock_alert" (

@@ -1,4 +1,6 @@
-package org.myweb.flowmat.domain.production.api.dto.request;
+﻿package org.myweb.flowmat.domain.production.api.dto.request;
 
-public record ProductionRunFinishRequest(String finishedBy) {
+import java.math.BigDecimal;
+
+public record ProductionRunFinishRequest(BigDecimal actualOutputQty, String finishedBy) {
 }

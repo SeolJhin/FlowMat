@@ -1,4 +1,15 @@
-package org.myweb.flowmat.domain.catalog.api.dto.request;
+﻿package org.myweb.flowmat.domain.catalog.api.dto.request;
 
-public record ItemCreateRequest(String projectId, String itemCode, String itemName, String unitId) {
+import jakarta.validation.constraints.NotBlank;
+
+public record ItemCreateRequest(
+    @NotBlank String projectId,
+    @NotBlank String itemCode,
+    @NotBlank String itemName,
+    String itemType,
+    String resourceCategory,
+    String resourceType,
+    String unitId,
+    String itemStatus
+) {
 }

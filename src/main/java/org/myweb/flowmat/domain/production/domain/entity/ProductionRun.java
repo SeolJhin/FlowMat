@@ -1,4 +1,4 @@
-package org.myweb.flowmat.domain.production.domain.entity;
+﻿package org.myweb.flowmat.domain.production.domain.entity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -22,6 +22,7 @@ public class ProductionRun extends CreatedUpdatedAuditEntity {
     private String workOrderId;
     private String bomId;
     private String runNumber;
+    private String runType;
     private String runStatus;
     private String targetItemId;
     private BigDecimal plannedOutputQty;

@@ -1,4 +1,16 @@
-package org.myweb.flowmat.domain.production.api.dto.response;
+﻿package org.myweb.flowmat.domain.production.api.dto.response;
 
-public record ProductionRunResponse(String productionRunId, String runNumber, String runStatus) {
+import java.math.BigDecimal;
+
+public record ProductionRunResponse(
+    String productionRunId,
+    String projectId,
+    String workflowId,
+    String runNumber,
+    String runType,
+    String runStatus,
+    String targetItemId,
+    BigDecimal plannedOutputQty,
+    BigDecimal actualOutputQty
+) {
 }

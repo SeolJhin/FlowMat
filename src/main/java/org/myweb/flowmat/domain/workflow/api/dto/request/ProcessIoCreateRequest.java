@@ -1,4 +1,19 @@
-package org.myweb.flowmat.domain.workflow.api.dto.request;
+﻿package org.myweb.flowmat.domain.workflow.api.dto.request;
 
-public record ProcessIoCreateRequest(String processId, String itemId, String direction, String unit) {
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import java.math.BigDecimal;
+
+public record ProcessIoCreateRequest(
+    @NotBlank String processId,
+    @NotBlank String itemId,
+    String ioName,
+    @NotBlank String direction,
+    String ioType,
+    @NotNull BigDecimal quantity,
+    @NotBlank String unit,
+    String formula,
+    String requiredYn,
+    String allowShortageYn
+) {
 }

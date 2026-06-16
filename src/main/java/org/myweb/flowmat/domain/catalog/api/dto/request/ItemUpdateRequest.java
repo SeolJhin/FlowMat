@@ -1,4 +1,11 @@
-package org.myweb.flowmat.domain.catalog.api.dto.request;
+﻿package org.myweb.flowmat.domain.catalog.api.dto.request;
 
-public record ItemUpdateRequest(String itemName, String itemStatus, String specJson) {
+public record ItemUpdateRequest(
+    String itemName,
+    String itemType,
+    String resourceCategory,
+    String resourceType,
+    String unitId,
+    String itemStatus
+) {
 }

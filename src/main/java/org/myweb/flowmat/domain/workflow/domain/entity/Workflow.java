@@ -1,4 +1,4 @@
-package org.myweb.flowmat.domain.workflow.domain.entity;
+﻿package org.myweb.flowmat.domain.workflow.domain.entity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -18,6 +18,7 @@ public class Workflow extends CreatedUpdatedAuditEntity {
 
     private String projectId;
     private String workflowName;
+    private String workflowDesc;
     private String workflowType;
     private String workflowStatus;
     private String canvasSnapshot;

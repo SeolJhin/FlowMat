@@ -1,4 +1,16 @@
-package org.myweb.flowmat.domain.workflow.api.dto.request;
+﻿package org.myweb.flowmat.domain.workflow.api.dto.request;
 
-public record ProcessCreateRequest(String workflowId, String processName, String processType, String nodeType) {
+import jakarta.validation.constraints.NotBlank;
+
+public record ProcessCreateRequest(
+    @NotBlank String workflowId,
+    @NotBlank String processName,
+    String processType,
+    String nodeType,
+    Double posX,
+    Double posY,
+    Double width,
+    Double height,
+    String processDesc
+) {
 }

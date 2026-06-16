@@ -1,10 +1,8 @@
-﻿package org.myweb.flowmat.domain.workflow.api.dto.response;
+﻿package org.myweb.flowmat.domain.workflow.api.dto.request;
 
 import java.math.BigDecimal;
 
-public record ProcessIoResponse(
-    String processIoId,
-    String processId,
+public record ProcessIoUpdateRequest(
     String itemId,
     String ioName,
     String direction,

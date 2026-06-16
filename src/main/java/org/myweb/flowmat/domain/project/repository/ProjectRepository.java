@@ -1,7 +1,13 @@
-package org.myweb.flowmat.domain.project.repository;
+﻿package org.myweb.flowmat.domain.project.repository;
 
+import java.util.List;
+import java.util.Optional;
 import org.myweb.flowmat.domain.project.domain.entity.Project;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ProjectRepository extends JpaRepository<Project, String> {
+
+    List<Project> findAllByDeletedYnOrderByCreatedAtDesc(String deletedYn);
+
+    Optional<Project> findByProjectIdAndDeletedYn(String projectId, String deletedYn);
 }

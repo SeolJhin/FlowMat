@@ -1,4 +1,11 @@
-package org.myweb.flowmat.domain.workflow.api.dto.response;
+﻿package org.myweb.flowmat.domain.workflow.api.dto.response;
 
-public record WorkflowCanvasResponse(String workflowId, String canvasSnapshot) {
+import java.util.List;
+
+public record WorkflowCanvasResponse(
+    WorkflowResponse workflow,
+    List<ProcessResponse> processes,
+    List<ProcessIoResponse> processIos,
+    List<ProcessConnectionResponse> connections
+) {
 }

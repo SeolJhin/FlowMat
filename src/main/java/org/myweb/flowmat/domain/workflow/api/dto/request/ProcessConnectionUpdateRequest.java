@@ -1,12 +1,8 @@
 ﻿package org.myweb.flowmat.domain.workflow.api.dto.request;
 
-import jakarta.validation.constraints.NotBlank;
 import java.math.BigDecimal;
 
-public record ProcessConnectionCreateRequest(
-    @NotBlank String workflowId,
-    @NotBlank String fromProcessId,
-    @NotBlank String toProcessId,
+public record ProcessConnectionUpdateRequest(
     String fromIoId,
     String toIoId,
     String itemId,

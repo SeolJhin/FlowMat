@@ -1,4 +1,11 @@
-package org.myweb.flowmat.domain.project.api.dto.request;
+﻿package org.myweb.flowmat.domain.project.api.dto.request;
 
-public record ProjectCreateRequest(String projectName, String projectDesc, String visibility) {
+import jakarta.validation.constraints.NotBlank;
+
+public record ProjectCreateRequest(
+    @NotBlank String projectName,
+    @NotBlank String ownerId,
+    String projectDesc,
+    String visibility
+) {
 }

@@ -1,4 +1,4 @@
-package org.myweb.flowmat.domain.workflow.domain.entity;
+﻿package org.myweb.flowmat.domain.workflow.domain.entity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -25,4 +25,7 @@ public class Process extends CreatedUpdatedAuditEntity {
     private String processStatus;
     private Double posX;
     private Double posY;
+    private Double width;
+    private Double height;
+    private String processDesc;
 }
