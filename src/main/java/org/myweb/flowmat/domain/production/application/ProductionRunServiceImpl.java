@@ -6,6 +6,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.inventory.application.InventoryTransactionService;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunFinishRequest;
@@ -45,6 +46,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     private final ProcessIoRepository processIoRepository;
     private final ItemRepository itemRepository;
     private final InventoryRepository inventoryRepository;
+    private final InventoryTransactionService inventoryTransactionService;
     private final IdGenerator idGenerator;
 
     @Override
@@ -101,6 +103,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         ProductionRun run = findActiveRun(productionRunId);
         Item item = findActiveItem(request.itemId());
         validateSameProject(run.getProjectId(), item.getProjectId());
+        Inventory inventory = null;
 
         if (request.processId() != null && !request.processId().isBlank()) {
             Process process = findActiveProcess(request.processId());
@@ -115,7 +118,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             }
         }
         if (request.inventoryId() != null && !request.inventoryId().isBlank()) {
-            Inventory inventory = findActiveInventory(request.inventoryId());
+            inventory = findActiveInventory(request.inventoryId());
             validateSameProject(run.getProjectId(), inventory.getProjectId());
         }
 
@@ -130,7 +133,13 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         runItem.setPlannedQty(request.plannedQty());
         runItem.setActualQty(request.actualQty());
         runItem.setUnit(request.unit().trim());
-        return toItemResponse(productionRunItemRepository.save(runItem));
+        ProductionRunItem savedRunItem = productionRunItemRepository.save(runItem);
+
+        if (inventory != null) {
+            applyInventoryEffect(run, savedRunItem, inventory);
+        }
+
+        return toItemResponse(savedRunItem);
     }
 
     @Override
@@ -229,6 +238,42 @@ public class ProductionRunServiceImpl implements ProductionRunService {
 
     private static String defaultIfBlank(String value, String defaultValue) {
         return value != null && !value.isBlank() ? value.trim().toLowerCase() : defaultValue;
+    }
+
+    private void applyInventoryEffect(ProductionRun run, ProductionRunItem runItem, Inventory inventory) {
+        BigDecimal actualQty = runItem.getActualQty() != null ? runItem.getActualQty() : runItem.getPlannedQty();
+        if (actualQty == null) {
+            actualQty = BigDecimal.ZERO;
+        }
+
+        BigDecimal quantityDelta;
+        if ("input".equals(runItem.getDirection())) {
+            quantityDelta = actualQty.negate();
+        } else if ("output".equals(runItem.getDirection())) {
+            quantityDelta = actualQty;
+        } else {
+            quantityDelta = BigDecimal.ZERO;
+        }
+
+        inventory.setQuantity(defaultIfNull(inventory.getQuantity(), BigDecimal.ZERO).add(quantityDelta));
+        inventory.setAvailableQuantity(defaultIfNull(inventory.getAvailableQuantity(), BigDecimal.ZERO).add(quantityDelta));
+        Inventory savedInventory = inventoryRepository.save(inventory);
+
+        inventoryTransactionService.recordSystemTransaction(
+            savedInventory,
+            "run_" + runItem.getDirection(),
+            quantityDelta,
+            BigDecimal.ZERO,
+            quantityDelta,
+            "production_run_item",
+            runItem.getProductionRunItemId(),
+            "Recorded from run " + run.getRunNumber(),
+            run.getStartedBy()
+        );
+    }
+
+    private static BigDecimal defaultIfNull(BigDecimal value, BigDecimal defaultValue) {
+        return value != null ? value : defaultValue;
     }
 
     private static String generateRunNumber() {

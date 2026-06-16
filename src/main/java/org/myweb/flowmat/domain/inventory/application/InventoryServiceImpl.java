@@ -27,6 +27,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final InventoryRepository inventoryRepository;
     private final ProjectRepository projectRepository;
     private final ItemRepository itemRepository;
+    private final InventoryTransactionService inventoryTransactionService;
     private final IdGenerator idGenerator;
 
     @Override
@@ -56,7 +57,19 @@ public class InventoryServiceImpl implements InventoryService {
         inventory.setLocation(trimToNull(request.location()));
         inventory.setInventoryStatus(defaultIfBlank(request.inventoryStatus(), "available"));
         inventory.setDeletedYn(NOT_DELETED);
-        return toResponse(inventoryRepository.save(inventory));
+        Inventory savedInventory = inventoryRepository.save(inventory);
+        inventoryTransactionService.recordSystemTransaction(
+            savedInventory,
+            "create",
+            savedInventory.getQuantity(),
+            savedInventory.getReservedQuantity(),
+            savedInventory.getAvailableQuantity(),
+            "inventory",
+            savedInventory.getInventoryId(),
+            "Inventory created",
+            null
+        );
+        return toResponse(savedInventory);
     }
 
     @Override
@@ -72,6 +85,10 @@ public class InventoryServiceImpl implements InventoryService {
         validateSameProject(inventory.getProjectId(), request.projectId());
         validateSameProject(inventory.getProjectId(), item.getProjectId());
 
+        BigDecimal quantityBefore = inventory.getQuantity();
+        BigDecimal reservedBefore = inventory.getReservedQuantity();
+        BigDecimal availableBefore = inventory.getAvailableQuantity();
+
         inventory.setItemId(item.getItemId());
         inventory.setQuantity(request.quantity());
         inventory.setReservedQuantity(defaultIfNull(request.reservedQuantity(), BigDecimal.ZERO));
@@ -80,7 +97,19 @@ public class InventoryServiceImpl implements InventoryService {
         );
         inventory.setLocation(trimToNull(request.location()));
         inventory.setInventoryStatus(defaultIfBlank(request.inventoryStatus(), inventory.getInventoryStatus()));
-        return toResponse(inventoryRepository.save(inventory));
+        Inventory savedInventory = inventoryRepository.save(inventory);
+        inventoryTransactionService.recordSystemTransaction(
+            savedInventory,
+            "adjust",
+            savedInventory.getQuantity().subtract(quantityBefore),
+            savedInventory.getReservedQuantity().subtract(reservedBefore),
+            savedInventory.getAvailableQuantity().subtract(availableBefore),
+            "inventory",
+            savedInventory.getInventoryId(),
+            "Inventory adjusted",
+            null
+        );
+        return toResponse(savedInventory);
     }
 
     @Override
@@ -88,7 +117,18 @@ public class InventoryServiceImpl implements InventoryService {
     public void deleteInventory(String inventoryId) {
         Inventory inventory = findActiveInventory(inventoryId);
         inventory.setDeletedYn(DELETED);
-        inventoryRepository.save(inventory);
+        Inventory savedInventory = inventoryRepository.save(inventory);
+        inventoryTransactionService.recordSystemTransaction(
+            savedInventory,
+            "delete",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            "inventory",
+            savedInventory.getInventoryId(),
+            "Inventory deleted",
+            null
+        );
     }
 
     private void ensureProjectExists(String projectId) {
