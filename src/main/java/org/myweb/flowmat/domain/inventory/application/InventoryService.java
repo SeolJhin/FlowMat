@@ -1,4 +1,4 @@
-﻿package org.myweb.flowmat.domain.inventory.application;
+package org.myweb.flowmat.domain.inventory.application;
 
 import java.util.List;
 import org.myweb.flowmat.domain.inventory.api.dto.request.InventoryAdjustRequest;

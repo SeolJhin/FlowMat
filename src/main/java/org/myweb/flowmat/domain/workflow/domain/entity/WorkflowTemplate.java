@@ -19,4 +19,11 @@ public class WorkflowTemplate extends BaseTimeEntity {
     private String templateName;
     private String templateCategory;
     private String templateType;
+    private String iconKey;
+    private Double defaultWidth;
+    private Double defaultHeight;
+    private String defaultDesc;
+    private String defaultConfig;
+    private String publicYn;
+    private Integer sortOrder;
 }

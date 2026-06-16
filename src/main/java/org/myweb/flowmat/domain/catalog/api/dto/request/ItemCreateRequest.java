@@ -1,4 +1,4 @@
-﻿package org.myweb.flowmat.domain.catalog.api.dto.request;
+package org.myweb.flowmat.domain.catalog.api.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
 

@@ -1,4 +1,4 @@
-﻿package org.myweb.flowmat.domain.production.api.dto.request;
+package org.myweb.flowmat.domain.production.api.dto.request;
 
 import java.math.BigDecimal;
 

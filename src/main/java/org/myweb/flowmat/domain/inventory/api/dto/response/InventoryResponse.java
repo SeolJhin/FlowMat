@@ -1,4 +1,4 @@
-﻿package org.myweb.flowmat.domain.inventory.api.dto.response;
+package org.myweb.flowmat.domain.inventory.api.dto.response;
 
 import java.math.BigDecimal;
 

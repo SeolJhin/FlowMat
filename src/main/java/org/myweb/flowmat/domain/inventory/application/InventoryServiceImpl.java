@@ -1,12 +1,17 @@
-﻿package org.myweb.flowmat.domain.inventory.application;
+package org.myweb.flowmat.domain.inventory.application;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.api.dto.request.InventoryAdjustRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.response.InventoryResponse;
+import org.myweb.flowmat.domain.rule.application.FlowRuleEngineService;
+import org.myweb.flowmat.domain.rule.application.RuleEvaluationContext;
+import org.myweb.flowmat.domain.rule.application.RuleTarget;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.domain.project.repository.ProjectRepository;
@@ -28,6 +33,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final ProjectRepository projectRepository;
     private final ItemRepository itemRepository;
     private final InventoryTransactionService inventoryTransactionService;
+    private final FlowRuleEngineService flowRuleEngineService;
     private final IdGenerator idGenerator;
 
     @Override
@@ -44,6 +50,18 @@ public class InventoryServiceImpl implements InventoryService {
         ensureProjectExists(request.projectId());
         Item item = findActiveItem(request.itemId());
         validateSameProject(request.projectId(), item.getProjectId());
+        evaluateRules(
+            request.projectId(),
+            List.of(
+                new RuleTarget("project", request.projectId()),
+                new RuleTarget("item", item.getItemId())
+            ),
+            Map.of(
+                "operation", "inventory_create",
+                "request", request,
+                "item", item
+            )
+        );
 
         Inventory inventory = new Inventory();
         inventory.setInventoryId(idGenerator.generate());
@@ -84,6 +102,20 @@ public class InventoryServiceImpl implements InventoryService {
         Item item = findActiveItem(request.itemId());
         validateSameProject(inventory.getProjectId(), request.projectId());
         validateSameProject(inventory.getProjectId(), item.getProjectId());
+        evaluateRules(
+            inventory.getProjectId(),
+            List.of(
+                new RuleTarget("project", inventory.getProjectId()),
+                new RuleTarget("item", item.getItemId()),
+                new RuleTarget("inventory", inventory.getInventoryId())
+            ),
+            Map.of(
+                "operation", "inventory_update",
+                "request", request,
+                "inventory", inventory,
+                "item", item
+            )
+        );
 
         BigDecimal quantityBefore = inventory.getQuantity();
         BigDecimal reservedBefore = inventory.getReservedQuantity();
@@ -116,6 +148,17 @@ public class InventoryServiceImpl implements InventoryService {
     @Transactional
     public void deleteInventory(String inventoryId) {
         Inventory inventory = findActiveInventory(inventoryId);
+        evaluateRules(
+            inventory.getProjectId(),
+            List.of(
+                new RuleTarget("project", inventory.getProjectId()),
+                new RuleTarget("inventory", inventory.getInventoryId())
+            ),
+            Map.of(
+                "operation", "inventory_delete",
+                "inventory", inventory
+            )
+        );
         inventory.setDeletedYn(DELETED);
         Inventory savedInventory = inventoryRepository.save(inventory);
         inventoryTransactionService.recordSystemTransaction(
@@ -175,5 +218,9 @@ public class InventoryServiceImpl implements InventoryService {
 
     private static BigDecimal defaultIfNull(BigDecimal value, BigDecimal defaultValue) {
         return value != null ? value : defaultValue;
+    }
+
+    private void evaluateRules(String projectId, List<RuleTarget> targets, Map<String, Object> facts) {
+        flowRuleEngineService.validateRules(new RuleEvaluationContext(projectId.trim(), new ArrayList<>(targets), facts));
     }
 }

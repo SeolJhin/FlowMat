@@ -1,4 +1,4 @@
-﻿package org.myweb.flowmat.domain.project.api;
+package org.myweb.flowmat.domain.project.api;
 
 import jakarta.validation.Valid;
 import java.util.List;

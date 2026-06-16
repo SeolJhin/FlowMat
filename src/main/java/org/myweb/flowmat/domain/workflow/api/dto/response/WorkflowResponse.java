@@ -1,4 +1,4 @@
-﻿package org.myweb.flowmat.domain.workflow.api.dto.response;
+package org.myweb.flowmat.domain.workflow.api.dto.response;
 
 public record WorkflowResponse(
     String workflowId,

@@ -1,4 +1,4 @@
-﻿package org.myweb.flowmat.domain.production.application;
+package org.myweb.flowmat.domain.production.application;
 
 import java.util.List;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunFinishRequest;

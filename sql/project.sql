@@ -711,6 +711,27 @@ CREATE TABLE IF NOT EXISTS "run_state_snapshot" (
     CONSTRAINT "pk_run_state_snapshot" PRIMARY KEY ("run_state_snapshot_id")
 );
 
+CREATE TABLE IF NOT EXISTS "flow_rule" (
+    "rule_id" varchar(50) NOT NULL,
+    "project_id" varchar(50) NOT NULL,
+    "target_type" varchar(50) NOT NULL,
+    "target_id" varchar(50) NOT NULL,
+    "rule_name" varchar(100) NOT NULL,
+    "rule_desc" text,
+    "condition_type" varchar(30) DEFAULT 'expression' NOT NULL,
+    "condition_expression" text NOT NULL,
+    "action_type" varchar(30) DEFAULT 'validate' NOT NULL,
+    "action_config" jsonb DEFAULT '{}'::jsonb NOT NULL,
+    "priority" integer DEFAULT 0,
+    "enabled_yn" char(1) DEFAULT 'Y',
+    "created_by" varchar(50),
+    "updated_by" varchar(50),
+    "created_at" timestamptz DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" timestamptz DEFAULT CURRENT_TIMESTAMP,
+    "deleted_yn" char(1) DEFAULT 'N',
+    CONSTRAINT "pk_flow_rule" PRIMARY KEY ("rule_id")
+);
+
 CREATE TABLE IF NOT EXISTS "stock_alert" (
     "stock_alert_id" varchar(50) NOT NULL,
     "project_id" varchar(50) NOT NULL,
@@ -1466,6 +1487,18 @@ COMMENT ON COLUMN "inventory_transaction"."reference_id" IS 'Reference ID';
 COMMENT ON COLUMN "inventory_transaction"."note" IS 'Note';
 COMMENT ON COLUMN "inventory_transaction"."created_by" IS 'Created by';
 COMMENT ON COLUMN "inventory_transaction"."created_at" IS 'Created at';
+COMMENT ON COLUMN "flow_rule"."rule_id" IS 'Flow rule ID';
+COMMENT ON COLUMN "flow_rule"."project_id" IS 'Project ID';
+COMMENT ON COLUMN "flow_rule"."target_type" IS 'Target type';
+COMMENT ON COLUMN "flow_rule"."target_id" IS 'Target ID';
+COMMENT ON COLUMN "flow_rule"."rule_name" IS 'Rule name';
+COMMENT ON COLUMN "flow_rule"."rule_desc" IS 'Rule description';
+COMMENT ON COLUMN "flow_rule"."condition_type" IS 'Condition type';
+COMMENT ON COLUMN "flow_rule"."condition_expression" IS 'Condition expression';
+COMMENT ON COLUMN "flow_rule"."action_type" IS 'Action type';
+COMMENT ON COLUMN "flow_rule"."action_config" IS 'Action config JSON';
+COMMENT ON COLUMN "flow_rule"."priority" IS 'Rule priority';
+COMMENT ON COLUMN "flow_rule"."enabled_yn" IS 'Enabled flag (Y/N)';
 COMMENT ON COLUMN "bom_header"."bom_id" IS 'BOM ID';
 COMMENT ON COLUMN "bom_header"."project_id" IS 'Project ID';
 COMMENT ON COLUMN "bom_header"."target_item_id" IS 'Target Item ID';
@@ -1932,6 +1965,9 @@ CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_item_id" ON "inventory_tra
 CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_lot_id" ON "inventory_transaction" ("lot_id");
 CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_created_by" ON "inventory_transaction" ("created_by");
 CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_reference_id" ON "inventory_transaction" ("reference_id");
+CREATE INDEX IF NOT EXISTS "idx_flow_rule_project_id" ON "flow_rule" ("project_id");
+CREATE INDEX IF NOT EXISTS "idx_flow_rule_target" ON "flow_rule" ("target_type", "target_id");
+CREATE INDEX IF NOT EXISTS "idx_flow_rule_enabled_yn" ON "flow_rule" ("enabled_yn");
 CREATE INDEX IF NOT EXISTS "idx_equipment_project_id" ON "equipment" ("project_id");
 CREATE INDEX IF NOT EXISTS "idx_equipment_created_by" ON "equipment" ("created_by");
 CREATE INDEX IF NOT EXISTS "idx_equipment_updated_by" ON "equipment" ("updated_by");

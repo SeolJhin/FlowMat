@@ -1,7 +1,10 @@
-﻿package org.myweb.flowmat.domain.production.application;
+package org.myweb.flowmat.domain.production.application;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
@@ -19,6 +22,9 @@ import org.myweb.flowmat.domain.production.domain.entity.ProductionRunItem;
 import org.myweb.flowmat.domain.production.repository.ProductionRunItemRepository;
 import org.myweb.flowmat.domain.production.repository.ProductionRunRepository;
 import org.myweb.flowmat.domain.project.repository.ProjectRepository;
+import org.myweb.flowmat.domain.rule.application.FlowRuleEngineService;
+import org.myweb.flowmat.domain.rule.application.RuleEvaluationContext;
+import org.myweb.flowmat.domain.rule.application.RuleTarget;
 import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
@@ -47,6 +53,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     private final ItemRepository itemRepository;
     private final InventoryRepository inventoryRepository;
     private final InventoryTransactionService inventoryTransactionService;
+    private final FlowRuleEngineService flowRuleEngineService;
     private final IdGenerator idGenerator;
 
     @Override
@@ -64,10 +71,12 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         ensureProjectExists(request.projectId());
         Workflow workflow = findActiveWorkflow(request.workflowId());
         validateSameProject(request.projectId(), workflow.getProjectId());
+        Item item = null;
         if (request.targetItemId() != null && !request.targetItemId().isBlank()) {
-            Item item = findActiveItem(request.targetItemId());
+            item = findActiveItem(request.targetItemId());
             validateSameProject(request.projectId(), item.getProjectId());
         }
+        evaluateRunStartRules(request, workflow, item);
 
         ProductionRun run = new ProductionRun();
         run.setProductionRunId(idGenerator.generate());
@@ -104,13 +113,15 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         Item item = findActiveItem(request.itemId());
         validateSameProject(run.getProjectId(), item.getProjectId());
         Inventory inventory = null;
+        Process process = null;
+        ProcessIo processIo = null;
 
         if (request.processId() != null && !request.processId().isBlank()) {
-            Process process = findActiveProcess(request.processId());
+            process = findActiveProcess(request.processId());
             validateSameWorkflow(run.getWorkflowId(), process.getWorkflowId());
         }
         if (request.processIoId() != null && !request.processIoId().isBlank()) {
-            ProcessIo processIo = findActiveProcessIo(request.processIoId());
+            processIo = findActiveProcessIo(request.processIoId());
             if (request.processId() != null && !request.processId().isBlank()) {
                 if (!request.processId().equals(processIo.getProcessId())) {
                     throw new BusinessException(ErrorCode.BAD_REQUEST);
@@ -121,6 +132,8 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             inventory = findActiveInventory(request.inventoryId());
             validateSameProject(run.getProjectId(), inventory.getProjectId());
         }
+
+        evaluateRunItemRules(run, request, item, process, processIo, inventory);
 
         ProductionRunItem runItem = new ProductionRunItem();
         runItem.setProductionRunItemId(idGenerator.generate());
@@ -146,6 +159,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     @Transactional
     public ProductionRunResponse finishRun(String productionRunId, ProductionRunFinishRequest request) {
         ProductionRun run = findActiveRun(productionRunId);
+        evaluateRunFinishRules(run, request);
         run.setRunStatus("finished");
         if (request != null && request.actualOutputQty() != null) {
             run.setActualOutputQty(request.actualOutputQty());
@@ -280,5 +294,81 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         long timestamp = System.currentTimeMillis();
         int suffix = ThreadLocalRandom.current().nextInt(1000, 9999);
         return "RUN-" + timestamp + "-" + suffix;
+    }
+
+    private void evaluateRunStartRules(ProductionRunStartRequest request, Workflow workflow, Item item) {
+        List<RuleTarget> targets = new ArrayList<>();
+        targets.add(new RuleTarget("project", request.projectId()));
+        targets.add(new RuleTarget("workflow", workflow.getWorkflowId()));
+        if (item != null) {
+            targets.add(new RuleTarget("item", item.getItemId()));
+        }
+
+        Map<String, Object> facts = new LinkedHashMap<>();
+        facts.put("operation", "run_start");
+        facts.put("request", request);
+        facts.put("workflow", workflow);
+        facts.put("item", item);
+        facts.put("plannedOutputQty", request.plannedOutputQty());
+        facts.put("runType", defaultIfBlank(request.runType(), "actual"));
+
+        flowRuleEngineService.validateRules(new RuleEvaluationContext(request.projectId().trim(), targets, facts));
+    }
+
+    private void evaluateRunItemRules(
+        ProductionRun run,
+        ProductionRunItemRecordRequest request,
+        Item item,
+        Process process,
+        ProcessIo processIo,
+        Inventory inventory
+    ) {
+        List<RuleTarget> targets = new ArrayList<>();
+        targets.add(new RuleTarget("project", run.getProjectId()));
+        targets.add(new RuleTarget("workflow", run.getWorkflowId()));
+        targets.add(new RuleTarget("run", run.getProductionRunId()));
+        targets.add(new RuleTarget("item", item.getItemId()));
+        if (process != null) {
+            targets.add(new RuleTarget("process", process.getProcessId()));
+        }
+        if (processIo != null) {
+            targets.add(new RuleTarget("process_io", processIo.getProcessIoId()));
+        }
+        if (inventory != null) {
+            targets.add(new RuleTarget("inventory", inventory.getInventoryId()));
+        }
+
+        BigDecimal requestQuantity = request.actualQty() != null ? request.actualQty() : request.plannedQty();
+        Map<String, Object> facts = new LinkedHashMap<>();
+        facts.put("operation", "run_item_record");
+        facts.put("run", run);
+        facts.put("request", request);
+        facts.put("item", item);
+        facts.put("process", process);
+        facts.put("processIo", processIo);
+        facts.put("inventory", inventory);
+        facts.put("requestQuantity", requestQuantity);
+        facts.put("direction", request.direction().trim().toLowerCase());
+
+        flowRuleEngineService.validateRules(new RuleEvaluationContext(run.getProjectId(), targets, facts));
+    }
+
+    private void evaluateRunFinishRules(ProductionRun run, ProductionRunFinishRequest request) {
+        List<RuleTarget> targets = List.of(
+            new RuleTarget("project", run.getProjectId()),
+            new RuleTarget("workflow", run.getWorkflowId()),
+            new RuleTarget("run", run.getProductionRunId())
+        );
+
+        Map<String, Object> facts = new LinkedHashMap<>();
+        facts.put("operation", "run_finish");
+        facts.put("run", run);
+        facts.put("request", request);
+        if (request != null) {
+            facts.put("actualOutputQty", request.actualOutputQty());
+            facts.put("finishedBy", request.finishedBy());
+        }
+
+        flowRuleEngineService.validateRules(new RuleEvaluationContext(run.getProjectId(), new ArrayList<>(targets), facts));
     }
 }

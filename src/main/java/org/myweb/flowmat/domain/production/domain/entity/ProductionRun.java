@@ -1,4 +1,4 @@
-﻿package org.myweb.flowmat.domain.production.domain.entity;
+package org.myweb.flowmat.domain.production.domain.entity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;

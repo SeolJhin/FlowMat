@@ -1,4 +1,4 @@
-﻿package org.myweb.flowmat.domain.workflow.api.dto.request;
+package org.myweb.flowmat.domain.workflow.api.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
 import java.math.BigDecimal;

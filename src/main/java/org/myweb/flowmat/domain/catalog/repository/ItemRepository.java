@@ -1,4 +1,4 @@
-﻿package org.myweb.flowmat.domain.catalog.repository;
+package org.myweb.flowmat.domain.catalog.repository;
 
 import java.util.List;
 import java.util.Optional;

@@ -1,4 +1,4 @@
-﻿package org.myweb.flowmat.domain.workflow.repository;
+package org.myweb.flowmat.domain.workflow.repository;
 
 import java.util.Collection;
 import java.util.List;

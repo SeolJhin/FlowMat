@@ -1,4 +1,4 @@
-﻿package org.myweb.flowmat.domain.workflow.application;
+package org.myweb.flowmat.domain.workflow.application;
 
 import java.math.BigDecimal;
 import java.util.List;

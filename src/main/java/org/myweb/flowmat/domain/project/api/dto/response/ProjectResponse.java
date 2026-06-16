@@ -1,4 +1,4 @@
-﻿package org.myweb.flowmat.domain.project.api.dto.response;
+package org.myweb.flowmat.domain.project.api.dto.response;
 
 public record ProjectResponse(
     String projectId,
