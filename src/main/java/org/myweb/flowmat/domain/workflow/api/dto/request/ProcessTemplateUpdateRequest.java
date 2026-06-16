@@ -5,6 +5,7 @@ public record ProcessTemplateUpdateRequest(
     String templateCategory,
     String templateType,
     String iconKey,
+    String defaultColorScheme,
     Double defaultWidth,
     Double defaultHeight,
     String defaultDesc,

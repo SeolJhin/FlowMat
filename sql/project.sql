@@ -222,6 +222,7 @@ CREATE TABLE IF NOT EXISTS "process_template" (
     "template_category" varchar(50) NOT NULL,
     "template_type" varchar(30) DEFAULT 'process' NOT NULL,
     "icon_key" varchar(50),
+    "default_color_scheme" varchar(30) DEFAULT 'slate',
     "default_width" numeric(8,2) DEFAULT 120.0,
     "default_height" numeric(8,2) DEFAULT 60.0,
     "default_duration_min" integer,
@@ -1220,6 +1221,7 @@ COMMENT ON COLUMN "process_template"."template_name" IS 'Template Name';
 COMMENT ON COLUMN "process_template"."template_category" IS 'Template Category';
 COMMENT ON COLUMN "process_template"."template_type" IS 'Template Type';
 COMMENT ON COLUMN "process_template"."icon_key" IS 'Icon Key';
+COMMENT ON COLUMN "process_template"."default_color_scheme" IS 'Default Color Scheme';
 COMMENT ON COLUMN "process_template"."default_width" IS 'Default Width';
 COMMENT ON COLUMN "process_template"."default_height" IS 'Default Height';
 COMMENT ON COLUMN "process_template"."default_duration_min" IS 'Default Duration minimum';

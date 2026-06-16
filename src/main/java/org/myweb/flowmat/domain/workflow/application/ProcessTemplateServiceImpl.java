@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProcessTemplateServiceImpl implements ProcessTemplateService {
 
     private static final String NOT_DELETED = "N";
+    private static final String DEFAULT_COLOR_SCHEME = "slate";
 
     private final ProcessTemplateRepository processTemplateRepository;
     private final WorkflowRepository workflowRepository;
@@ -49,6 +50,7 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
             request.templateCategory(),
             request.templateType(),
             request.iconKey(),
+            request.defaultColorScheme(),
             request.defaultWidth(),
             request.defaultHeight(),
             request.defaultDesc(),
@@ -79,6 +81,9 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
         }
         if (request.iconKey() != null) {
             template.setIconKey(trimToNull(request.iconKey()));
+        }
+        if (request.defaultColorScheme() != null) {
+            template.setDefaultColorScheme(defaultColorScheme(request.defaultColorScheme(), template.getDefaultColorScheme()));
         }
         if (request.defaultWidth() != null) {
             template.setDefaultWidth(request.defaultWidth());
@@ -123,6 +128,7 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
         process.setProcessType(defaultIfBlank(request.processType(), template.getTemplateCategory()));
         process.setNodeType(defaultIfBlank(request.nodeType(), template.getTemplateType()));
         process.setProcessStatus("active");
+        process.setColorScheme(defaultColorScheme(request.colorScheme(), template.getDefaultColorScheme()));
         process.setPosX(defaultIfNull(request.posX(), 0.0));
         process.setPosY(defaultIfNull(request.posY(), 0.0));
         process.setWidth(defaultIfNull(template.getDefaultWidth(), 120.0));
@@ -143,6 +149,7 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
         String templateCategory,
         String templateType,
         String iconKey,
+        String defaultColorScheme,
         Double defaultWidth,
         Double defaultHeight,
         String defaultDesc,
@@ -154,6 +161,7 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
         template.setTemplateCategory(templateCategory.trim().toLowerCase());
         template.setTemplateType(defaultIfBlank(templateType, "process"));
         template.setIconKey(trimToNull(iconKey));
+        template.setDefaultColorScheme(defaultColorScheme(defaultColorScheme, DEFAULT_COLOR_SCHEME));
         template.setDefaultWidth(defaultIfNull(defaultWidth, 120.0));
         template.setDefaultHeight(defaultIfNull(defaultHeight, 60.0));
         template.setDefaultDesc(trimToNull(defaultDesc));
@@ -169,6 +177,7 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
             template.getTemplateCategory(),
             template.getTemplateType(),
             template.getIconKey(),
+            template.getDefaultColorScheme(),
             template.getDefaultWidth(),
             template.getDefaultHeight(),
             template.getDefaultDesc(),
@@ -187,6 +196,7 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
             process.getProcessType(),
             process.getNodeType(),
             process.getProcessStatus(),
+            process.getColorScheme(),
             process.getPosX(),
             process.getPosY(),
             process.getWidth(),
@@ -221,5 +231,9 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
 
     private static String normalizeYn(String value) {
         return "N".equalsIgnoreCase(value) ? "N" : "Y";
+    }
+
+    private static String defaultColorScheme(String value, String defaultValue) {
+        return hasText(value) ? value.trim().toLowerCase() : defaultValue;
     }
 }

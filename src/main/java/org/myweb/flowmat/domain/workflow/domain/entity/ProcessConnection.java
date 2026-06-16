@@ -24,6 +24,8 @@ public class ProcessConnection extends CreatedUpdatedAuditEntity {
     private String fromIoId;
     private String toIoId;
     private String itemId;
+    private String sourceHandle;
+    private String targetHandle;
     private String connectionType;
     private String connectionLabel;
     private BigDecimal flowRate;

@@ -7,6 +7,7 @@ public record ProcessCreateRequest(
     @NotBlank String processName,
     String processType,
     String nodeType,
+    String colorScheme,
     Double posX,
     Double posY,
     Double width,

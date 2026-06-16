@@ -12,6 +12,7 @@ public record ProcessIoResponse(
     BigDecimal quantity,
     String unit,
     String formula,
+    String colorScheme,
     String requiredYn,
     String allowShortageYn
 ) {

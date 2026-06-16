@@ -7,6 +7,7 @@ public record ProcessTemplateCreateRequest(
     @NotBlank String templateCategory,
     String templateType,
     String iconKey,
+    String defaultColorScheme,
     Double defaultWidth,
     Double defaultHeight,
     String defaultDesc,

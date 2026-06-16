@@ -76,6 +76,7 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
             process.getProcessType(),
             process.getNodeType(),
             process.getProcessStatus(),
+            process.getColorScheme(),
             process.getPosX(),
             process.getPosY(),
             process.getWidth(),
@@ -95,6 +96,7 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
             processIo.getQuantity(),
             processIo.getUnit(),
             processIo.getFormula(),
+            processIo.getColorScheme(),
             processIo.getRequiredYn(),
             processIo.getAllowShortageYn()
         );
@@ -110,6 +112,8 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
             connection.getFromIoId(),
             connection.getToIoId(),
             connection.getItemId(),
+            connection.getSourceHandle(),
+            connection.getTargetHandle(),
             connection.getConnectionType(),
             connection.getConnectionLabel(),
             connection.getFlowRate(),

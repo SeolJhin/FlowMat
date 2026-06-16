@@ -7,6 +7,7 @@ public record ProcessTemplateApplyRequest(
     String processName,
     String processType,
     String nodeType,
+    String colorScheme,
     Double posX,
     Double posY
 ) {

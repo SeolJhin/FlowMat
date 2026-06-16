@@ -63,6 +63,8 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         connection.setFromIoId(validateProcessIo(request.fromIoId(), fromProcess.getProcessId()));
         connection.setToIoId(validateProcessIo(request.toIoId(), toProcess.getProcessId()));
         connection.setItemId(validateItem(request.itemId(), workflow.getProjectId()));
+        connection.setSourceHandle(resolveHandle(request.sourceHandle(), connection.getFromIoId(), "out"));
+        connection.setTargetHandle(resolveHandle(request.targetHandle(), connection.getToIoId(), "in"));
         connection.setConnectionType(defaultIfBlank(request.connectionType(), "material"));
         connection.setConnectionLabel(trimToNull(request.connectionLabel()));
         connection.setFlowRate(request.flowRate());
@@ -94,6 +96,16 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         }
         if (request.itemId() != null) {
             connection.setItemId(validateItem(request.itemId(), connection.getProjectId()));
+        }
+        if (request.sourceHandle() != null) {
+            connection.setSourceHandle(resolveHandle(request.sourceHandle(), connection.getFromIoId(), "out"));
+        } else if (connection.getSourceHandle() == null) {
+            connection.setSourceHandle(resolveHandle(null, connection.getFromIoId(), "out"));
+        }
+        if (request.targetHandle() != null) {
+            connection.setTargetHandle(resolveHandle(request.targetHandle(), connection.getToIoId(), "in"));
+        } else if (connection.getTargetHandle() == null) {
+            connection.setTargetHandle(resolveHandle(null, connection.getToIoId(), "in"));
         }
         if (hasText(request.connectionType())) {
             connection.setConnectionType(request.connectionType().trim().toLowerCase());
@@ -183,6 +195,8 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
             connection.getFromIoId(),
             connection.getToIoId(),
             connection.getItemId(),
+            connection.getSourceHandle(),
+            connection.getTargetHandle(),
             connection.getConnectionType(),
             connection.getConnectionLabel(),
             connection.getFlowRate(),
@@ -207,5 +221,15 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
 
     private static BigDecimal defaultIfNull(BigDecimal value, BigDecimal defaultValue) {
         return value != null ? value : defaultValue;
+    }
+
+    private static String resolveHandle(String requestedHandle, String ioId, String defaultPrefix) {
+        if (hasText(requestedHandle)) {
+            return requestedHandle.trim();
+        }
+        if (hasText(ioId)) {
+            return ioId.trim();
+        }
+        return defaultPrefix + "-default";
     }
 }

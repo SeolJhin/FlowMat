@@ -13,6 +13,7 @@ public record ProcessIoCreateRequest(
     @NotNull BigDecimal quantity,
     @NotBlank String unit,
     String formula,
+    String colorScheme,
     String requiredYn,
     String allowShortageYn
 ) {

@@ -20,6 +20,7 @@ public class ProcessTemplate extends BaseTimeEntity {
     private String templateCategory;
     private String templateType;
     private String iconKey;
+    private String defaultColorScheme;
     private Double defaultWidth;
     private Double defaultHeight;
     private String defaultDesc;

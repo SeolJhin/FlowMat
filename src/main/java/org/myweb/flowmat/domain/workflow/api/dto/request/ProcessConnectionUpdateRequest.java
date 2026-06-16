@@ -6,6 +6,8 @@ public record ProcessConnectionUpdateRequest(
     String fromIoId,
     String toIoId,
     String itemId,
+    String sourceHandle,
+    String targetHandle,
     String connectionType,
     String connectionLabel,
     BigDecimal flowRate,

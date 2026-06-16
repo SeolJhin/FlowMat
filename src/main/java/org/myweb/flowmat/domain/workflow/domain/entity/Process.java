@@ -23,6 +23,7 @@ public class Process extends CreatedUpdatedAuditEntity {
     private String processType;
     private String nodeType;
     private String processStatus;
+    private String colorScheme;
     private Double posX;
     private Double posY;
     private Double width;

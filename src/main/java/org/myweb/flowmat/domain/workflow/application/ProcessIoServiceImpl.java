@@ -25,6 +25,9 @@ public class ProcessIoServiceImpl implements ProcessIoService {
 
     private static final String NOT_DELETED = "N";
     private static final String DELETED = "Y";
+    private static final String INPUT_DEFAULT_COLOR = "sky";
+    private static final String OUTPUT_DEFAULT_COLOR = "emerald";
+    private static final String DEFAULT_COLOR = "slate";
 
     private final ProcessIoRepository processIoRepository;
     private final ProcessRepository processRepository;
@@ -56,6 +59,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         processIo.setQuantity(defaultIfNull(request.quantity(), BigDecimal.ZERO));
         processIo.setUnit(request.unit().trim());
         processIo.setFormula(trimToNull(request.formula()));
+        processIo.setColorScheme(defaultColorScheme(request.colorScheme(), request.direction()));
         processIo.setRequiredYn(defaultYn(request.requiredYn(), "Y"));
         processIo.setAllowShortageYn(defaultYn(request.allowShortageYn(), "N"));
         processIo.setDeletedYn(NOT_DELETED);
@@ -95,6 +99,11 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         }
         if (request.formula() != null) {
             processIo.setFormula(trimToNull(request.formula()));
+        }
+        if (request.colorScheme() != null) {
+            processIo.setColorScheme(normalizeColorScheme(request.colorScheme()));
+        } else if (request.direction() != null && processIo.getColorScheme() == null) {
+            processIo.setColorScheme(defaultColorScheme(null, processIo.getDirection()));
         }
         if (request.requiredYn() != null) {
             processIo.setRequiredYn(defaultYn(request.requiredYn(), processIo.getRequiredYn()));
@@ -139,6 +148,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
             processIo.getQuantity(),
             processIo.getUnit(),
             processIo.getFormula(),
+            processIo.getColorScheme(),
             processIo.getRequiredYn(),
             processIo.getAllowShortageYn()
         );
@@ -168,5 +178,22 @@ public class ProcessIoServiceImpl implements ProcessIoService {
 
     private static String defaultYn(String value, String defaultValue) {
         return hasText(value) ? value.trim().toUpperCase() : defaultValue;
+    }
+
+    private static String defaultColorScheme(String value, String direction) {
+        if (hasText(value)) {
+            return normalizeColorScheme(value);
+        }
+        if ("input".equalsIgnoreCase(direction)) {
+            return INPUT_DEFAULT_COLOR;
+        }
+        if ("output".equalsIgnoreCase(direction)) {
+            return OUTPUT_DEFAULT_COLOR;
+        }
+        return DEFAULT_COLOR;
+    }
+
+    private static String normalizeColorScheme(String value) {
+        return value.trim().toLowerCase();
     }
 }

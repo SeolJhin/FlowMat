@@ -22,6 +22,7 @@ public class ProcessServiceImpl implements ProcessService {
 
     private static final String NOT_DELETED = "N";
     private static final String DELETED = "Y";
+    private static final String DEFAULT_COLOR_SCHEME = "slate";
 
     private final ProcessRepository processRepository;
     private final WorkflowRepository workflowRepository;
@@ -48,6 +49,7 @@ public class ProcessServiceImpl implements ProcessService {
         process.setProcessType(defaultIfBlank(request.processType(), "generic"));
         process.setNodeType(defaultIfBlank(request.nodeType(), "process"));
         process.setProcessStatus("active");
+        process.setColorScheme(defaultColorScheme(request.colorScheme(), DEFAULT_COLOR_SCHEME));
         process.setPosX(defaultIfNull(request.posX(), 0.0));
         process.setPosY(defaultIfNull(request.posY(), 0.0));
         process.setWidth(defaultIfNull(request.width(), 120.0));
@@ -77,6 +79,9 @@ public class ProcessServiceImpl implements ProcessService {
         }
         if (hasText(request.processStatus())) {
             process.setProcessStatus(request.processStatus().trim().toLowerCase());
+        }
+        if (request.colorScheme() != null) {
+            process.setColorScheme(defaultColorScheme(request.colorScheme(), process.getColorScheme()));
         }
         if (request.posX() != null) {
             process.setPosX(request.posX());
@@ -124,6 +129,7 @@ public class ProcessServiceImpl implements ProcessService {
             process.getProcessType(),
             process.getNodeType(),
             process.getProcessStatus(),
+            process.getColorScheme(),
             process.getPosX(),
             process.getPosY(),
             process.getWidth(),
@@ -146,5 +152,9 @@ public class ProcessServiceImpl implements ProcessService {
 
     private static Double defaultIfNull(Double value, Double defaultValue) {
         return value != null ? value : defaultValue;
+    }
+
+    static String defaultColorScheme(String value, String defaultValue) {
+        return hasText(value) ? value.trim().toLowerCase() : defaultValue;
     }
 }

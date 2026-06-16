@@ -8,6 +8,7 @@ public record ProcessResponse(
     String processType,
     String nodeType,
     String processStatus,
+    String colorScheme,
     Double posX,
     Double posY,
     Double width,

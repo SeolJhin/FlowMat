@@ -25,6 +25,7 @@ public class ProcessIo extends CreatedUpdatedAuditEntity {
     private BigDecimal quantity;
     private String unit;
     private String formula;
+    private String colorScheme;
     private String requiredYn;
     private String allowShortageYn;
 }
