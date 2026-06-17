@@ -1,4 +1,4 @@
-package com.example.demo;
+package org.myweb.flowmat;
 
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.web.servlet.support.SpringBootServletInitializer;
