@@ -1,9 +1,12 @@
 package org.myweb.flowmat.domain.user.api;
 
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.user.api.dto.request.UserLoginRequest;
+import org.myweb.flowmat.domain.user.api.dto.request.UserSignupRequest;
+import org.myweb.flowmat.domain.user.api.dto.response.UserTokenResponse;
 import org.myweb.flowmat.domain.user.application.AuthService;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.myweb.flowmat.global.response.ApiResponse;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequiredArgsConstructor
@@ -11,4 +14,15 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+
+    @PostMapping("/signup")
+    public ApiResponse<Void> signup(@RequestBody UserSignupRequest request) {
+        authService.signup(request);
+        return ApiResponse.ok(null);
+    }
+
+    @PostMapping("/login")
+    public ApiResponse<UserTokenResponse> login(@RequestBody UserLoginRequest request) {
+        return ApiResponse.ok(authService.login(request));
+    }
 }
