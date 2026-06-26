@@ -1956,16 +1956,10 @@ CREATE INDEX IF NOT EXISTS "idx_inventory_updated_by" ON "inventory" ("updated_b
 CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_project_id" ON "inventory_transaction" ("project_id");
 CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_item_id" ON "inventory_transaction" ("item_id");
 CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_lot_id" ON "inventory_transaction" ("lot_id");
-CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_last_checked_by" ON "inventory_transaction" ("last_checked_by");
 CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_created_by" ON "inventory_transaction" ("created_by");
-CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_updated_by" ON "inventory_transaction" ("updated_by");
 CREATE INDEX IF NOT EXISTS "idx_bom_header_project_id" ON "bom_header" ("project_id");
 CREATE INDEX IF NOT EXISTS "idx_bom_header_target_item_id" ON "bom_header" ("target_item_id");
-CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_project_id" ON "inventory_transaction" ("project_id");
 CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_inventory_id" ON "inventory_transaction" ("inventory_id");
-CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_item_id" ON "inventory_transaction" ("item_id");
-CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_lot_id" ON "inventory_transaction" ("lot_id");
-CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_created_by" ON "inventory_transaction" ("created_by");
 CREATE INDEX IF NOT EXISTS "idx_inventory_transaction_reference_id" ON "inventory_transaction" ("reference_id");
 CREATE INDEX IF NOT EXISTS "idx_flow_rule_project_id" ON "flow_rule" ("project_id");
 CREATE INDEX IF NOT EXISTS "idx_flow_rule_target" ON "flow_rule" ("target_type", "target_id");
