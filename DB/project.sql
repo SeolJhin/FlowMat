@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS "notification" (
     "nfc_body" text,
     "ref_type" varchar(50),
     "ref_id" varchar(50),
-    "is_read" boolean DEFAULT 0 NOT NULL,
+    "is_read" boolean DEFAULT false NOT NULL,
     "read_at" timestamptz,
     "created_at" timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT "pk_notification" PRIMARY KEY ("nfc_id")
