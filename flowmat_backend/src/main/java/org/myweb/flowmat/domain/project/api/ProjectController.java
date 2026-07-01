@@ -36,20 +36,20 @@ public class ProjectController {
     }
 
     @GetMapping("/{projectId}")
-    public ApiResponse<ProjectResponse> getProject(@PathVariable String projectId) {
+    public ApiResponse<ProjectResponse> getProject(@PathVariable("projectId") String projectId) {
         return ApiResponse.ok(projectService.getProject(projectId));
     }
 
     @PutMapping("/{projectId}")
     public ApiResponse<ProjectResponse> updateProject(
-        @PathVariable String projectId,
+        @PathVariable("projectId") String projectId,
         @RequestBody ProjectUpdateRequest request
     ) {
         return ApiResponse.ok(projectService.updateProject(projectId, request));
     }
 
     @DeleteMapping("/{projectId}")
-    public ApiResponse<Void> deleteProject(@PathVariable String projectId) {
+    public ApiResponse<Void> deleteProject(@PathVariable("projectId") String projectId) {
         projectService.deleteProject(projectId);
         return ApiResponse.ok(null);
     }

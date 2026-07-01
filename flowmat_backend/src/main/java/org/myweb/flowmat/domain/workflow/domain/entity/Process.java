@@ -3,6 +3,7 @@ package org.myweb.flowmat.domain.workflow.domain.entity;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Column;
 import lombok.Getter;
 import lombok.Setter;
 import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
@@ -24,8 +25,13 @@ public class Process extends CreatedUpdatedAuditEntity {
     private String nodeType;
     private String processStatus;
     private String colorScheme;
+
+    @Column(name = "pos_x")
     private Double posX;
+
+    @Column(name = "pos_y")
     private Double posY;
+
     private Double width;
     private Double height;
     private String processDesc;

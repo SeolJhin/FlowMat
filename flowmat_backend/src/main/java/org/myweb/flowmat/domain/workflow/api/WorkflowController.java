@@ -29,7 +29,7 @@ public class WorkflowController {
     private final WorkflowCanvasService workflowCanvasService;
 
     @GetMapping
-    public ApiResponse<List<WorkflowResponse>> listWorkflows(@RequestParam String projectId) {
+    public ApiResponse<List<WorkflowResponse>> listWorkflows(@RequestParam("projectId") String projectId) {
         return ApiResponse.ok(workflowService.listWorkflows(projectId));
     }
 
@@ -39,26 +39,26 @@ public class WorkflowController {
     }
 
     @GetMapping("/{workflowId}")
-    public ApiResponse<WorkflowResponse> getWorkflow(@PathVariable String workflowId) {
+    public ApiResponse<WorkflowResponse> getWorkflow(@PathVariable("workflowId") String workflowId) {
         return ApiResponse.ok(workflowService.getWorkflow(workflowId));
     }
 
     @PutMapping("/{workflowId}")
     public ApiResponse<WorkflowResponse> updateWorkflow(
-        @PathVariable String workflowId,
+        @PathVariable("workflowId") String workflowId,
         @RequestBody WorkflowUpdateRequest request
     ) {
         return ApiResponse.ok(workflowService.updateWorkflow(workflowId, request));
     }
 
     @DeleteMapping("/{workflowId}")
-    public ApiResponse<Void> deleteWorkflow(@PathVariable String workflowId) {
+    public ApiResponse<Void> deleteWorkflow(@PathVariable("workflowId") String workflowId) {
         workflowService.deleteWorkflow(workflowId);
         return ApiResponse.ok(null);
     }
 
     @GetMapping("/{workflowId}/canvas")
-    public ApiResponse<WorkflowCanvasResponse> getCanvas(@PathVariable String workflowId) {
+    public ApiResponse<WorkflowCanvasResponse> getCanvas(@PathVariable("workflowId") String workflowId) {
         return ApiResponse.ok(workflowCanvasService.getCanvas(workflowId));
     }
 }
