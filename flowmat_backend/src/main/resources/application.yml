@@ -6,6 +6,11 @@ spring:
     username: ${DB_USERNAME:flowmat}
     password: ${DB_PASSWORD:flowmat}
     driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 1
+    locations: classpath:db/migration
   jpa:
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
