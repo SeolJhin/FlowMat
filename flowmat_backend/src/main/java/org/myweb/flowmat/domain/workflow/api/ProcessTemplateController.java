@@ -37,27 +37,27 @@ public class ProcessTemplateController {
     }
 
     @GetMapping("/{templateId}")
-    public ApiResponse<ProcessTemplateResponse> getTemplate(@PathVariable String templateId) {
+    public ApiResponse<ProcessTemplateResponse> getTemplate(@PathVariable("templateId") String templateId) {
         return ApiResponse.ok(processTemplateService.getTemplate(templateId));
     }
 
     @PutMapping("/{templateId}")
     public ApiResponse<ProcessTemplateResponse> updateTemplate(
-        @PathVariable String templateId,
+        @PathVariable("templateId") String templateId,
         @RequestBody ProcessTemplateUpdateRequest request
     ) {
         return ApiResponse.ok(processTemplateService.updateTemplate(templateId, request));
     }
 
     @DeleteMapping("/{templateId}")
-    public ApiResponse<Void> deleteTemplate(@PathVariable String templateId) {
+    public ApiResponse<Void> deleteTemplate(@PathVariable("templateId") String templateId) {
         processTemplateService.deleteTemplate(templateId);
         return ApiResponse.ok(null);
     }
 
     @PostMapping("/{templateId}/apply")
     public ApiResponse<ProcessResponse> applyTemplate(
-        @PathVariable String templateId,
+        @PathVariable("templateId") String templateId,
         @Valid @RequestBody ProcessTemplateApplyRequest request
     ) {
         return ApiResponse.ok(processTemplateService.applyTemplate(templateId, request));

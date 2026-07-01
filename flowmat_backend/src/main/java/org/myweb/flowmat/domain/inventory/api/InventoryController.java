@@ -25,7 +25,7 @@ public class InventoryController {
     private final InventoryService inventoryService;
 
     @GetMapping
-    public ApiResponse<List<InventoryResponse>> listInventories(@RequestParam String projectId) {
+    public ApiResponse<List<InventoryResponse>> listInventories(@RequestParam("projectId") String projectId) {
         return ApiResponse.ok(inventoryService.listInventories(projectId));
     }
 
@@ -35,20 +35,20 @@ public class InventoryController {
     }
 
     @GetMapping("/{inventoryId}")
-    public ApiResponse<InventoryResponse> getInventory(@PathVariable String inventoryId) {
+    public ApiResponse<InventoryResponse> getInventory(@PathVariable("inventoryId") String inventoryId) {
         return ApiResponse.ok(inventoryService.getInventory(inventoryId));
     }
 
     @PutMapping("/{inventoryId}")
     public ApiResponse<InventoryResponse> updateInventory(
-        @PathVariable String inventoryId,
+        @PathVariable("inventoryId") String inventoryId,
         @Valid @RequestBody InventoryAdjustRequest request
     ) {
         return ApiResponse.ok(inventoryService.updateInventory(inventoryId, request));
     }
 
     @DeleteMapping("/{inventoryId}")
-    public ApiResponse<Void> deleteInventory(@PathVariable String inventoryId) {
+    public ApiResponse<Void> deleteInventory(@PathVariable("inventoryId") String inventoryId) {
         inventoryService.deleteInventory(inventoryId);
         return ApiResponse.ok(null);
     }

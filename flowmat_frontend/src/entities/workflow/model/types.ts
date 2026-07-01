@@ -1,4 +1,4 @@
-// ── View Models (what components consume) ────────────────────────────────────
+// View Models (what components consume)
 
 export interface WorkflowHeaderViewModel {
   workflowId: string
@@ -74,11 +74,13 @@ export interface WorkflowCanvasViewModel {
   portMap: Record<string, CanvasPortViewModel>
 }
 
-// ── Mutation input types ─────────────────────────────────────────────────────
+// Mutation input types
 
 export interface UpdateProcessInput {
   processId: string
   processName?: string
+  nodeType?: string
+  processType?: string
   colorScheme?: string
   processDesc?: string
   processStatus?: string
@@ -90,11 +92,12 @@ export interface UpdateProcessInput {
 
 export interface CreateProcessIoInput {
   processId: string
+  itemId: string
   ioName: string
   direction: 'input' | 'output'
   ioType: string
-  quantity?: number
-  unit?: string
+  quantity: number
+  unit: string
   formula?: string
   colorScheme?: string
   requiredYn?: 'Y' | 'N'

@@ -10,12 +10,21 @@ export type UiError = {
   kind: 'validation' | 'not_found' | 'forbidden' | 'unknown'
 }
 
-// ?? Raw DTOs from the backend ????????????????????????????????????????????????
+// Raw DTOs from the backend.
 
 export interface ProjectSummaryDto {
   projectId: string
   projectName: string
   projectStatus: string
+}
+
+export interface ProjectDto {
+  projectId: string
+  projectName: string
+  projectDesc: string | null
+  projectStatus: string
+  visibility: string
+  currentWorkflowId: string | null
 }
 
 export interface WorkflowDto {
@@ -25,6 +34,18 @@ export interface WorkflowDto {
   workflowDesc: string | null
   workflowType: string
   workflowStatus: string
+}
+
+export interface ItemDto {
+  itemId: string
+  projectId: string
+  itemCode: string
+  itemName: string
+  itemType: string
+  resourceCategory: string | null
+  resourceType: string | null
+  unitId: string | null
+  itemStatus: string
 }
 
 export interface ProcessDto {
@@ -66,7 +87,7 @@ export interface ProcessConnectionDto {
   toProcessId: string
   fromIoId: string | null
   toIoId: string | null
-  itemId: string | null
+  itemId?: string | null
   sourceHandle: string
   targetHandle: string
   connectionType: string

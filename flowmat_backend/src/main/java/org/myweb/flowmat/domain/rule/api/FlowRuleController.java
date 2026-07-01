@@ -27,9 +27,9 @@ public class FlowRuleController {
 
     @GetMapping
     public ApiResponse<List<FlowRuleResponse>> listRules(
-        @RequestParam(required = false) String projectId,
-        @RequestParam(required = false) String targetType,
-        @RequestParam(required = false) String targetId
+        @RequestParam(value = "projectId", required = false) String projectId,
+        @RequestParam(value = "targetType", required = false) String targetType,
+        @RequestParam(value = "targetId", required = false) String targetId
     ) {
         return ApiResponse.ok(flowRuleService.listRules(projectId, targetType, targetId));
     }
@@ -40,20 +40,20 @@ public class FlowRuleController {
     }
 
     @GetMapping("/{ruleId}")
-    public ApiResponse<FlowRuleResponse> getRule(@PathVariable String ruleId) {
+    public ApiResponse<FlowRuleResponse> getRule(@PathVariable("ruleId") String ruleId) {
         return ApiResponse.ok(flowRuleService.getRule(ruleId));
     }
 
     @PutMapping("/{ruleId}")
     public ApiResponse<FlowRuleResponse> updateRule(
-        @PathVariable String ruleId,
+        @PathVariable("ruleId") String ruleId,
         @RequestBody FlowRuleUpdateRequest request
     ) {
         return ApiResponse.ok(flowRuleService.updateRule(ruleId, request));
     }
 
     @DeleteMapping("/{ruleId}")
-    public ApiResponse<Void> deleteRule(@PathVariable String ruleId) {
+    public ApiResponse<Void> deleteRule(@PathVariable("ruleId") String ruleId) {
         flowRuleService.deleteRule(ruleId);
         return ApiResponse.ok(null);
     }

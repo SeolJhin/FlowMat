@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
-import type { ApiEnvelope, ProjectSummaryDto } from '../../../shared/types/api'
+import type { ApiEnvelope, ProjectDto } from '../../../shared/types/api'
 
 export interface CreateProjectInput {
   projectName: string
@@ -10,8 +10,8 @@ export interface CreateProjectInput {
   visibility?: string
 }
 
-async function createProject(input: CreateProjectInput): Promise<ProjectSummaryDto> {
-  const envelope = await httpClient.post<ApiEnvelope<ProjectSummaryDto>>('/projects', input)
+async function createProject(input: CreateProjectInput): Promise<ProjectDto> {
+  const envelope = await httpClient.post<ApiEnvelope<ProjectDto>>('/projects', input)
   return unwrapApiResponse(envelope)
 }
 

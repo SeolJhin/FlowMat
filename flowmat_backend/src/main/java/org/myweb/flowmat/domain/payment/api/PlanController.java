@@ -28,13 +28,15 @@ public class PlanController {
 
     // 요금제 단건 조회
     @GetMapping("/{planId}")
-    public ResponseEntity<ApiResponse<PlanResponse>> getPlan(@PathVariable UUID planId) {
+    public ResponseEntity<ApiResponse<PlanResponse>> getPlan(@PathVariable("planId") UUID planId) {
         return ResponseEntity.ok(ApiResponse.ok(planService.getPlan(planId)));
     }
 
     // 요금제별 개월수 가격 정책 조회
     @GetMapping("/{planId}/pricing")
-    public ResponseEntity<ApiResponse<List<PlanPricingResponse>>> getPricing(@PathVariable UUID planId) {
+    public ResponseEntity<ApiResponse<List<PlanPricingResponse>>> getPricing(
+        @PathVariable("planId") UUID planId
+    ) {
         return ResponseEntity.ok(ApiResponse.ok(planService.getActivePricing(planId)));
     }
 }

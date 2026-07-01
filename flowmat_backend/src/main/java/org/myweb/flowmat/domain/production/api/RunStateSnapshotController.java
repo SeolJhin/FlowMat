@@ -23,7 +23,9 @@ public class RunStateSnapshotController {
     private final RunStateSnapshotService runStateSnapshotService;
 
     @GetMapping
-    public ApiResponse<List<RunStateSnapshotResponse>> listSnapshots(@RequestParam String productionRunId) {
+    public ApiResponse<List<RunStateSnapshotResponse>> listSnapshots(
+        @RequestParam("productionRunId") String productionRunId
+    ) {
         return ApiResponse.ok(runStateSnapshotService.listSnapshots(productionRunId));
     }
 
@@ -35,7 +37,9 @@ public class RunStateSnapshotController {
     }
 
     @GetMapping("/{runStateSnapshotId}")
-    public ApiResponse<RunStateSnapshotResponse> getSnapshot(@PathVariable String runStateSnapshotId) {
+    public ApiResponse<RunStateSnapshotResponse> getSnapshot(
+        @PathVariable("runStateSnapshotId") String runStateSnapshotId
+    ) {
         return ApiResponse.ok(runStateSnapshotService.getSnapshot(runStateSnapshotId));
     }
 }

@@ -1,5 +1,10 @@
+import type { CSSProperties } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { CanvasNodeViewModel, CanvasPortViewModel } from '../../../entities/workflow/model/types'
+import {
+  getWorkflowNodeDefinition,
+  getWorkflowNodeStyle,
+} from '../../../entities/workflow/model/nodeCatalog'
 import { useWorkspaceStore } from '../model/workspaceStore'
 
 // Color scheme → CSS color approximation
@@ -61,11 +66,16 @@ export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
   const editing = inlineEditingNodeId === node.id
 
   const headerColor = resolveColor(node.colorScheme)
+  const nodeDefinition = getWorkflowNodeDefinition(node.nodeType)
 
   return (
     <div
       className={`canvas-node ${selected ? 'canvas-node--selected' : ''} ${editing ? 'canvas-node--editing' : ''}`}
-      style={{ minWidth: node.size.width, minHeight: node.size.height }}
+      style={{
+        minWidth: node.size.width,
+        minHeight: node.size.height,
+        ...(getWorkflowNodeStyle(node.nodeType) as CSSProperties),
+      }}
     >
       <div className="canvas-node__header" style={{ borderTopColor: headerColor }}>
         <span
@@ -74,7 +84,7 @@ export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
           title={node.colorScheme}
         />
         <span className="canvas-node__name">{node.name}</span>
-        <span className="canvas-node__type">{node.nodeType}</span>
+        <span className="canvas-node__type">{nodeDefinition.label}</span>
       </div>
 
       {node.inputs.length > 0 && (

@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useState, type MouseEvent } from 'react'
 import {
   ReactFlow,
   Background,
@@ -8,6 +8,7 @@ import {
   type EdgeChange,
   type Connection,
   type OnConnectStart,
+  type ReactFlowInstance,
   applyNodeChanges,
   applyEdgeChanges,
 } from '@xyflow/react'
@@ -32,12 +33,13 @@ interface Props {
   selectedNodeId: string | null
   selectedEdgeId: string | null
   canvasMode: CanvasMode
+  drawingEnabled: boolean
   onNodeSelect(id: string): void
   onEdgeSelect(id: string): void
   onNodeDragEnd(processId: string, x: number, y: number): void
   onConnectStart(payload: ConnectStartPayload): void
   onConnectComplete(payload: ConnectCompletePayload): void
-  onCanvasClick(): void
+  onCanvasClick(position: { x: number; y: number }): void
 }
 
 // Convert view models to React Flow node/edge objects
@@ -69,6 +71,7 @@ export function CanvasViewport({
   edges,
   selectedNodeId,
   selectedEdgeId,
+  drawingEnabled,
   onNodeSelect,
   onEdgeSelect,
   onNodeDragEnd,
@@ -77,6 +80,7 @@ export function CanvasViewport({
   onCanvasClick,
 }: Props) {
   const { selectNode, selectEdge } = useWorkspaceStore()
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
 
   const rfNodes = toRfNodes(nodes, selectedNodeId)
   const rfEdges = toRfEdges(edges, selectedEdgeId)
@@ -126,9 +130,30 @@ export function CanvasViewport({
     [onConnectComplete]
   )
 
+  const handlePaneClick = useCallback(
+    (event: MouseEvent) => {
+      if (!reactFlowInstance) return
+
+      const position = reactFlowInstance.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      })
+
+      onCanvasClick(position)
+    },
+    [onCanvasClick, reactFlowInstance]
+  )
+
   return (
-    <div style={{ width: '100%', height: '100%' }}>
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        cursor: drawingEnabled ? 'crosshair' : 'default',
+      }}
+    >
       <ReactFlow
+        onInit={setReactFlowInstance}
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
@@ -145,7 +170,7 @@ export function CanvasViewport({
         }}
         onConnectStart={handleConnectStart}
         onConnect={handleConnect}
-        onPaneClick={onCanvasClick}
+        onPaneClick={handlePaneClick}
         fitView
       >
         <Background gap={16} />

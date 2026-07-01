@@ -26,7 +26,7 @@ public class ItemController {
     private final ItemService itemService;
 
     @GetMapping
-    public ApiResponse<List<ItemResponse>> listItems(@RequestParam String projectId) {
+    public ApiResponse<List<ItemResponse>> listItems(@RequestParam("projectId") String projectId) {
         return ApiResponse.ok(itemService.listItems(projectId));
     }
 
@@ -36,20 +36,20 @@ public class ItemController {
     }
 
     @GetMapping("/{itemId}")
-    public ApiResponse<ItemResponse> getItem(@PathVariable String itemId) {
+    public ApiResponse<ItemResponse> getItem(@PathVariable("itemId") String itemId) {
         return ApiResponse.ok(itemService.getItem(itemId));
     }
 
     @PutMapping("/{itemId}")
     public ApiResponse<ItemResponse> updateItem(
-        @PathVariable String itemId,
+        @PathVariable("itemId") String itemId,
         @RequestBody ItemUpdateRequest request
     ) {
         return ApiResponse.ok(itemService.updateItem(itemId, request));
     }
 
     @DeleteMapping("/{itemId}")
-    public ApiResponse<Void> deleteItem(@PathVariable String itemId) {
+    public ApiResponse<Void> deleteItem(@PathVariable("itemId") String itemId) {
         itemService.deleteItem(itemId);
         return ApiResponse.ok(null);
     }

@@ -22,19 +22,23 @@ public class PaymentController {
 
     // 유저 결제 내역 조회
     @GetMapping("/users/{userId}")
-    public ResponseEntity<ApiResponse<List<PaymentResponse>>> getPayments(@PathVariable String userId) {
+    public ResponseEntity<ApiResponse<List<PaymentResponse>>> getPayments(
+        @PathVariable("userId") String userId
+    ) {
         return ResponseEntity.ok(ApiResponse.ok(paymentService.getPaymentsByUserId(userId)));
     }
 
     // 결제 단건 조회
     @GetMapping("/{paymentId}")
-    public ResponseEntity<ApiResponse<PaymentResponse>> getPayment(@PathVariable UUID paymentId) {
+    public ResponseEntity<ApiResponse<PaymentResponse>> getPayment(@PathVariable("paymentId") UUID paymentId) {
         return ResponseEntity.ok(ApiResponse.ok(paymentService.getPayment(paymentId)));
     }
 
     // 유저 활성 구독 조회
     @GetMapping("/subscriptions/{userId}/active")
-    public ResponseEntity<ApiResponse<SubscriptionResponse>> getActiveSubscription(@PathVariable String userId) {
+    public ResponseEntity<ApiResponse<SubscriptionResponse>> getActiveSubscription(
+        @PathVariable("userId") String userId
+    ) {
         return ResponseEntity.ok(ApiResponse.ok(paymentService.getActiveSubscription(userId)));
     }
 }

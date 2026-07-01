@@ -1,26 +1,16 @@
-import { useState } from 'react'
-import { useCreateProcessMutation } from '../../../entities/workflow/api/useCreateProcessMutation'
-import { useCreateProcessConnectionMutation } from '../../../entities/workflow/api/useCreateProcessConnectionMutation'
 import type {
   ConnectCompletePayload,
   ConnectStartPayload,
   WorkflowCanvasViewModel,
 } from '../../../entities/workflow/model/types'
 import { useWorkspaceStore } from '../model/workspaceStore'
+import { useWorkflowCanvasActions } from '../model/useWorkflowCanvasActions'
 import { CanvasViewport } from './CanvasViewport'
-import { NodeInspector } from './NodeInspector'
 import { ConnectionInspector } from './ConnectionInspector'
+import { NodeInspector } from './NodeInspector'
 
 interface Props {
   canvas: WorkflowCanvasViewModel
-}
-
-function toOptionalIoId(handleId: string | null): string | null {
-  if (!handleId || handleId === 'in-default' || handleId === 'out-default') {
-    return null
-  }
-
-  return handleId
 }
 
 export function WorkflowCanvasPage({ canvas }: Props) {
@@ -34,9 +24,23 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     selectEdge,
     clearSelection,
   } = useWorkspaceStore()
-  const createProcessMutation = useCreateProcessMutation()
-  const createConnectionMutation = useCreateProcessConnectionMutation()
-  const [workspaceMessage, setWorkspaceMessage] = useState<string | null>(null)
+
+  const {
+    activeTool,
+    setActiveTool,
+    workspaceMessage,
+    paletteDefinitions,
+    addNode,
+    createNodeAt,
+    updateNode,
+    createPort,
+    updatePort,
+    deletePort,
+    saveNodePosition,
+    deleteConnection,
+    deleteNode,
+    createConnection,
+  } = useWorkflowCanvasActions({ canvas, clearSelection })
 
   const selectedNode = selectedProcessId ? canvas.nodeMap[selectedProcessId] ?? null : null
   const selectedEdge = selectedConnectionId
@@ -44,34 +48,8 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     : null
   const selectedPort = selectedPortId ? canvas.portMap[selectedPortId] ?? null : null
 
-  async function handleAddNode() {
-    setWorkspaceMessage(null)
-
-    const nextIndex = canvas.nodes.length + 1
-    const x = 120 + ((nextIndex - 1) % 4) * 220
-    const y = 140 + Math.floor((nextIndex - 1) / 4) * 150
-
-    try {
-      await createProcessMutation.mutateAsync({
-        workflowId: canvas.workflow.workflowId,
-        processName: `Process ${nextIndex}`,
-        processType: 'generic',
-        nodeType: 'process',
-        colorScheme: 'slate',
-        posX: x,
-        posY: y,
-        width: 180,
-        height: 88,
-        processDesc: `Created from the canvas toolbar (${nextIndex}).`,
-      })
-    } catch (error) {
-      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to create node.')
-    }
-  }
-
-  function handleNodeDragEnd(processId: string, x: number, y: number) {
-    // Position update mutation can be added next. Keep the interaction visible for now.
-    console.log('node drag end', processId, x, y)
+  async function handleNodeDragEnd(processId: string, x: number, y: number) {
+    await saveNodePosition(processId, x, y)
   }
 
   function handleConnectStart(payload: ConnectStartPayload) {
@@ -79,28 +57,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
   }
 
   async function handleConnectComplete(payload: ConnectCompletePayload) {
-    setWorkspaceMessage(null)
-
-    try {
-      await createConnectionMutation.mutateAsync({
-        workflowId: canvas.workflow.workflowId,
-        fromProcessId: payload.fromProcessId,
-        toProcessId: payload.toProcessId,
-        fromIoId: toOptionalIoId(payload.fromIoId),
-        toIoId: toOptionalIoId(payload.toIoId),
-        sourceHandle: payload.sourceHandle,
-        targetHandle: payload.targetHandle,
-        connectionType: 'material',
-        connectionLabel: null,
-        flowRate: null,
-        unit: null,
-        delayTimeSec: 0,
-        lossRate: 0,
-        priority: 0,
-      })
-    } catch (error) {
-      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to create connection.')
-    }
+    await createConnection(payload)
   }
 
   return (
@@ -121,11 +78,33 @@ export function WorkflowCanvasPage({ canvas }: Props) {
             justifyContent: 'flex-end',
           }}
         >
-          <button type="button" onClick={handleAddNode} disabled={createProcessMutation.isPending}>
-            {createProcessMutation.isPending ? 'Adding node...' : 'Add Node'}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {(['select', ...paletteDefinitions.map((definition) => definition.tool)] as const).map(
+              (tool) => (
+                <button
+                  key={tool}
+                  type="button"
+                  onClick={() => setActiveTool(tool)}
+                  style={{
+                    border:
+                      activeTool === tool ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    background: activeTool === tool ? 'var(--accent-bg)' : 'transparent',
+                  }}
+                >
+                  {tool === 'select' ? 'Pointer' : tool}
+                </button>
+              )
+            )}
+          </div>
+          <button type="button" onClick={() => void addNode()}>
+            Add Node
           </button>
           <span style={{ fontSize: '13px', opacity: 0.8 }}>
-            Drag from a right handle to a left handle to create a connection.
+            Current tool:{' '}
+            {activeTool === 'select'
+              ? 'pointer'
+              : paletteDefinitions.find((definition) => definition.tool === activeTool)?.label}
+            . Click the canvas to place a node, then drag between handles to connect.
           </span>
         </div>
       </header>
@@ -147,10 +126,53 @@ export function WorkflowCanvasPage({ canvas }: Props) {
 
       <div className="workspace-body">
         <aside className="workspace-panel workspace-panel--left">
-          <p className="panel-placeholder">Template Palette (Sprint 2)</p>
-          <p className="panel-placeholder" style={{ marginTop: '12px' }}>
-            Use "Add Node" for now. Template-driven creation can replace it later.
-          </p>
+          <div style={{ display: 'grid', gap: '10px' }}>
+            <h3 style={{ margin: 0 }}>Node Palette</h3>
+            <p className="panel-placeholder" style={{ margin: 0 }}>
+              Pick a workflow node, then click any empty canvas area.
+            </p>
+            {paletteDefinitions.map((definition) => (
+              <button
+                key={definition.tool}
+                type="button"
+                onClick={() => setActiveTool(definition.tool)}
+                style={{
+                  textAlign: 'left',
+                  padding: '12px 14px',
+                  borderRadius: '12px',
+                  border:
+                    activeTool === definition.tool
+                      ? '1px solid var(--accent)'
+                      : '1px solid var(--border)',
+                  background:
+                    activeTool === definition.tool ? 'var(--accent-bg)' : 'var(--surface)',
+                  display: 'grid',
+                  gap: '4px',
+                }}
+              >
+                <strong>{definition.label}</strong>
+                <span style={{ fontSize: '12px', opacity: 0.75 }}>
+                  {definition.description}
+                </span>
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setActiveTool('select')}
+              style={{
+                textAlign: 'left',
+                padding: '12px 14px',
+                borderRadius: '12px',
+                border:
+                  activeTool === 'select'
+                    ? '1px solid var(--accent)'
+                    : '1px solid var(--border)',
+                background: activeTool === 'select' ? 'var(--accent-bg)' : 'var(--surface)',
+              }}
+            >
+              Pointer
+            </button>
+          </div>
         </aside>
 
         <main className="workspace-canvas">
@@ -160,12 +182,13 @@ export function WorkflowCanvasPage({ canvas }: Props) {
             selectedNodeId={selectedProcessId}
             selectedEdgeId={selectedConnectionId}
             canvasMode={canvasMode}
+            drawingEnabled={activeTool !== 'select'}
             onNodeSelect={selectNode}
             onEdgeSelect={selectEdge}
             onNodeDragEnd={handleNodeDragEnd}
             onConnectStart={handleConnectStart}
             onConnectComplete={handleConnectComplete}
-            onCanvasClick={clearSelection}
+            onCanvasClick={(position) => void createNodeAt(position)}
           />
         </main>
 
@@ -175,10 +198,11 @@ export function WorkflowCanvasPage({ canvas }: Props) {
               node={selectedNode}
               selectedPort={selectedPort}
               rules={[]}
-              onNodeSubmit={async () => {}}
-              onPortCreate={async () => {}}
-              onPortUpdate={async () => {}}
-              onPortDelete={async () => {}}
+              onNodeSubmit={updateNode}
+              onNodeDelete={deleteNode}
+              onPortCreate={createPort}
+              onPortUpdate={updatePort}
+              onPortDelete={deletePort}
               onOpenRuleBuilder={() => {}}
             />
           )}
@@ -187,7 +211,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
               edge={selectedEdge}
               rules={[]}
               onSubmit={async () => {}}
-              onDelete={async () => {}}
+              onDelete={deleteConnection}
               onOpenRuleBuilder={() => {}}
             />
           )}

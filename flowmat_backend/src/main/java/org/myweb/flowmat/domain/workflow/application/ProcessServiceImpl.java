@@ -7,6 +7,7 @@ import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessUpdateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessResponse;
 import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
+import org.myweb.flowmat.domain.workflow.domain.enums.NodeType;
 import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
 import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
@@ -47,7 +48,7 @@ public class ProcessServiceImpl implements ProcessService {
         process.setWorkflowId(workflow.getWorkflowId());
         process.setProcessName(request.processName().trim());
         process.setProcessType(defaultIfBlank(request.processType(), "generic"));
-        process.setNodeType(defaultIfBlank(request.nodeType(), "process"));
+        process.setNodeType(normalizeNodeType(request.nodeType()));
         process.setProcessStatus("active");
         process.setColorScheme(defaultColorScheme(request.colorScheme(), DEFAULT_COLOR_SCHEME));
         process.setPosX(defaultIfNull(request.posX(), 0.0));
@@ -75,7 +76,7 @@ public class ProcessServiceImpl implements ProcessService {
             process.setProcessType(request.processType().trim().toLowerCase());
         }
         if (hasText(request.nodeType())) {
-            process.setNodeType(request.nodeType().trim().toLowerCase());
+            process.setNodeType(normalizeNodeType(request.nodeType()));
         }
         if (hasText(request.processStatus())) {
             process.setProcessStatus(request.processStatus().trim().toLowerCase());
@@ -156,5 +157,13 @@ public class ProcessServiceImpl implements ProcessService {
 
     static String defaultColorScheme(String value, String defaultValue) {
         return hasText(value) ? value.trim().toLowerCase() : defaultValue;
+    }
+
+    private static String normalizeNodeType(String value) {
+        try {
+            return NodeType.normalize(value);
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, e.getMessage());
+        }
     }
 }

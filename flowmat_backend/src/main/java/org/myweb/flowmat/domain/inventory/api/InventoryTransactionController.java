@@ -24,8 +24,8 @@ public class InventoryTransactionController {
 
     @GetMapping
     public ApiResponse<List<InventoryTransactionResponse>> listTransactions(
-        @RequestParam(required = false) String projectId,
-        @RequestParam(required = false) String inventoryId
+        @RequestParam(value = "projectId", required = false) String projectId,
+        @RequestParam(value = "inventoryId", required = false) String inventoryId
     ) {
         return ApiResponse.ok(inventoryTransactionService.listTransactions(projectId, inventoryId));
     }
@@ -38,7 +38,9 @@ public class InventoryTransactionController {
     }
 
     @GetMapping("/{inventoryTransactionId}")
-    public ApiResponse<InventoryTransactionResponse> getTransaction(@PathVariable String inventoryTransactionId) {
+    public ApiResponse<InventoryTransactionResponse> getTransaction(
+        @PathVariable("inventoryTransactionId") String inventoryTransactionId
+    ) {
         return ApiResponse.ok(inventoryTransactionService.getTransaction(inventoryTransactionId));
     }
 }

@@ -10,6 +10,7 @@ import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessTemplateRespons
 import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessTemplate;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
+import org.myweb.flowmat.domain.workflow.domain.enums.NodeType;
 import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
 import org.myweb.flowmat.domain.workflow.repository.ProcessTemplateRepository;
 import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
@@ -77,7 +78,7 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
             template.setTemplateCategory(request.templateCategory().trim().toLowerCase());
         }
         if (hasText(request.templateType())) {
-            template.setTemplateType(request.templateType().trim().toLowerCase());
+            template.setTemplateType(normalizeNodeType(request.templateType()));
         }
         if (request.iconKey() != null) {
             template.setIconKey(trimToNull(request.iconKey()));
@@ -126,7 +127,7 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
         process.setTemplateId(template.getTemplateId());
         process.setProcessName(defaultText(request.processName(), template.getTemplateName()));
         process.setProcessType(defaultIfBlank(request.processType(), template.getTemplateCategory()));
-        process.setNodeType(defaultIfBlank(request.nodeType(), template.getTemplateType()));
+        process.setNodeType(normalizeNodeType(defaultIfBlank(request.nodeType(), template.getTemplateType())));
         process.setProcessStatus("active");
         process.setColorScheme(defaultColorScheme(request.colorScheme(), template.getDefaultColorScheme()));
         process.setPosX(defaultIfNull(request.posX(), 0.0));
@@ -159,7 +160,7 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
     ) {
         template.setTemplateName(templateName.trim());
         template.setTemplateCategory(templateCategory.trim().toLowerCase());
-        template.setTemplateType(defaultIfBlank(templateType, "process"));
+        template.setTemplateType(normalizeNodeType(defaultIfBlank(templateType, "process")));
         template.setIconKey(trimToNull(iconKey));
         template.setDefaultColorScheme(defaultColorScheme(defaultColorScheme, DEFAULT_COLOR_SCHEME));
         template.setDefaultWidth(defaultIfNull(defaultWidth, 120.0));
@@ -235,5 +236,13 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
 
     private static String defaultColorScheme(String value, String defaultValue) {
         return hasText(value) ? value.trim().toLowerCase() : defaultValue;
+    }
+
+    private static String normalizeNodeType(String value) {
+        try {
+            return NodeType.normalize(value);
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, e.getMessage());
+        }
     }
 }

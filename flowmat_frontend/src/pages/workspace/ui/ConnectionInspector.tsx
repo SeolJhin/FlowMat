@@ -13,7 +13,7 @@ interface Props {
   onOpenRuleBuilder(target: RuleTargetInput): void
 }
 
-export function ConnectionInspector({ edge }: Props) {
+export function ConnectionInspector({ edge, onDelete }: Props) {
   if (!edge) return null
 
   return (
@@ -29,7 +29,10 @@ export function ConnectionInspector({ edge }: Props) {
         {edge.flowRate !== null && (
           <>
             <dt>Flow rate</dt>
-            <dd>{edge.flowRate}{edge.unit ? ` ${edge.unit}` : ''}</dd>
+            <dd>
+              {edge.flowRate}
+              {edge.unit ? ` ${edge.unit}` : ''}
+            </dd>
           </>
         )}
         {edge.delayTimeSec !== null && (
@@ -51,6 +54,20 @@ export function ConnectionInspector({ edge }: Props) {
           </>
         )}
       </dl>
+
+      <div style={{ marginTop: '16px', display: 'flex', gap: '8px' }}>
+        <button
+          type="button"
+          onClick={() => void onDelete(edge.id)}
+          style={{
+            border: '1px solid #fca5a5',
+            color: '#991b1b',
+            background: '#fef2f2',
+          }}
+        >
+          Delete Connection
+        </button>
+      </div>
 
       <p className="inspector__hint">Edit forms available in Sprint 2.</p>
     </div>

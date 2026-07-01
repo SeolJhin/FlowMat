@@ -37,27 +37,27 @@ public class WorkflowTemplateController {
     }
 
     @GetMapping("/{templateId}")
-    public ApiResponse<WorkflowTemplateResponse> getTemplate(@PathVariable String templateId) {
+    public ApiResponse<WorkflowTemplateResponse> getTemplate(@PathVariable("templateId") String templateId) {
         return ApiResponse.ok(workflowTemplateService.getTemplate(templateId));
     }
 
     @PutMapping("/{templateId}")
     public ApiResponse<WorkflowTemplateResponse> updateTemplate(
-        @PathVariable String templateId,
+        @PathVariable("templateId") String templateId,
         @RequestBody WorkflowTemplateUpdateRequest request
     ) {
         return ApiResponse.ok(workflowTemplateService.updateTemplate(templateId, request));
     }
 
     @DeleteMapping("/{templateId}")
-    public ApiResponse<Void> deleteTemplate(@PathVariable String templateId) {
+    public ApiResponse<Void> deleteTemplate(@PathVariable("templateId") String templateId) {
         workflowTemplateService.deleteTemplate(templateId);
         return ApiResponse.ok(null);
     }
 
     @PostMapping("/{templateId}/apply")
     public ApiResponse<WorkflowResponse> applyTemplate(
-        @PathVariable String templateId,
+        @PathVariable("templateId") String templateId,
         @Valid @RequestBody WorkflowTemplateApplyRequest request
     ) {
         return ApiResponse.ok(workflowTemplateService.applyTemplate(templateId, request));

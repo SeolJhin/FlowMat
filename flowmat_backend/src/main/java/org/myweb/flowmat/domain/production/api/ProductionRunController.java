@@ -26,7 +26,7 @@ public class ProductionRunController {
     private final ProductionRunService productionRunService;
 
     @GetMapping
-    public ApiResponse<List<ProductionRunResponse>> listRuns(@RequestParam String workflowId) {
+    public ApiResponse<List<ProductionRunResponse>> listRuns(@RequestParam("workflowId") String workflowId) {
         return ApiResponse.ok(productionRunService.listRuns(workflowId));
     }
 
@@ -36,18 +36,22 @@ public class ProductionRunController {
     }
 
     @GetMapping("/{productionRunId}")
-    public ApiResponse<ProductionRunResponse> getRun(@PathVariable String productionRunId) {
+    public ApiResponse<ProductionRunResponse> getRun(
+        @PathVariable("productionRunId") String productionRunId
+    ) {
         return ApiResponse.ok(productionRunService.getRun(productionRunId));
     }
 
     @GetMapping("/{productionRunId}/items")
-    public ApiResponse<List<ProductionRunItemResponse>> listRunItems(@PathVariable String productionRunId) {
+    public ApiResponse<List<ProductionRunItemResponse>> listRunItems(
+        @PathVariable("productionRunId") String productionRunId
+    ) {
         return ApiResponse.ok(productionRunService.listRunItems(productionRunId));
     }
 
     @PostMapping("/{productionRunId}/items")
     public ApiResponse<ProductionRunItemResponse> recordRunItem(
-        @PathVariable String productionRunId,
+        @PathVariable("productionRunId") String productionRunId,
         @Valid @RequestBody ProductionRunItemRecordRequest request
     ) {
         return ApiResponse.ok(productionRunService.recordRunItem(productionRunId, request));
@@ -55,7 +59,7 @@ public class ProductionRunController {
 
     @PostMapping("/{productionRunId}/finish")
     public ApiResponse<ProductionRunResponse> finishRun(
-        @PathVariable String productionRunId,
+        @PathVariable("productionRunId") String productionRunId,
         @RequestBody ProductionRunFinishRequest request
     ) {
         return ApiResponse.ok(productionRunService.finishRun(productionRunId, request));
