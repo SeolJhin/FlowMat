@@ -1,10 +1,5 @@
--- Auto-generated PostgreSQL DDL from WBS_FlowMat (1).xlsx
--- Source sheets: user technical spec 2, project table technical spec sheet 9
--- Notes:
--- 1) Some FK constraints were converted to indexes because referenced table details were incomplete in the source Excel.
--- 2) datetime and timestamp values were converted to PostgreSQL timestamptz.
--- 3) The pgcrypto extension is enabled to use gen_random_uuid() as the default UUID generator.
--- 4) Several naming typos were normalized for SQL compatibility: plain_id->plan_id, subcription_id->subscription_id, primotion_id->promotion_id, panding->pending.
+-- Things to do : 테이블 생성 + 테이블 제약조건 모두 한 sql문으로 정리, 임시 데이터 sql문 따로 생성, 
+-- V1으로 임시로 시작하지만, 초기화시  V1버전으로 재시작 + 메타데이터 정리 후 최상단 DB 폴더에 보관(레가시용)
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
