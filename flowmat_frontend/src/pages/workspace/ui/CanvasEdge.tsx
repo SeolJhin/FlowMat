@@ -1,4 +1,4 @@
-import { BaseEdge, EdgeLabelRenderer, getStraightPath, type EdgeProps } from '@xyflow/react'
+import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from '@xyflow/react'
 import type { CanvasEdgeViewModel } from '../../../entities/workflow/model/types'
 
 interface CanvasEdgeComponentProps extends EdgeProps {
@@ -14,7 +14,7 @@ export function CanvasEdge({
   selected,
   data: edge,
 }: CanvasEdgeComponentProps) {
-  const [edgePath, labelX, labelY] = getStraightPath({ sourceX, sourceY, targetX, targetY })
+  const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY })
 
   return (
     <>

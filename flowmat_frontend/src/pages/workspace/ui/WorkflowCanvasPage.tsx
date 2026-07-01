@@ -48,18 +48,41 @@ export function WorkflowCanvasPage({ canvas }: Props) {
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (!(e.ctrlKey || e.metaKey)) return
-      if (e.key === 'z' && !e.shiftKey) {
-        e.preventDefault()
-        void undo()
-      } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
-        e.preventDefault()
-        void redo()
+      const target = e.target as HTMLElement
+      const isEditing =
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z' && !e.shiftKey) {
+          e.preventDefault()
+          void undo()
+        } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
+          e.preventDefault()
+          void redo()
+        }
+        return
+      }
+
+      if (!isEditing && (e.key === 'Delete' || e.key === 'Backspace')) {
+        if (selectedProcessId) {
+          e.preventDefault()
+          void deleteNode(selectedProcessId)
+        } else if (selectedConnectionId) {
+          e.preventDefault()
+          void deleteConnection(selectedConnectionId)
+        }
+      }
+
+      if (e.key === 'Escape') {
+        clearSelection()
       }
     }
+
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo])
+  }, [undo, redo, selectedProcessId, selectedConnectionId, deleteNode, deleteConnection, clearSelection])
 
   const selectedNode = selectedProcessId ? canvas.nodeMap[selectedProcessId] ?? null : null
   const selectedEdge = selectedConnectionId

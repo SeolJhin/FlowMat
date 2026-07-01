@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
 import {
   ReactFlow,
   Background,
   BackgroundVariant,
   Controls,
   MiniMap,
+  useViewport,
   type NodeChange,
   type EdgeChange,
   type Connection,
   type OnConnectStart,
   type ReactFlowInstance,
+  type Node,
   applyNodeChanges,
   applyEdgeChanges,
 } from '@xyflow/react'
@@ -27,6 +29,118 @@ import { useWorkspaceStore } from '../model/workspaceStore'
 
 const nodeTypes = { flowmatNode: CanvasNode }
 const edgeTypes = { flowmatEdge: CanvasEdge }
+
+const SNAP_THRESHOLD = 8 // flow-space pixels
+
+interface SnapGuide {
+  type: 'vertical' | 'horizontal'
+  position: number
+  start: number
+  end: number
+}
+
+function calculateSnapGuides(
+  dragging: { x: number; y: number; w: number; h: number },
+  others: Array<{ id: string; x: number; y: number; w: number; h: number }>
+): SnapGuide[] {
+  const dL = dragging.x
+  const dC = dragging.x + dragging.w / 2
+  const dR = dragging.x + dragging.w
+  const dT = dragging.y
+  const dM = dragging.y + dragging.h / 2
+  const dB = dragging.y + dragging.h
+
+  let bestX: { dist: number; guide: SnapGuide } | null = null
+  let bestY: { dist: number; guide: SnapGuide } | null = null
+
+  for (const o of others) {
+    const oL = o.x
+    const oC = o.x + o.w / 2
+    const oR = o.x + o.w
+    const oT = o.y
+    const oM = o.y + o.h / 2
+    const oB = o.y + o.h
+
+    for (const dPt of [dL, dC, dR]) {
+      for (const oPt of [oL, oC, oR]) {
+        const dist = Math.abs(dPt - oPt)
+        if (dist < SNAP_THRESHOLD && (!bestX || dist < bestX.dist)) {
+          const allY = [dT, dB, oT, oB]
+          bestX = {
+            dist,
+            guide: { type: 'vertical', position: oPt, start: Math.min(...allY), end: Math.max(...allY) },
+          }
+        }
+      }
+    }
+
+    for (const dPt of [dT, dM, dB]) {
+      for (const oPt of [oT, oM, oB]) {
+        const dist = Math.abs(dPt - oPt)
+        if (dist < SNAP_THRESHOLD && (!bestY || dist < bestY.dist)) {
+          const allX = [dL, dR, oL, oR]
+          bestY = {
+            dist,
+            guide: { type: 'horizontal', position: oPt, start: Math.min(...allX), end: Math.max(...allX) },
+          }
+        }
+      }
+    }
+  }
+
+  return [bestX?.guide, bestY?.guide].filter(Boolean) as SnapGuide[]
+}
+
+// Renders alignment guide lines in screen space (must be inside ReactFlow for context)
+function SnapGuideLayer({ guides }: { guides: SnapGuide[] }) {
+  const { x: vpX, y: vpY, zoom } = useViewport()
+  if (guides.length === 0) return null
+
+  const toSX = (fx: number) => fx * zoom + vpX
+  const toSY = (fy: number) => fy * zoom + vpY
+
+  return (
+    <svg
+      style={{
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+        zIndex: 5,
+        overflow: 'visible',
+      }}
+    >
+      {guides.map((guide, i) =>
+        guide.type === 'vertical' ? (
+          <line
+            key={i}
+            x1={toSX(guide.position)}
+            y1={toSY(guide.start - 20)}
+            x2={toSX(guide.position)}
+            y2={toSY(guide.end + 20)}
+            stroke="var(--accent)"
+            strokeWidth={1}
+            strokeDasharray="4 3"
+            opacity={0.85}
+          />
+        ) : (
+          <line
+            key={i}
+            x1={toSX(guide.start - 20)}
+            y1={toSY(guide.position)}
+            x2={toSX(guide.end + 20)}
+            y2={toSY(guide.position)}
+            stroke="var(--accent)"
+            strokeWidth={1}
+            strokeDasharray="4 3"
+            opacity={0.85}
+          />
+        )
+      )}
+    </svg>
+  )
+}
 
 interface Props {
   nodes: CanvasNodeViewModel[]
@@ -106,23 +220,26 @@ export function CanvasViewport({
 }: Props) {
   const { selectNode, selectEdge } = useWorkspaceStore()
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
+  const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([])
 
-  // Local RF state — React Flow owns positions/dimensions between server syncs
   const [localNodes, setLocalNodes] = useState<RfNode[]>(() => toRfNodes(nodes, selectedNodeId))
   const [localEdges, setLocalEdges] = useState<RfEdge[]>(() => toRfEdges(edges, selectedEdgeId))
 
-  // Sync from server after mutations + refetch
+  // Keep a ref so snap calculation always reads the latest positions without deps churn
+  const localNodesRef = useRef<RfNode[]>(localNodes)
+
   useEffect(() => {
     setLocalNodes((prev) => {
       const next = toRfNodes(nodes, selectedNodeId)
-      return next.map((n) => {
+      const updated = next.map((n) => {
         const existing = prev.find((p) => p.id === n.id)
-        // Preserve RF-managed dimensions while a resize hasn't been acknowledged yet
         if (existing && (existing.width !== n.width || existing.height !== n.height)) {
           return { ...n, width: existing.width, height: existing.height }
         }
         return n
       })
+      localNodesRef.current = updated
+      return updated
     })
   }, [nodes, selectedNodeId])
 
@@ -132,13 +249,16 @@ export function CanvasViewport({
 
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      setLocalNodes((nds) => applyNodeChanges(changes, nds) as RfNode[])
+      setLocalNodes((nds) => {
+        const updated = applyNodeChanges(changes, nds) as RfNode[]
+        localNodesRef.current = updated
+        return updated
+      })
 
       for (const change of changes) {
         if (change.type === 'position' && change.dragging === false && change.position) {
           onNodeDragEnd(change.id, change.position.x, change.position.y)
         }
-        // NodeResizer fires 'dimensions' changes; save to server when drag is complete
         if (change.type === 'dimensions' && change.resizing === false && change.dimensions) {
           onNodeResize(change.id, change.dimensions.width, change.dimensions.height)
         }
@@ -149,6 +269,27 @@ export function CanvasViewport({
 
   const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
     setLocalEdges((eds) => applyEdgeChanges(changes, eds) as RfEdge[])
+  }, [])
+
+  const handleNodeDrag = useCallback((_event: MouseEvent, node: Node) => {
+    const current = localNodesRef.current
+    const dragging = current.find((n) => n.id === node.id)
+    if (!dragging) return
+
+    const others = current
+      .filter((n) => n.id !== node.id)
+      .map((n) => ({ id: n.id, x: n.position.x, y: n.position.y, w: n.width, h: n.height }))
+
+    setSnapGuides(
+      calculateSnapGuides(
+        { x: node.position.x, y: node.position.y, w: dragging.width, h: dragging.height },
+        others
+      )
+    )
+  }, [])
+
+  const handleNodeDragStop = useCallback(() => {
+    setSnapGuides([])
   }, [])
 
   const handleConnectStart: OnConnectStart = useCallback(
@@ -205,14 +346,19 @@ export function CanvasViewport({
           selectEdge(edge.id)
           onEdgeSelect(edge.id)
         }}
+        onNodeDrag={handleNodeDrag}
+        onNodeDragStop={handleNodeDragStop}
         onConnectStart={handleConnectStart}
         onConnect={handleConnect}
         onPaneClick={handlePaneClick}
         fitView
         minZoom={0.1}
         maxZoom={2.5}
+        snapToGrid
+        snapGrid={[8, 8]}
         deleteKeyCode={null}
       >
+        <SnapGuideLayer guides={snapGuides} />
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--border)" />
         <Controls />
         <MiniMap zoomable pannable nodeStrokeWidth={2} />
