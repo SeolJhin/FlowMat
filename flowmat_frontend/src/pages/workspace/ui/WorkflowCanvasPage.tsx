@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import type {
   ConnectCompletePayload,
   ConnectStartPayload,
@@ -30,6 +31,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     setActiveTool,
     workspaceMessage,
     paletteDefinitions,
+    commandHistory,
     addNode,
     createNodeAt,
     updateNode,
@@ -42,6 +44,23 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     createConnection,
   } = useWorkflowCanvasActions({ canvas, clearSelection })
 
+  const { past, future, undo, redo } = commandHistory
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey)) return
+      if (e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        void undo()
+      } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
+        e.preventDefault()
+        void redo()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [undo, redo])
+
   const selectedNode = selectedProcessId ? canvas.nodeMap[selectedProcessId] ?? null : null
   const selectedEdge = selectedConnectionId
     ? canvas.edges.find((edge) => edge.id === selectedConnectionId) ?? null
@@ -50,6 +69,10 @@ export function WorkflowCanvasPage({ canvas }: Props) {
 
   async function handleNodeDragEnd(processId: string, x: number, y: number) {
     await saveNodePosition(processId, x, y)
+  }
+
+  async function handleNodeResize(processId: string, width: number, height: number) {
+    await updateNode({ processId, width: Math.round(width), height: Math.round(height) })
   }
 
   function handleConnectStart(payload: ConnectStartPayload) {
@@ -96,6 +119,22 @@ export function WorkflowCanvasPage({ canvas }: Props) {
               )
             )}
           </div>
+          <button
+            type="button"
+            onClick={() => void undo()}
+            disabled={past.length === 0}
+            title={past.length > 0 ? `Undo: ${past[past.length - 1].label}` : 'Nothing to undo'}
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            onClick={() => void redo()}
+            disabled={future.length === 0}
+            title={future.length > 0 ? `Redo: ${future[0].label}` : 'Nothing to redo'}
+          >
+            Redo
+          </button>
           <button type="button" onClick={() => void addNode()}>
             Add Node
           </button>
@@ -186,6 +225,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
             onNodeSelect={selectNode}
             onEdgeSelect={selectEdge}
             onNodeDragEnd={handleNodeDragEnd}
+            onNodeResize={handleNodeResize}
             onConnectStart={handleConnectStart}
             onConnectComplete={handleConnectComplete}
             onCanvasClick={(position) => void createNodeAt(position)}

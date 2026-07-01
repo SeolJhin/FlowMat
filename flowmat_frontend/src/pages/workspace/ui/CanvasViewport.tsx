@@ -1,7 +1,8 @@
-import { useCallback, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useState, type MouseEvent } from 'react'
 import {
   ReactFlow,
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   type NodeChange,
@@ -37,23 +38,46 @@ interface Props {
   onNodeSelect(id: string): void
   onEdgeSelect(id: string): void
   onNodeDragEnd(processId: string, x: number, y: number): void
+  onNodeResize(processId: string, width: number, height: number): void
   onConnectStart(payload: ConnectStartPayload): void
   onConnectComplete(payload: ConnectCompletePayload): void
   onCanvasClick(position: { x: number; y: number }): void
 }
 
-// Convert view models to React Flow node/edge objects
-function toRfNodes(nodes: CanvasNodeViewModel[], selectedId: string | null) {
+type RfNode = {
+  id: string
+  type: 'flowmatNode'
+  position: { x: number; y: number }
+  width: number
+  height: number
+  selected: boolean
+  data: CanvasNodeViewModel
+}
+
+type RfEdge = {
+  id: string
+  type: 'flowmatEdge'
+  source: string
+  target: string
+  sourceHandle: string | null
+  targetHandle: string | null
+  selected: boolean
+  data: CanvasEdgeViewModel
+}
+
+function toRfNodes(nodes: CanvasNodeViewModel[], selectedId: string | null): RfNode[] {
   return nodes.map((n) => ({
     id: n.id,
     type: 'flowmatNode' as const,
     position: n.position,
+    width: n.size.width,
+    height: n.size.height,
     selected: n.id === selectedId,
     data: n,
   }))
 }
 
-function toRfEdges(edges: CanvasEdgeViewModel[], selectedId: string | null) {
+function toRfEdges(edges: CanvasEdgeViewModel[], selectedId: string | null): RfEdge[] {
   return edges.map((e) => ({
     id: e.id,
     type: 'flowmatEdge' as const,
@@ -75,6 +99,7 @@ export function CanvasViewport({
   onNodeSelect,
   onEdgeSelect,
   onNodeDragEnd,
+  onNodeResize,
   onConnectStart,
   onConnectComplete,
   onCanvasClick,
@@ -82,29 +107,49 @@ export function CanvasViewport({
   const { selectNode, selectEdge } = useWorkspaceStore()
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
 
-  const rfNodes = toRfNodes(nodes, selectedNodeId)
-  const rfEdges = toRfEdges(edges, selectedEdgeId)
+  // Local RF state — React Flow owns positions/dimensions between server syncs
+  const [localNodes, setLocalNodes] = useState<RfNode[]>(() => toRfNodes(nodes, selectedNodeId))
+  const [localEdges, setLocalEdges] = useState<RfEdge[]>(() => toRfEdges(edges, selectedEdgeId))
+
+  // Sync from server after mutations + refetch
+  useEffect(() => {
+    setLocalNodes((prev) => {
+      const next = toRfNodes(nodes, selectedNodeId)
+      return next.map((n) => {
+        const existing = prev.find((p) => p.id === n.id)
+        // Preserve RF-managed dimensions while a resize hasn't been acknowledged yet
+        if (existing && (existing.width !== n.width || existing.height !== n.height)) {
+          return { ...n, width: existing.width, height: existing.height }
+        }
+        return n
+      })
+    })
+  }, [nodes, selectedNodeId])
+
+  useEffect(() => {
+    setLocalEdges(toRfEdges(edges, selectedEdgeId))
+  }, [edges, selectedEdgeId])
 
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      // Only handle position changes here (read-only state reconciliation)
+      setLocalNodes((nds) => applyNodeChanges(changes, nds) as RfNode[])
+
       for (const change of changes) {
         if (change.type === 'position' && change.dragging === false && change.position) {
           onNodeDragEnd(change.id, change.position.x, change.position.y)
         }
+        // NodeResizer fires 'dimensions' changes; save to server when drag is complete
+        if (change.type === 'dimensions' && change.resizing === false && change.dimensions) {
+          onNodeResize(change.id, change.dimensions.width, change.dimensions.height)
+        }
       }
-      // We don't maintain local RF state; parent owns the source of truth
-      applyNodeChanges(changes, rfNodes)
     },
-    [rfNodes, onNodeDragEnd]
+    [onNodeDragEnd, onNodeResize]
   )
 
-  const handleEdgesChange = useCallback(
-    (changes: EdgeChange[]) => {
-      applyEdgeChanges(changes, rfEdges)
-    },
-    [rfEdges]
-  )
+  const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
+    setLocalEdges((eds) => applyEdgeChanges(changes, eds) as RfEdge[])
+  }, [])
 
   const handleConnectStart: OnConnectStart = useCallback(
     (_event, { nodeId, handleId }) => {
@@ -133,29 +178,21 @@ export function CanvasViewport({
   const handlePaneClick = useCallback(
     (event: MouseEvent) => {
       if (!reactFlowInstance) return
-
       const position = reactFlowInstance.screenToFlowPosition({
         x: event.clientX,
         y: event.clientY,
       })
-
       onCanvasClick(position)
     },
     [onCanvasClick, reactFlowInstance]
   )
 
   return (
-    <div
-      style={{
-        width: '100%',
-        height: '100%',
-        cursor: drawingEnabled ? 'crosshair' : 'default',
-      }}
-    >
+    <div style={{ width: '100%', height: '100%', cursor: drawingEnabled ? 'crosshair' : 'default' }}>
       <ReactFlow
         onInit={setReactFlowInstance}
-        nodes={rfNodes}
-        edges={rfEdges}
+        nodes={localNodes}
+        edges={localEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={handleNodesChange}
@@ -172,10 +209,13 @@ export function CanvasViewport({
         onConnect={handleConnect}
         onPaneClick={handlePaneClick}
         fitView
+        minZoom={0.1}
+        maxZoom={2.5}
+        deleteKeyCode={null}
       >
-        <Background gap={16} />
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--border)" />
         <Controls />
-        <MiniMap />
+        <MiniMap zoomable pannable nodeStrokeWidth={2} />
       </ReactFlow>
     </div>
   )

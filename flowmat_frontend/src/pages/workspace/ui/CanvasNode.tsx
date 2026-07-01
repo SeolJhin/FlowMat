@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 import type { CanvasNodeViewModel, CanvasPortViewModel } from '../../../entities/workflow/model/types'
 import {
   getWorkflowNodeDefinition,
@@ -71,12 +71,21 @@ export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
   return (
     <div
       className={`canvas-node ${selected ? 'canvas-node--selected' : ''} ${editing ? 'canvas-node--editing' : ''}`}
-      style={{
-        minWidth: node.size.width,
-        minHeight: node.size.height,
-        ...(getWorkflowNodeStyle(node.nodeType) as CSSProperties),
-      }}
+      style={getWorkflowNodeStyle(node.nodeType) as CSSProperties}
     >
+      <NodeResizer
+        isVisible={selected}
+        minWidth={120}
+        minHeight={60}
+        lineStyle={{ borderColor: 'var(--accent)', borderWidth: 1 }}
+        handleStyle={{
+          width: 8,
+          height: 8,
+          borderRadius: 2,
+          background: 'white',
+          border: '1.5px solid var(--accent)',
+        }}
+      />
       <div className="canvas-node__header" style={{ borderTopColor: headerColor }}>
         <span
           className="canvas-node__color-chip"
