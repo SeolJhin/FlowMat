@@ -1,9 +1,12 @@
 import { useWorkspaceStore } from '../model/workspaceStore'
-import type { WorkflowCanvasViewModel } from '../../../entities/workflow/model/types'
+import type {
+  ConnectCompletePayload,
+  ConnectStartPayload,
+  WorkflowCanvasViewModel,
+} from '../../../entities/workflow/model/types'
 import { CanvasViewport } from './CanvasViewport'
 import { NodeInspector } from './NodeInspector'
 import { ConnectionInspector } from './ConnectionInspector'
-import type { ConnectCompletePayload, ConnectStartPayload } from '../../../entities/workflow/model/types'
 
 interface Props {
   canvas: WorkflowCanvasViewModel
@@ -23,12 +26,12 @@ export function WorkflowCanvasPage({ canvas }: Props) {
 
   const selectedNode = selectedProcessId ? canvas.nodeMap[selectedProcessId] ?? null : null
   const selectedEdge = selectedConnectionId
-    ? canvas.edges.find((e) => e.id === selectedConnectionId) ?? null
+    ? canvas.edges.find((edge) => edge.id === selectedConnectionId) ?? null
     : null
   const selectedPort = selectedPortId ? canvas.portMap[selectedPortId] ?? null : null
 
   function handleNodeDragEnd(processId: string, x: number, y: number) {
-    // Sprint 2: useUpdateProcess mutation for optimistic position update
+    // Sprint 2: useUpdateProcess mutation for optimistic position update.
     console.log('node drag end', processId, x, y)
   }
 
@@ -37,7 +40,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
   }
 
   function handleConnectComplete(payload: ConnectCompletePayload) {
-    // Sprint 2: useCreateProcessConnection mutation
+    // Sprint 2: useCreateProcessConnection mutation.
     console.log('connect complete', payload)
   }
 
@@ -93,7 +96,9 @@ export function WorkflowCanvasPage({ canvas }: Props) {
           )}
           {inspectorMode === 'none' && (
             <div className="inspector-summary">
-              <p>{canvas.nodes.length} nodes · {canvas.edges.length} connections</p>
+              <p>
+                {canvas.nodes.length} nodes | {canvas.edges.length} connections
+              </p>
               <p className="inspector-hint">Click a node or connection to inspect it.</p>
             </div>
           )}

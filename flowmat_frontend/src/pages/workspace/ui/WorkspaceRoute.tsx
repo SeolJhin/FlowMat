@@ -6,10 +6,17 @@ export function WorkspaceRoute() {
   const { workflowId = '' } = useParams<{ projectId: string; workflowId: string }>()
   const { data: canvas, isLoading, isError, error } = useWorkflowCanvasQuery(workflowId)
 
-  if (isLoading) return <div className="workspace-loading">Loading canvas…</div>
+  if (isLoading) {
+    return <div className="workspace-loading">Loading canvas...</div>
+  }
 
   if (isError || !canvas) {
-    const msg = error instanceof Error ? error.message : 'Failed to load canvas'
+    const msg =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'object' && error !== null && 'message' in error
+          ? String(error.message)
+          : 'Failed to load canvas.'
     return <div className="workspace-error">{msg}</div>
   }
 

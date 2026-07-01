@@ -1,12 +1,14 @@
 package org.myweb.flowmat.global.exception;
 
 import jakarta.validation.ConstraintViolationException;
+import lombok.extern.slf4j.Slf4j;
 import org.myweb.flowmat.global.response.ApiResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -33,9 +35,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleException(Exception e) {
+        log.error("Unhandled exception", e);
         return ResponseEntity
             .status(ErrorCode.INTERNAL_ERROR.getStatus())
-            .body(ApiResponse.error(ErrorCode.INTERNAL_ERROR.getMessage()));
+            .body(ApiResponse.error(e.getMessage() != null && !e.getMessage().isBlank()
+                ? e.getMessage()
+                : ErrorCode.INTERNAL_ERROR.getMessage()));
     }
 
     private static String resolveBusinessMessage(BusinessException e) {

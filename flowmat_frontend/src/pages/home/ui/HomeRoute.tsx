@@ -47,12 +47,11 @@ export function HomeRoute() {
         {isProjectsError && (
           <p>{projectsError instanceof Error ? projectsError.message : 'Failed to load projects.'}</p>
         )}
-        {!isProjectsLoading && !isProjectsError && projects.length === 0 && (
-          <p>No projects found.</p>
-        )}
+        {!isProjectsLoading && !isProjectsError && projects.length === 0 && <p>No projects found.</p>}
         <div style={{ display: 'grid', gap: '12px', marginTop: '16px' }}>
           {projects.map((project) => {
             const isSelected = project.projectId === selectedProjectId
+
             return (
               <button
                 key={project.projectId}
@@ -71,7 +70,7 @@ export function HomeRoute() {
               >
                 <div style={{ fontSize: '18px', fontWeight: 600 }}>{project.projectName}</div>
                 <div style={{ fontSize: '14px', opacity: 0.8 }}>
-                  {project.projectStatus} · {project.projectId}
+                  {project.projectStatus} | {project.projectId}
                 </div>
               </button>
             )
@@ -105,7 +104,7 @@ export function HomeRoute() {
             >
               <div style={{ fontSize: '18px', fontWeight: 600 }}>{workflow.workflowName}</div>
               <div style={{ fontSize: '14px', opacity: 0.8 }}>
-                {workflow.workflowStatus} · {workflow.workflowType}
+                {workflow.workflowStatus} | {workflow.workflowType}
               </div>
             </Link>
           ))}
