@@ -1,18 +1,18 @@
-import { createBrowserRouter } from 'react-router-dom'
+import { Navigate, createBrowserRouter } from 'react-router-dom'
+import { HomeRoute } from '../../pages/home/ui/HomeRoute'
 import { WorkspaceRoute } from '../../pages/workspace/ui/WorkspaceRoute'
 
 export const router = createBrowserRouter([
+  {
+    path: '/',
+    element: <HomeRoute />,
+  },
   {
     path: '/projects/:projectId/workflows/:workflowId',
     element: <WorkspaceRoute />,
   },
   {
     path: '*',
-    element: (
-      <div style={{ padding: '2rem', fontFamily: 'sans-serif' }}>
-        <h2>FlowMat</h2>
-        <p>Navigate to /projects/:projectId/workflows/:workflowId to open a canvas.</p>
-      </div>
-    ),
+    element: <Navigate to="/" replace />,
   },
 ])
