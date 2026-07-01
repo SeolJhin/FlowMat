@@ -26,7 +26,7 @@ public class ProcessController {
     private final ProcessService processService;
 
     @GetMapping
-    public ApiResponse<List<ProcessResponse>> listProcesses(@RequestParam String workflowId) {
+    public ApiResponse<List<ProcessResponse>> listProcesses(@RequestParam("workflowId") String workflowId) {
         return ApiResponse.ok(processService.listProcesses(workflowId));
     }
 
@@ -36,20 +36,20 @@ public class ProcessController {
     }
 
     @GetMapping("/{processId}")
-    public ApiResponse<ProcessResponse> getProcess(@PathVariable String processId) {
+    public ApiResponse<ProcessResponse> getProcess(@PathVariable("processId") String processId) {
         return ApiResponse.ok(processService.getProcess(processId));
     }
 
     @PutMapping("/{processId}")
     public ApiResponse<ProcessResponse> updateProcess(
-        @PathVariable String processId,
+        @PathVariable("processId") String processId,
         @RequestBody ProcessUpdateRequest request
     ) {
         return ApiResponse.ok(processService.updateProcess(processId, request));
     }
 
     @DeleteMapping("/{processId}")
-    public ApiResponse<Void> deleteProcess(@PathVariable String processId) {
+    public ApiResponse<Void> deleteProcess(@PathVariable("processId") String processId) {
         processService.deleteProcess(processId);
         return ApiResponse.ok(null);
     }

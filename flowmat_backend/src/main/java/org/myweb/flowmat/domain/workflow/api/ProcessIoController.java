@@ -26,7 +26,7 @@ public class ProcessIoController {
     private final ProcessIoService processIoService;
 
     @GetMapping
-    public ApiResponse<List<ProcessIoResponse>> listProcessIos(@RequestParam String processId) {
+    public ApiResponse<List<ProcessIoResponse>> listProcessIos(@RequestParam("processId") String processId) {
         return ApiResponse.ok(processIoService.listProcessIos(processId));
     }
 
@@ -36,20 +36,20 @@ public class ProcessIoController {
     }
 
     @GetMapping("/{processIoId}")
-    public ApiResponse<ProcessIoResponse> getProcessIo(@PathVariable String processIoId) {
+    public ApiResponse<ProcessIoResponse> getProcessIo(@PathVariable("processIoId") String processIoId) {
         return ApiResponse.ok(processIoService.getProcessIo(processIoId));
     }
 
     @PutMapping("/{processIoId}")
     public ApiResponse<ProcessIoResponse> updateProcessIo(
-        @PathVariable String processIoId,
+        @PathVariable("processIoId") String processIoId,
         @RequestBody ProcessIoUpdateRequest request
     ) {
         return ApiResponse.ok(processIoService.updateProcessIo(processIoId, request));
     }
 
     @DeleteMapping("/{processIoId}")
-    public ApiResponse<Void> deleteProcessIo(@PathVariable String processIoId) {
+    public ApiResponse<Void> deleteProcessIo(@PathVariable("processIoId") String processIoId) {
         processIoService.deleteProcessIo(processIoId);
         return ApiResponse.ok(null);
     }

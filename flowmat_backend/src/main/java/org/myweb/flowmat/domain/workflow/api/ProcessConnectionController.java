@@ -26,7 +26,7 @@ public class ProcessConnectionController {
     private final ProcessConnectionService processConnectionService;
 
     @GetMapping
-    public ApiResponse<List<ProcessConnectionResponse>> listConnections(@RequestParam String workflowId) {
+    public ApiResponse<List<ProcessConnectionResponse>> listConnections(@RequestParam("workflowId") String workflowId) {
         return ApiResponse.ok(processConnectionService.listConnections(workflowId));
     }
 
@@ -38,20 +38,20 @@ public class ProcessConnectionController {
     }
 
     @GetMapping("/{connectionId}")
-    public ApiResponse<ProcessConnectionResponse> getConnection(@PathVariable String connectionId) {
+    public ApiResponse<ProcessConnectionResponse> getConnection(@PathVariable("connectionId") String connectionId) {
         return ApiResponse.ok(processConnectionService.getConnection(connectionId));
     }
 
     @PutMapping("/{connectionId}")
     public ApiResponse<ProcessConnectionResponse> updateConnection(
-        @PathVariable String connectionId,
+        @PathVariable("connectionId") String connectionId,
         @RequestBody ProcessConnectionUpdateRequest request
     ) {
         return ApiResponse.ok(processConnectionService.updateConnection(connectionId, request));
     }
 
     @DeleteMapping("/{connectionId}")
-    public ApiResponse<Void> deleteConnection(@PathVariable String connectionId) {
+    public ApiResponse<Void> deleteConnection(@PathVariable("connectionId") String connectionId) {
         processConnectionService.deleteConnection(connectionId);
         return ApiResponse.ok(null);
     }

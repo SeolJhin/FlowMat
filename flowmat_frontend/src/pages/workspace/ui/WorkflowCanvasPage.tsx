@@ -1,15 +1,26 @@
-import { useWorkspaceStore } from '../model/workspaceStore'
+import { useState } from 'react'
+import { useCreateProcessMutation } from '../../../entities/workflow/api/useCreateProcessMutation'
+import { useCreateProcessConnectionMutation } from '../../../entities/workflow/api/useCreateProcessConnectionMutation'
 import type {
   ConnectCompletePayload,
   ConnectStartPayload,
   WorkflowCanvasViewModel,
 } from '../../../entities/workflow/model/types'
+import { useWorkspaceStore } from '../model/workspaceStore'
 import { CanvasViewport } from './CanvasViewport'
 import { NodeInspector } from './NodeInspector'
 import { ConnectionInspector } from './ConnectionInspector'
 
 interface Props {
   canvas: WorkflowCanvasViewModel
+}
+
+function toOptionalIoId(handleId: string | null): string | null {
+  if (!handleId || handleId === 'in-default' || handleId === 'out-default') {
+    return null
+  }
+
+  return handleId
 }
 
 export function WorkflowCanvasPage({ canvas }: Props) {
@@ -23,6 +34,9 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     selectEdge,
     clearSelection,
   } = useWorkspaceStore()
+  const createProcessMutation = useCreateProcessMutation()
+  const createConnectionMutation = useCreateProcessConnectionMutation()
+  const [workspaceMessage, setWorkspaceMessage] = useState<string | null>(null)
 
   const selectedNode = selectedProcessId ? canvas.nodeMap[selectedProcessId] ?? null : null
   const selectedEdge = selectedConnectionId
@@ -30,8 +44,33 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     : null
   const selectedPort = selectedPortId ? canvas.portMap[selectedPortId] ?? null : null
 
+  async function handleAddNode() {
+    setWorkspaceMessage(null)
+
+    const nextIndex = canvas.nodes.length + 1
+    const x = 120 + ((nextIndex - 1) % 4) * 220
+    const y = 140 + Math.floor((nextIndex - 1) / 4) * 150
+
+    try {
+      await createProcessMutation.mutateAsync({
+        workflowId: canvas.workflow.workflowId,
+        processName: `Process ${nextIndex}`,
+        processType: 'generic',
+        nodeType: 'process',
+        colorScheme: 'slate',
+        posX: x,
+        posY: y,
+        width: 180,
+        height: 88,
+        processDesc: `Created from the canvas toolbar (${nextIndex}).`,
+      })
+    } catch (error) {
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to create node.')
+    }
+  }
+
   function handleNodeDragEnd(processId: string, x: number, y: number) {
-    // Sprint 2: useUpdateProcess mutation for optimistic position update.
+    // Position update mutation can be added next. Keep the interaction visible for now.
     console.log('node drag end', processId, x, y)
   }
 
@@ -39,21 +78,79 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     console.log('connect start', payload)
   }
 
-  function handleConnectComplete(payload: ConnectCompletePayload) {
-    // Sprint 2: useCreateProcessConnection mutation.
-    console.log('connect complete', payload)
+  async function handleConnectComplete(payload: ConnectCompletePayload) {
+    setWorkspaceMessage(null)
+
+    try {
+      await createConnectionMutation.mutateAsync({
+        workflowId: canvas.workflow.workflowId,
+        fromProcessId: payload.fromProcessId,
+        toProcessId: payload.toProcessId,
+        fromIoId: toOptionalIoId(payload.fromIoId),
+        toIoId: toOptionalIoId(payload.toIoId),
+        sourceHandle: payload.sourceHandle,
+        targetHandle: payload.targetHandle,
+        connectionType: 'material',
+        connectionLabel: null,
+        flowRate: null,
+        unit: null,
+        delayTimeSec: 0,
+        lossRate: 0,
+        priority: 0,
+      })
+    } catch (error) {
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to create connection.')
+    }
   }
 
   return (
     <div className="workspace-layout">
       <header className="workspace-topbar">
-        <span className="workspace-topbar__project">{canvas.workflow.workflowName}</span>
-        <span className="workspace-topbar__status">{canvas.workflow.workflowStatus}</span>
+        <div style={{ display: 'grid', gap: '4px' }}>
+          <span className="workspace-topbar__project">{canvas.workflow.workflowName}</span>
+          <span className="workspace-topbar__status">
+            {canvas.workflow.workflowStatus} | {canvas.workflow.workflowType}
+          </span>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            gap: '12px',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            justifyContent: 'flex-end',
+          }}
+        >
+          <button type="button" onClick={handleAddNode} disabled={createProcessMutation.isPending}>
+            {createProcessMutation.isPending ? 'Adding node...' : 'Add Node'}
+          </button>
+          <span style={{ fontSize: '13px', opacity: 0.8 }}>
+            Drag from a right handle to a left handle to create a connection.
+          </span>
+        </div>
       </header>
+
+      {workspaceMessage && (
+        <div
+          style={{
+            margin: '12px 16px 0',
+            padding: '10px 12px',
+            border: '1px solid #fca5a5',
+            borderRadius: '10px',
+            color: '#991b1b',
+            background: '#fef2f2',
+          }}
+        >
+          {workspaceMessage}
+        </div>
+      )}
 
       <div className="workspace-body">
         <aside className="workspace-panel workspace-panel--left">
           <p className="panel-placeholder">Template Palette (Sprint 2)</p>
+          <p className="panel-placeholder" style={{ marginTop: '12px' }}>
+            Use "Add Node" for now. Template-driven creation can replace it later.
+          </p>
         </aside>
 
         <main className="workspace-canvas">

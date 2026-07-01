@@ -60,10 +60,13 @@ export interface ProcessIoDto {
 
 export interface ProcessConnectionDto {
   connectionId: string
+  projectId: string
+  workflowId: string
   fromProcessId: string
   toProcessId: string
   fromIoId: string | null
   toIoId: string | null
+  itemId: string | null
   sourceHandle: string
   targetHandle: string
   connectionType: string
