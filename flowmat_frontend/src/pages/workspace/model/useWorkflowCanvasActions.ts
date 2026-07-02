@@ -15,8 +15,10 @@ import {
 import {
   getWorkflowDefaultNodeDefinition,
   getWorkflowPaletteDefinitions,
+  type WorkflowNodeDefinition,
   type WorkflowPaletteTool,
 } from '../../../entities/workflow/model/nodeCatalog'
+import type { NodePickerState } from './canvasInteractionStore'
 import type {
   ConnectCompletePayload,
   CreateProcessIoInput,
@@ -83,17 +85,18 @@ export function useWorkflowCanvasActions({
     }
   }
 
-  async function createNodeAt(position: { x: number; y: number }) {
-    if (activeTool === 'select') {
-      clearSelection()
-      return
-    }
-
+  /**
+   * Create a node of the given definition at a flow-space position.
+   * Returns the created process, or null when creation failed.
+   * Shared by click-to-place, drag-to-create, and the on-canvas picker.
+   */
+  async function createNodeOfDefinition(
+    definition: WorkflowNodeDefinition,
+    position: { x: number; y: number },
+    options?: { pushHistory?: boolean }
+  ) {
     setWorkspaceMessage(null)
-
     const nextIndex = canvas.nodes.length + 1
-    const definition = paletteDefinitions.find((item) => item.tool === activeTool)
-    if (!definition) return
 
     try {
       const created = await createProcessMutation.mutateAsync({
@@ -108,15 +111,180 @@ export function useWorkflowCanvasActions({
         height: definition.height,
         processDesc: `Created on canvas at (${Math.round(position.x)}, ${Math.round(position.y)}).`,
       })
-      let currentProcessId = created.processId
+      if (options?.pushHistory !== false) {
+        const currentProcessId = created.processId
+        commandHistory.push({
+          label: `Create "${created.processName}"`,
+          undo: async () => {
+            await deleteProcessMutation.mutateAsync(currentProcessId)
+          },
+        })
+      }
+      return created
+    } catch (error) {
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to create node.')
+      return null
+    }
+  }
+
+  async function createNodeAt(position: { x: number; y: number }) {
+    if (activeTool === 'select') {
+      clearSelection()
+      return
+    }
+
+    const definition = paletteDefinitions.find((item) => item.tool === activeTool)
+    if (!definition) return
+
+    await createNodeOfDefinition(definition, position)
+  }
+
+  /**
+   * Drag-to-create (ported from tldraw's useDragToCreate): a palette item
+   * dropped on the canvas creates a node centered on the drop position.
+   */
+  async function createNodeFromTool(
+    tool: WorkflowPaletteTool,
+    position: { x: number; y: number }
+  ) {
+    const definition = paletteDefinitions.find((item) => item.tool === tool)
+    if (!definition) return
+
+    await createNodeOfDefinition(definition, {
+      x: position.x - definition.width / 2,
+      y: position.y - definition.height / 2,
+    })
+  }
+
+  /**
+   * On-canvas picker, connect-drop mode (ported from tldraw's
+   * OnCanvasComponentPicker): a connection drag dropped on empty canvas
+   * creates the picked node and wires it to the dragged handle.
+   */
+  async function createNodeFromConnectionDrop(
+    draft: Extract<NodePickerState, { kind: 'connect-drop' }>['draft'],
+    tool: WorkflowPaletteTool,
+    position: { x: number; y: number }
+  ) {
+    const definition = paletteDefinitions.find((item) => item.tool === tool)
+    if (!definition) return
+
+    const created = await createNodeOfDefinition(
+      definition,
+      {
+        x: position.x - definition.width / 2,
+        y: position.y - definition.height / 2,
+      },
+      { pushHistory: false }
+    )
+    if (!created) return
+
+    // Drag started at an output handle → new node is the target, and vice versa.
+    const payload: ConnectCompletePayload =
+      draft.fromHandleType === 'source'
+        ? {
+            fromProcessId: draft.fromProcessId,
+            toProcessId: created.processId,
+            fromIoId: draft.fromHandleId,
+            toIoId: null,
+            sourceHandle: draft.fromHandleId ?? 'out-default',
+            targetHandle: 'in-default',
+          }
+        : {
+            fromProcessId: created.processId,
+            toProcessId: draft.fromProcessId,
+            fromIoId: null,
+            toIoId: draft.fromHandleId,
+            sourceHandle: 'out-default',
+            targetHandle: draft.fromHandleId ?? 'in-default',
+          }
+
+    const connectionInput = buildDefaultConnectionPayload(canvas.workflow.workflowId, payload)
+    try {
+      const connection = await createConnectionMutation.mutateAsync(connectionInput)
       commandHistory.push({
-        label: `Create "${created.processName}"`,
+        label: `Create "${created.processName}" from connection`,
         undo: async () => {
-          await deleteProcessMutation.mutateAsync(currentProcessId)
+          await deleteConnectionMutation.mutateAsync(connection.connectionId)
+          await deleteProcessMutation.mutateAsync(created.processId)
         },
       })
     } catch (error) {
-      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to create node.')
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to create connection.')
+    }
+  }
+
+  /**
+   * On-canvas picker, insert-on-edge mode (ported from tldraw's
+   * insertNodeWithinConnection): split an existing connection with a new
+   * node — original edge is replaced by source→new and new→target.
+   */
+  async function insertNodeOnEdge(
+    edgeId: string,
+    tool: WorkflowPaletteTool,
+    position: { x: number; y: number }
+  ) {
+    const edge = canvas.edges.find((e) => e.id === edgeId)
+    if (!edge) return
+
+    const definition = paletteDefinitions.find((item) => item.tool === tool)
+    if (!definition) return
+
+    const created = await createNodeOfDefinition(
+      definition,
+      {
+        x: position.x - definition.width / 2,
+        y: position.y - definition.height / 2,
+      },
+      { pushHistory: false }
+    )
+    if (!created) return
+
+    const originalPayload = buildDefaultConnectionPayload(canvas.workflow.workflowId, {
+      fromProcessId: edge.fromProcessId,
+      toProcessId: edge.toProcessId,
+      fromIoId: edge.fromIoId,
+      toIoId: edge.toIoId,
+      sourceHandle: edge.sourceHandle,
+      targetHandle: edge.targetHandle,
+    })
+
+    const upstreamInput = buildDefaultConnectionPayload(canvas.workflow.workflowId, {
+      fromProcessId: edge.fromProcessId,
+      toProcessId: created.processId,
+      fromIoId: edge.fromIoId,
+      toIoId: null,
+      sourceHandle: edge.sourceHandle,
+      targetHandle: 'in-default',
+    })
+    const downstreamInput = buildDefaultConnectionPayload(canvas.workflow.workflowId, {
+      fromProcessId: created.processId,
+      toProcessId: edge.toProcessId,
+      fromIoId: null,
+      toIoId: edge.toIoId,
+      sourceHandle: 'out-default',
+      targetHandle: edge.targetHandle,
+    })
+
+    try {
+      await deleteConnectionMutation.mutateAsync(edge.connectionId)
+      const upstream = await createConnectionMutation.mutateAsync(upstreamInput)
+      const downstream = await createConnectionMutation.mutateAsync(downstreamInput)
+      clearSelection()
+
+      commandHistory.push({
+        label: `Insert "${created.processName}" into connection`,
+        undo: async () => {
+          await deleteConnectionMutation.mutateAsync(upstream.connectionId)
+          await deleteConnectionMutation.mutateAsync(downstream.connectionId)
+          await deleteProcessMutation.mutateAsync(created.processId)
+          await createConnectionMutation.mutateAsync(originalPayload)
+        },
+      })
+    } catch (error) {
+      setWorkspaceMessage(
+        error instanceof Error ? error.message : 'Failed to insert node into connection.'
+      )
     }
   }
 
@@ -282,6 +450,9 @@ export function useWorkflowCanvasActions({
     commandHistory,
     addNode,
     createNodeAt,
+    createNodeFromTool,
+    createNodeFromConnectionDrop,
+    insertNodeOnEdge,
     updateNode,
     createPort,
     updatePort,

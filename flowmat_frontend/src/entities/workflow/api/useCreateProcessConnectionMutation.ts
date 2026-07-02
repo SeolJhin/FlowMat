@@ -13,7 +13,7 @@ export interface CreateProcessConnectionInput {
   sourceHandle?: string | null
   targetHandle?: string | null
   connectionType?: string
-  connectionLabel?: string
+  connectionLabel?: string | null
   flowRate?: number | null
   unit?: string | null
   delayTimeSec?: number | null

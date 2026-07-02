@@ -415,6 +415,120 @@ code {
 }
 
 /* ============================================================
+   On-canvas node picker (ported from tldraw OnCanvasComponentPicker)
+   ============================================================ */
+.node-picker__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.node-picker {
+  position: fixed;
+  z-index: 41;
+  min-width: 200px;
+  max-width: 240px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.node-picker__title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  opacity: 0.55;
+  padding: 4px 8px 6px;
+}
+
+.node-picker__item {
+  display: grid;
+  grid-template-columns: 10px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  align-items: center;
+  text-align: left;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+
+.node-picker__item:hover {
+  background: var(--accent-bg);
+}
+
+.node-picker__chip {
+  grid-row: 1 / span 2;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.node-picker__chip--sky { background: #0ea5e9; }
+.node-picker__chip--emerald { background: #10b981; }
+.node-picker__chip--amber { background: #f59e0b; }
+.node-picker__chip--rose { background: #f43f5e; }
+.node-picker__chip--violet { background: #8b5cf6; }
+.node-picker__chip--slate { background: #64748b; }
+.node-picker__chip--gray { background: #6b7280; }
+
+.node-picker__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-h);
+  line-height: 1.4;
+}
+
+.node-picker__desc {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--text);
+  opacity: 0.6;
+  line-height: 1.35;
+}
+
+/* ============================================================
+   Edge center "+" insert handle (ported from tldraw
+   ConnectionCenterHandleOverlayUtil)
+   ============================================================ */
+.edge-insert-button {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  background: var(--bg);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  pointer-events: all;
+  box-shadow: var(--node-shadow);
+  transition: scale 0.12s ease, background 0.12s ease;
+  padding: 0;
+}
+
+.edge-insert-button:hover {
+  scale: 1.15;
+  background: var(--accent-bg);
+}
+
+/* ============================================================
    Topbar button overrides (workspace context)
    ============================================================ */
 .workspace-topbar button {

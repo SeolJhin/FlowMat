@@ -6,9 +6,11 @@ import type {
 } from '../../../entities/workflow/model/types'
 import { useWorkspaceStore } from '../model/workspaceStore'
 import { useWorkflowCanvasActions } from '../model/useWorkflowCanvasActions'
-import { CanvasViewport } from './CanvasViewport'
+import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
+import { CanvasViewport, PALETTE_DRAG_MIME } from './CanvasViewport'
 import { ConnectionInspector } from './ConnectionInspector'
 import { NodeInspector } from './NodeInspector'
+import { NodePickerPopup } from './NodePickerPopup'
 
 interface Props {
   canvas: WorkflowCanvasViewModel
@@ -34,6 +36,9 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     commandHistory,
     addNode,
     createNodeAt,
+    createNodeFromTool,
+    createNodeFromConnectionDrop,
+    insertNodeOnEdge,
     updateNode,
     createPort,
     updatePort,
@@ -43,6 +48,10 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     deleteNode,
     createConnection,
   } = useWorkflowCanvasActions({ canvas, clearSelection })
+
+  const nodePicker = useCanvasInteractionStore((s) => s.nodePicker)
+  const openNodePicker = useCanvasInteractionStore((s) => s.openNodePicker)
+  const closeNodePicker = useCanvasInteractionStore((s) => s.closeNodePicker)
 
   const { past, future, undo, redo } = commandHistory
 
@@ -104,6 +113,16 @@ export function WorkflowCanvasPage({ canvas }: Props) {
 
   async function handleConnectComplete(payload: ConnectCompletePayload) {
     await createConnection(payload)
+  }
+
+  async function handleNodePick(tool: Parameters<typeof createNodeFromTool>[0]) {
+    if (!nodePicker) return
+    closeNodePicker()
+    if (nodePicker.kind === 'connect-drop') {
+      await createNodeFromConnectionDrop(nodePicker.draft, tool, nodePicker.flowPosition)
+    } else {
+      await insertNodeOnEdge(nodePicker.edgeId, tool, nodePicker.flowPosition)
+    }
   }
 
   return (
@@ -197,6 +216,11 @@ export function WorkflowCanvasPage({ canvas }: Props) {
               <button
                 key={definition.tool}
                 type="button"
+                draggable
+                onDragStart={(event) => {
+                  event.dataTransfer.setData(PALETTE_DRAG_MIME, definition.tool)
+                  event.dataTransfer.effectAllowed = 'move'
+                }}
                 onClick={() => setActiveTool(definition.tool)}
                 style={{
                   textAlign: 'left',
@@ -210,6 +234,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
                     activeTool === definition.tool ? 'var(--accent-bg)' : 'var(--surface)',
                   display: 'grid',
                   gap: '4px',
+                  cursor: 'grab',
                 }}
               >
                 <strong>{definition.label}</strong>
@@ -252,7 +277,28 @@ export function WorkflowCanvasPage({ canvas }: Props) {
             onConnectStart={handleConnectStart}
             onConnectComplete={handleConnectComplete}
             onCanvasClick={(position) => void createNodeAt(position)}
+            onNodeDrop={(tool, position) => void createNodeFromTool(tool, position)}
+            onConnectDropOnCanvas={(payload) =>
+              openNodePicker({
+                kind: 'connect-drop',
+                flowPosition: payload.flowPosition,
+                screenPosition: payload.screenPosition,
+                draft: {
+                  fromProcessId: payload.fromProcessId,
+                  fromHandleId: payload.fromHandleId,
+                  fromHandleType: payload.fromHandleType,
+                },
+              })
+            }
           />
+          {nodePicker && (
+            <NodePickerPopup
+              picker={nodePicker}
+              definitions={paletteDefinitions}
+              onPick={(tool) => void handleNodePick(tool)}
+              onClose={closeNodePicker}
+            />
+          )}
         </main>
 
         <aside className="workspace-panel workspace-panel--right">

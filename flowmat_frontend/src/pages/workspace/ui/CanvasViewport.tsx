@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent } from 'react'
 import {
   ReactFlow,
   Background,
@@ -10,8 +10,10 @@ import {
   type EdgeChange,
   type Connection,
   type OnConnectStart,
+  type OnConnectEnd,
   type ReactFlowInstance,
   type Node,
+  type Edge,
   applyNodeChanges,
   applyEdgeChanges,
 } from '@xyflow/react'
@@ -23,9 +25,14 @@ import type {
   ConnectStartPayload,
   ConnectCompletePayload,
 } from '../../../entities/workflow/model/types'
+import type { WorkflowPaletteTool } from '../../../entities/workflow/model/nodeCatalog'
 import { CanvasNode } from './CanvasNode'
 import { CanvasEdge } from './CanvasEdge'
 import { useWorkspaceStore } from '../model/workspaceStore'
+import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
+
+/** dataTransfer MIME type used by palette drag-to-create. */
+export const PALETTE_DRAG_MIME = 'application/flowmat-node-tool'
 
 const nodeTypes = { flowmatNode: CanvasNode }
 const edgeTypes = { flowmatEdge: CanvasEdge }
@@ -156,6 +163,14 @@ interface Props {
   onConnectStart(payload: ConnectStartPayload): void
   onConnectComplete(payload: ConnectCompletePayload): void
   onCanvasClick(position: { x: number; y: number }): void
+  onNodeDrop(tool: WorkflowPaletteTool, position: { x: number; y: number }): void
+  onConnectDropOnCanvas(payload: {
+    fromProcessId: string
+    fromHandleId: string | null
+    fromHandleType: 'source' | 'target'
+    flowPosition: { x: number; y: number }
+    screenPosition: { x: number; y: number }
+  }): void
 }
 
 type RfNode = {
@@ -217,8 +232,11 @@ export function CanvasViewport({
   onConnectStart,
   onConnectComplete,
   onCanvasClick,
+  onNodeDrop,
+  onConnectDropOnCanvas,
 }: Props) {
   const { selectNode, selectEdge } = useWorkspaceStore()
+  const setHoveredEdgeId = useCanvasInteractionStore((s) => s.setHoveredEdgeId)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([])
 
@@ -316,6 +334,63 @@ export function CanvasViewport({
     [onConnectComplete]
   )
 
+  // Connection drag dropped on empty canvas → open the on-canvas node picker
+  // (ported from tldraw's OnCanvasComponentPicker flow).
+  const handleConnectEnd: OnConnectEnd = useCallback(
+    (event, connectionState) => {
+      if (connectionState.isValid) return
+      const fromNode = connectionState.fromNode
+      const fromHandle = connectionState.fromHandle
+      if (!fromNode || !fromHandle || !reactFlowInstance) return
+
+      const client =
+        'clientX' in event
+          ? { x: event.clientX, y: event.clientY }
+          : { x: event.changedTouches[0].clientX, y: event.changedTouches[0].clientY }
+
+      onConnectDropOnCanvas({
+        fromProcessId: fromNode.id,
+        fromHandleId: fromHandle.id ?? null,
+        fromHandleType: fromHandle.type,
+        flowPosition: reactFlowInstance.screenToFlowPosition(client),
+        screenPosition: client,
+      })
+    },
+    [onConnectDropOnCanvas, reactFlowInstance]
+  )
+
+  // Palette drag-to-create (ported from tldraw's useDragToCreate).
+  const handleDragOver = useCallback((event: DragEvent) => {
+    if (!event.dataTransfer.types.includes(PALETTE_DRAG_MIME)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }, [])
+
+  const handleDrop = useCallback(
+    (event: DragEvent) => {
+      const tool = event.dataTransfer.getData(PALETTE_DRAG_MIME)
+      if (!tool || !reactFlowInstance) return
+      event.preventDefault()
+
+      const position = reactFlowInstance.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      })
+      onNodeDrop(tool as WorkflowPaletteTool, position)
+    },
+    [onNodeDrop, reactFlowInstance]
+  )
+
+  const handleEdgeMouseEnter = useCallback(
+    (_event: MouseEvent, edge: Edge) => setHoveredEdgeId(edge.id),
+    [setHoveredEdgeId]
+  )
+
+  const handleEdgeMouseLeave = useCallback(
+    () => setHoveredEdgeId(null),
+    [setHoveredEdgeId]
+  )
+
   const handlePaneClick = useCallback(
     (event: MouseEvent) => {
       if (!reactFlowInstance) return
@@ -350,7 +425,12 @@ export function CanvasViewport({
         onNodeDragStop={handleNodeDragStop}
         onConnectStart={handleConnectStart}
         onConnect={handleConnect}
+        onConnectEnd={handleConnectEnd}
         onPaneClick={handlePaneClick}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        onEdgeMouseEnter={handleEdgeMouseEnter}
+        onEdgeMouseLeave={handleEdgeMouseLeave}
         fitView
         minZoom={0.1}
         maxZoom={2.5}
