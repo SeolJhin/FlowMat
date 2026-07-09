@@ -16,7 +16,6 @@
 .project
 .vscode/
 .metadata/
-*.md
 
 # ===============================
 # OS 파일
