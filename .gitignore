@@ -75,3 +75,5 @@ node_modules/
 dist/
 # application 관련 파일/폴더 무시
 .application/
+
+bin/
