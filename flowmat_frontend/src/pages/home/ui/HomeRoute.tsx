@@ -14,7 +14,7 @@ export function HomeRoute() {
   } = useProjectsQuery()
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [projectName, setProjectName] = useState('')
-  const [projectOwnerId, setProjectOwnerId] = useState('demo-owner')
+  const [projectOwnerId, setProjectOwnerId] = useState('')
   const [projectDesc, setProjectDesc] = useState('')
   const [workflowName, setWorkflowName] = useState('')
   const [workflowDesc, setWorkflowDesc] = useState('')

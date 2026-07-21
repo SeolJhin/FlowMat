@@ -35,6 +35,7 @@ interface CanvasInteractionState {
   hoveredEdgeId: string | null
   pendingDeleteNodeId: string | null
   pendingDeleteEdgeId: string | null
+  pendingDuplicateNodeId: string | null
   pendingColorChange: { nodeId: string; colorScheme: string } | null
 
   openNodePicker(state: NodePickerState): void
@@ -43,6 +44,8 @@ interface CanvasInteractionState {
   requestDeleteNode(id: string): void
   requestDeleteEdge(id: string): void
   clearDeleteRequest(): void
+  requestDuplicateNode(id: string): void
+  clearDuplicateRequest(): void
   requestColorChange(nodeId: string, colorScheme: string): void
   clearColorChange(): void
 }
@@ -52,6 +55,7 @@ export const useCanvasInteractionStore = create<CanvasInteractionState>((set) =>
   hoveredEdgeId: null,
   pendingDeleteNodeId: null,
   pendingDeleteEdgeId: null,
+  pendingDuplicateNodeId: null,
   pendingColorChange: null,
 
   openNodePicker: (state) => set({ nodePicker: state }),
@@ -60,6 +64,8 @@ export const useCanvasInteractionStore = create<CanvasInteractionState>((set) =>
   requestDeleteNode: (id) => set({ pendingDeleteNodeId: id }),
   requestDeleteEdge: (id) => set({ pendingDeleteEdgeId: id }),
   clearDeleteRequest: () => set({ pendingDeleteNodeId: null, pendingDeleteEdgeId: null }),
+  requestDuplicateNode: (id) => set({ pendingDuplicateNodeId: id }),
+  clearDuplicateRequest: () => set({ pendingDuplicateNodeId: null }),
   requestColorChange: (nodeId, colorScheme) => set({ pendingColorChange: { nodeId, colorScheme } }),
   clearColorChange: () => set({ pendingColorChange: null }),
 }))

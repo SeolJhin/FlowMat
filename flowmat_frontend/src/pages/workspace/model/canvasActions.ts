@@ -10,7 +10,9 @@ export interface CanvasActionContext {
   isEditing: boolean
   deleteNodeWithConfirm(id: string): Promise<void>
   deleteConnection(id: string): Promise<void>
+  duplicateNode(id: string): Promise<void>
   clearSelection(): void
+  selectAll(): void
   undo(): Promise<void>
   redo(): Promise<void>
 }
@@ -54,6 +56,21 @@ export const CANVAS_ACTIONS: CanvasAction[] = [
       !!selectedConnectionId && !selectedProcessId && !isEditing,
     handler: ({ selectedConnectionId, deleteConnection }) =>
       selectedConnectionId ? deleteConnection(selectedConnectionId) : Promise.resolve(),
+  },
+  {
+    id: 'duplicate',
+    label: 'Duplicate Node',
+    keyTest: (e) => (e.ctrlKey || e.metaKey) && e.key === 'd',
+    predicate: ({ selectedProcessId, isEditing }) => !!selectedProcessId && !isEditing,
+    handler: ({ selectedProcessId, duplicateNode }) =>
+      selectedProcessId ? duplicateNode(selectedProcessId) : Promise.resolve(),
+  },
+  {
+    id: 'select-all',
+    label: 'Select All',
+    keyTest: (e) => (e.ctrlKey || e.metaKey) && e.key === 'a',
+    predicate: ({ isEditing }) => !isEditing,
+    handler: ({ selectAll }) => selectAll(),
   },
   {
     id: 'escape',

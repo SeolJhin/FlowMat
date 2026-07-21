@@ -111,17 +111,27 @@ export interface FlowRuleDto {
   projectId: string
   targetType: string
   targetId: string
-  ruleType: string
-  ruleValue: string | null
+  ruleName: string
   ruleDesc: string | null
+  conditionType: string
+  conditionExpression: string
+  actionType: string
+  actionConfig: string
+  priority: number
+  enabledYn: string
 }
 
 export interface ProcessTemplateDto {
   templateId: string
   templateName: string
-  category: string
-  nodeType: string
-  colorScheme: string
-  description: string | null
-  icon: string | null
+  templateCategory: string
+  templateType: string
+  iconKey: string | null
+  defaultColorScheme: string
+  defaultWidth: number | null
+  defaultHeight: number | null
+  defaultDesc: string | null
+  defaultConfig: string | null
+  publicYn: string
+  sortOrder: number | null
 }

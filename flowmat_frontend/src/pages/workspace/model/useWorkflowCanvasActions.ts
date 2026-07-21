@@ -20,9 +20,14 @@ import {
   type WorkflowPaletteTool,
 } from '../../../entities/workflow/model/nodeCatalog'
 import type { NodePickerState } from './canvasInteractionStore'
+
+// Module-level constants — computed once, never change at runtime
+const PALETTE_DEFINITIONS = getWorkflowPaletteDefinitions()
+const DEFAULT_NODE_DEFINITION = getWorkflowDefaultNodeDefinition()
 import type {
   ConnectCompletePayload,
   CreateProcessIoInput,
+  UpdateProcessConnectionInput,
   UpdateProcessInput,
   UpdateProcessIoInput,
   WorkflowCanvasViewModel,
@@ -49,12 +54,21 @@ export function useWorkflowCanvasActions({
 
   const commandHistory = useCommandHistory()
 
-  const [workspaceMessage, setWorkspaceMessage] = useState<string | null>(null)
+  const [workspaceMessage, setWorkspaceMessageRaw] = useState<string | null>(null)
   const [activeTool, setActiveTool] = useState<WorkflowPaletteTool>('process')
   const positionTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const messageTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const paletteDefinitions = getWorkflowPaletteDefinitions()
-  const defaultDefinition = getWorkflowDefaultNodeDefinition()
+  function setWorkspaceMessage(msg: string | null) {
+    if (messageTimer.current) clearTimeout(messageTimer.current)
+    setWorkspaceMessageRaw(msg)
+    if (msg !== null) {
+      messageTimer.current = setTimeout(() => setWorkspaceMessageRaw(null), 5000)
+    }
+  }
+
+  const paletteDefinitions = PALETTE_DEFINITIONS
+  const defaultDefinition = DEFAULT_NODE_DEFINITION
 
   async function addNode() {
     setWorkspaceMessage(null)
@@ -362,6 +376,33 @@ export function useWorkflowCanvasActions({
     }
   }
 
+  async function duplicateNode(processId: string) {
+    const node = canvas.nodeMap[processId]
+    if (!node) return
+    setWorkspaceMessage(null)
+
+    try {
+      const created = await createProcessMutation.mutateAsync({
+        workflowId: canvas.workflow.workflowId,
+        processName: `${node.name} (복사)`,
+        processType: node.processType,
+        nodeType: node.nodeType,
+        colorScheme: node.colorScheme,
+        posX: Math.round(node.position.x + 40),
+        posY: Math.round(node.position.y + 40),
+        width: node.size.width,
+        height: node.size.height,
+        processDesc: node.description ?? undefined,
+      })
+      commandHistory.push({
+        label: `Duplicate "${node.name}"`,
+        undo: async () => { await deleteProcessMutation.mutateAsync(created.processId) },
+      })
+    } catch (error) {
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to duplicate node.')
+    }
+  }
+
   function saveNodePosition(processId: string, x: number, y: number) {
     const existing = positionTimers.current.get(processId)
     if (existing) clearTimeout(existing)
@@ -405,7 +446,7 @@ export function useWorkflowCanvasActions({
     })
   }
 
-  async function updateConnection(input: import('../../../entities/workflow/model/types').UpdateProcessConnectionInput) {
+  async function updateConnection(input: UpdateProcessConnectionInput) {
     setWorkspaceMessage(null)
     const edge = canvas.edges.find((e) => e.id === input.connectionId)
 
@@ -417,9 +458,9 @@ export function useWorkflowCanvasActions({
     }
 
     if (edge) {
-      const oldInput: import('../../../entities/workflow/model/types').UpdateProcessConnectionInput = {
+      const oldInput: UpdateProcessConnectionInput = {
         connectionId: input.connectionId,
-        ...(input.connectionLabel !== undefined && { connectionLabel: edge.label ?? null }),
+        ...(input.connectionLabel !== undefined && { connectionLabel: edge.label ?? undefined }),
         ...(input.connectionType !== undefined && { connectionType: edge.connectionType }),
         ...(input.flowRate !== undefined && { flowRate: edge.flowRate !== null ? Number(edge.flowRate) : null }),
         ...(input.unit !== undefined && { unit: edge.unit }),
@@ -526,6 +567,7 @@ export function useWorkflowCanvasActions({
     updatePort,
     deletePort,
     saveNodePosition,
+    duplicateNode,
     batchUpdateNodePositions,
     updateConnection,
     deleteConnection,

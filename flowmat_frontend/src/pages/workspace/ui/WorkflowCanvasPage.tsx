@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useIsMutating } from '@tanstack/react-query'
 import type {
   ConnectCompletePayload,
@@ -12,7 +12,9 @@ import { getRelatedConnectionIds } from '../../../entities/workflow/model/connec
 import { useAutoLayout } from '../model/useAutoLayout'
 import { CANVAS_ACTIONS } from '../model/canvasActions'
 import { useWorkflowsQuery } from '../../../entities/workflow/api/useWorkflowsQuery'
-import { useNavigate } from 'react-router-dom'
+import { useUpdateWorkflowMutation } from '../../../entities/workflow/api/useUpdateWorkflowMutation'
+import { useWorkflowSync, type PresenceMessage } from '../../../entities/workflow/api/useWorkflowSync'
+import { Link, useNavigate } from 'react-router-dom'
 import { CanvasViewport, PALETTE_DRAG_MIME } from './CanvasViewport'
 import { ConnectionInspector } from './ConnectionInspector'
 import { NodeInspector } from './NodeInspector'
@@ -20,19 +22,18 @@ import { NodePickerPopup } from './NodePickerPopup'
 
 interface Props {
   canvas: WorkflowCanvasViewModel
+  projectId: string
 }
 
-export function WorkflowCanvasPage({ canvas }: Props) {
+export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   const {
     selectedProcessId,
     selectedConnectionId,
     selectedPortId,
     inspectorMode,
-    canvasMode,
     selectNode,
     selectEdge,
     clearSelection,
-    setConnectionDraft,
     pendingRename,
     clearPendingRename,
     inlineEditingEdgeId,
@@ -44,24 +45,25 @@ export function WorkflowCanvasPage({ canvas }: Props) {
   panelWidthRef.current = panelWidths
   const [localPanelWidths, setLocalPanelWidths] = useState(panelWidths)
 
-  function makeResizeHandler(side: 'left' | 'right') {
-    return (e: React.MouseEvent) => {
-      e.preventDefault()
-      const startX = e.clientX
-      const startWidth = side === 'left' ? localPanelWidths.left : localPanelWidths.right
-      function onMove(ev: MouseEvent) {
-        const delta = side === 'left' ? ev.clientX - startX : startX - ev.clientX
-        const next = Math.max(160, Math.min(400, startWidth + delta))
-        setLocalPanelWidths((w) => ({ ...w, [side]: next }))
-      }
-      function onUp() {
-        window.removeEventListener('mousemove', onMove)
-        window.removeEventListener('mouseup', onUp)
-      }
-      window.addEventListener('mousemove', onMove)
-      window.addEventListener('mouseup', onUp)
-    }
-  }
+  const makeResizeHandler = useCallback(
+    (side: 'left' | 'right') =>
+      (e: React.MouseEvent) => {
+        e.preventDefault()
+        const startX = e.clientX
+        const startWidth = side === 'left' ? localPanelWidths.left : localPanelWidths.right
+        function onMove(ev: MouseEvent) {
+          const delta = side === 'left' ? ev.clientX - startX : startX - ev.clientX
+          setLocalPanelWidths((w) => ({ ...w, [side]: Math.max(160, Math.min(400, startWidth + delta)) }))
+        }
+        function onUp() {
+          window.removeEventListener('mousemove', onMove)
+          window.removeEventListener('mouseup', onUp)
+        }
+        window.addEventListener('mousemove', onMove)
+        window.addEventListener('mouseup', onUp)
+      },
+    [localPanelWidths.left, localPanelWidths.right]
+  )
 
   const {
     activeTool,
@@ -79,6 +81,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     updatePort,
     deletePort,
     saveNodePosition,
+    duplicateNode,
     batchUpdateNodePositions,
     updateConnection,
     deleteConnection,
@@ -87,8 +90,53 @@ export function WorkflowCanvasPage({ canvas }: Props) {
   } = useWorkflowCanvasActions({ canvas, clearSelection })
 
   const navigate = useNavigate()
+  const updateWorkflowMutation = useUpdateWorkflowMutation()
   const workflowsQuery = useWorkflowsQuery(canvas.workflow.projectId)
+
+  // Presence: remote cursor state
+  const [remoteCursors, setRemoteCursors] = useState<
+    Map<string, { x: number; y: number; type: string }>
+  >(new Map())
+
+  const handlePresence = useCallback((msg: PresenceMessage) => {
+    if (!msg.userId) return
+    setRemoteCursors((prev) => {
+      const next = new Map(prev)
+      if (msg.type === 'LEAVE') {
+        next.delete(msg.userId!)
+      } else if (msg.type === 'CURSOR_MOVED' && msg.cursorX != null && msg.cursorY != null) {
+        next.set(msg.userId!, { x: msg.cursorX, y: msg.cursorY, type: msg.type })
+      } else if (msg.type === 'JOIN') {
+        next.set(msg.userId!, { x: 0, y: 0, type: msg.type })
+      }
+      return next
+    })
+  }, [])
+
+  const { sendPresence, clientId } = useWorkflowSync(
+    canvas.workflow.workflowId,
+    () => {},  // node-move handled in CanvasViewport
+    handlePresence
+  )
   const workflows = workflowsQuery.data ?? []
+  const [editingWorkflowName, setEditingWorkflowName] = useState(false)
+  const [draftWorkflowName, setDraftWorkflowName] = useState(canvas.workflow.workflowName)
+  const workflowNameInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (editingWorkflowName) workflowNameInputRef.current?.select()
+  }, [editingWorkflowName])
+
+  async function commitWorkflowName() {
+    setEditingWorkflowName(false)
+    const trimmed = draftWorkflowName.trim()
+    if (!trimmed || trimmed === canvas.workflow.workflowName) return
+    await updateWorkflowMutation.mutateAsync({
+      workflowId: canvas.workflow.workflowId,
+      workflowName: trimmed,
+    })
+  }
+
   const isMutating = useIsMutating()
   const [savedLabel, setSavedLabel] = useState<'saving' | 'saved' | null>(null)
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -101,8 +149,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
       setSavedLabel('saved')
       savedTimerRef.current = setTimeout(() => setSavedLabel(null), 2000)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMutating])
+  }, [isMutating, savedLabel])
 
   const { applyLayout } = useAutoLayout({
     nodes: canvas.nodes,
@@ -117,10 +164,34 @@ export function WorkflowCanvasPage({ canvas }: Props) {
   const pendingDeleteNodeId = useCanvasInteractionStore((s) => s.pendingDeleteNodeId)
   const pendingDeleteEdgeId = useCanvasInteractionStore((s) => s.pendingDeleteEdgeId)
   const clearDeleteRequest = useCanvasInteractionStore((s) => s.clearDeleteRequest)
+  const pendingDuplicateNodeId = useCanvasInteractionStore((s) => s.pendingDuplicateNodeId)
+  const clearDuplicateRequest = useCanvasInteractionStore((s) => s.clearDuplicateRequest)
   const pendingColorChange = useCanvasInteractionStore((s) => s.pendingColorChange)
   const clearColorChange = useCanvasInteractionStore((s) => s.clearColorChange)
 
   const { past, future, undo, redo } = commandHistory
+
+  // Declare refs and stable callbacks BEFORE any useEffect that references them
+  const canvasRef = useRef(canvas)
+  canvasRef.current = canvas
+  const fitViewRef = useRef<() => void>(() => {})
+  const selectAllRef = useRef<() => void>(() => {})
+  const exportPngRef = useRef<(filename: string) => void>(() => {})
+
+  const deleteNodeWithConfirm = useCallback(
+    async (processId: string) => {
+      const relatedCount = getRelatedConnectionIds(canvasRef.current.edges, processId).length
+      if (
+        relatedCount === 0 ||
+        window.confirm(
+          `이 노드를 삭제하면 연결된 연결선 ${relatedCount}개도 함께 삭제됩니다. 계속하시겠습니까?`
+        )
+      ) {
+        await deleteNode(processId)
+      }
+    },
+    [deleteNode]
+  )
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -136,7 +207,9 @@ export function WorkflowCanvasPage({ canvas }: Props) {
         isEditing,
         deleteNodeWithConfirm,
         deleteConnection,
+        duplicateNode,
         clearSelection,
+        selectAll: () => selectAllRef.current(),
         undo,
         redo,
       }
@@ -154,20 +227,13 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [undo, redo, selectedProcessId, selectedConnectionId, deleteNodeWithConfirm, deleteConnection, clearSelection])
 
-  // Ref to avoid stale closure in the effect below
-  const canvasRef = useRef(canvas)
-  canvasRef.current = canvas
-  const fitViewRef = useRef<() => void>(() => {})
-  const exportPngRef = useRef<(filename: string) => void>(() => {})
 
   useEffect(() => {
     if (pendingDeleteNodeId) {
       clearDeleteRequest()
       void deleteNodeWithConfirm(pendingDeleteNodeId)
     }
-  // deleteNodeWithConfirm captures canvas via canvasRef so no dep needed
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingDeleteNodeId, clearDeleteRequest])
+  }, [pendingDeleteNodeId, clearDeleteRequest, deleteNodeWithConfirm])
 
   useEffect(() => {
     if (pendingDeleteEdgeId) {
@@ -175,6 +241,13 @@ export function WorkflowCanvasPage({ canvas }: Props) {
       void deleteConnection(pendingDeleteEdgeId)
     }
   }, [pendingDeleteEdgeId, clearDeleteRequest, deleteConnection])
+
+  useEffect(() => {
+    if (pendingDuplicateNodeId) {
+      clearDuplicateRequest()
+      void duplicateNode(pendingDuplicateNodeId)
+    }
+  }, [pendingDuplicateNodeId, clearDuplicateRequest, duplicateNode])
 
   useEffect(() => {
     if (pendingColorChange) {
@@ -236,18 +309,6 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     URL.revokeObjectURL(a.href)
   }
 
-  async function deleteNodeWithConfirm(processId: string) {
-    const relatedCount = getRelatedConnectionIds(canvas.edges, processId).length
-    if (
-      relatedCount === 0 ||
-      window.confirm(
-        `이 노드를 삭제하면 연결된 연결선 ${relatedCount}개도 함께 삭제됩니다. 계속하시겠습니까?`
-      )
-    ) {
-      await deleteNode(processId)
-    }
-  }
-
   async function handleNodeDragEnd(processId: string, x: number, y: number) {
     await saveNodePosition(processId, x, y)
   }
@@ -256,16 +317,11 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     await updateNode({ processId, width: Math.round(width), height: Math.round(height) })
   }
 
-  function handleConnectStart(payload: ConnectStartPayload) {
-    setConnectionDraft({
-      fromProcessId: payload.processId,
-      fromIoId: payload.ioId,
-      sourceHandle: payload.handleId,
-    })
+  function handleConnectStart(_payload: ConnectStartPayload) {
+    // pendingConnectionDraft reserved for future collaboration feature
   }
 
   async function handleConnectComplete(payload: ConnectCompletePayload) {
-    setConnectionDraft(null)
     await createConnection(payload)
   }
 
@@ -283,8 +339,35 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     <div className="workspace-layout">
       <header className="workspace-topbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Link to="/" className="topbar-home-link" title="홈으로">← 홈</Link>
           <div style={{ display: 'grid', gap: '4px' }}>
-            <span className="workspace-topbar__project">{canvas.workflow.workflowName}</span>
+            {editingWorkflowName ? (
+              <input
+                ref={workflowNameInputRef}
+                className="workspace-topbar__name-input"
+                value={draftWorkflowName}
+                onChange={(e) => setDraftWorkflowName(e.target.value)}
+                onBlur={() => void commitWorkflowName()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void commitWorkflowName()
+                  if (e.key === 'Escape') {
+                    setDraftWorkflowName(canvas.workflow.workflowName)
+                    setEditingWorkflowName(false)
+                  }
+                }}
+              />
+            ) : (
+              <span
+                className="workspace-topbar__project"
+                title="더블클릭하여 이름 변경"
+                onDoubleClick={() => {
+                  setDraftWorkflowName(canvas.workflow.workflowName)
+                  setEditingWorkflowName(true)
+                }}
+              >
+                {canvas.workflow.workflowName}
+              </span>
+            )}
             <span className="workspace-topbar__status">
               {canvas.workflow.workflowStatus} | {canvas.workflow.workflowType}
             </span>
@@ -310,6 +393,18 @@ export function WorkflowCanvasPage({ canvas }: Props) {
           <span className={`save-status save-status--${savedLabel}`}>
             {savedLabel === 'saving' ? 'Saving…' : 'Saved ✓'}
           </span>
+        )}
+        {remoteCursors.size > 0 && (
+          <div className="presence-avatars" title={`${remoteCursors.size}명 접속 중`}>
+            {[...remoteCursors.keys()].slice(0, 5).map((uid) => (
+              <span key={uid} className="presence-avatar" title={uid}>
+                {uid.slice(0, 2).toUpperCase()}
+              </span>
+            ))}
+            {remoteCursors.size > 5 && (
+              <span className="presence-avatar presence-avatar--overflow">+{remoteCursors.size - 5}</span>
+            )}
+          </div>
         )}
         <div
           style={{
@@ -479,7 +574,6 @@ export function WorkflowCanvasPage({ canvas }: Props) {
             edges={canvas.edges}
             selectedNodeId={selectedProcessId}
             selectedEdgeId={selectedConnectionId}
-            canvasMode={canvasMode}
             drawingEnabled={activeTool !== 'select'}
             onNodeSelect={selectNode}
             onEdgeSelect={selectEdge}
@@ -490,7 +584,9 @@ export function WorkflowCanvasPage({ canvas }: Props) {
             onCanvasClick={(position) => void createNodeAt(position)}
             onNodeDrop={(tool, position) => void createNodeFromTool(tool, position)}
             onFitViewReady={(fn) => { fitViewRef.current = fn }}
+            onSelectAllReady={(fn) => { selectAllRef.current = fn }}
             onExportReady={(fn) => { exportPngRef.current = fn }}
+            onSendPresence={(type, x, y) => sendPresence({ type, cursorX: x, cursorY: y })}
             onEdgeReconnect={async (oldEdgeId, newConnection) => {
               await deleteConnection(oldEdgeId)
               await createConnection(newConnection)
@@ -516,6 +612,20 @@ export function WorkflowCanvasPage({ canvas }: Props) {
               onClose={closeNodePicker}
             />
           )}
+          {/* Remote cursor overlay */}
+          {[...remoteCursors.entries()]
+            .filter(([uid]) => uid !== clientId)
+            .map(([uid, cursor]) => (
+              <div
+                key={uid}
+                className="remote-cursor"
+                style={{ left: cursor.x, top: cursor.y }}
+              >
+                <div className="remote-cursor__dot" />
+                <span className="remote-cursor__label">{uid.slice(0, 8)}</span>
+              </div>
+            ))
+          }
         </main>
 
         <div className="panel-resize-handle" onMouseDown={makeResizeHandler('right')} />

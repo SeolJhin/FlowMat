@@ -34,7 +34,6 @@ import '@xyflow/react/dist/style.css'
 import type {
   CanvasNodeViewModel,
   CanvasEdgeViewModel,
-  CanvasMode,
   ConnectStartPayload,
   ConnectCompletePayload,
 } from '../../../entities/workflow/model/types'
@@ -43,6 +42,7 @@ import { CanvasNode } from './CanvasNode'
 import { CanvasEdge } from './CanvasEdge'
 import { useWorkspaceStore } from '../model/workspaceStore'
 import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
+import { useWorkflowSync, type NodeMoveMessage } from '../../../entities/workflow/api/useWorkflowSync'
 
 /** dataTransfer MIME type used by palette drag-to-create. */
 export const PALETTE_DRAG_MIME = 'application/flowmat-node-tool'
@@ -198,10 +198,12 @@ function SnapGuideLayer({ guides }: { guides: SnapGuide[] }) {
 
 function ExportController({ onReady }: { onReady?: (fn: (filename: string) => void) => void }) {
   const { getNodes } = useReactFlow()
+  const getNodesRef = useRef(getNodes)
+  getNodesRef.current = getNodes
 
   useEffect(() => {
     onReady?.((filename: string) => {
-      const nodes = getNodes() as unknown as RfNode[]
+      const nodes = getNodesRef.current() as unknown as RfNode[]
       if (nodes.length === 0) return
       const bounds = getNodesBounds(nodes as unknown as Node[])
       const W = 2400
@@ -226,7 +228,7 @@ function ExportController({ onReady }: { onReady?: (fn: (filename: string) => vo
         a.click()
       })
     })
-  }, [getNodes, onReady])
+  }, [onReady])
 
   return null
 }
@@ -255,7 +257,6 @@ interface Props {
   edges: CanvasEdgeViewModel[]
   selectedNodeId: string | null
   selectedEdgeId: string | null
-  canvasMode: CanvasMode
   drawingEnabled: boolean
   onNodeSelect(id: string): void
   onEdgeSelect(id: string): void
@@ -273,8 +274,10 @@ interface Props {
     screenPosition: { x: number; y: number }
   }): void
   onFitViewReady?(fn: () => void): void
+  onSelectAllReady?(fn: () => void): void
   onExportReady?(fn: (filename: string) => void): void
   onEdgeReconnect?(oldEdgeId: string, newConnection: ConnectCompletePayload): void
+  onSendPresence?(type: 'CURSOR_MOVED', x: number, y: number): void
 }
 
 type RfNode = {
@@ -350,20 +353,37 @@ export function CanvasViewport({
   onNodeDrop,
   onConnectDropOnCanvas,
   onFitViewReady,
+  onSelectAllReady,
   onExportReady,
   onEdgeReconnect,
+  onSendPresence,
 }: Props) {
   const storageKey = `flowmat-viewport-${workflowId}`
   const savedViewport = useMemo(() => loadSavedViewport(storageKey), [storageKey])
   const { selectNode, selectEdge, startInlineEdit, startInlineEditEdge, setMultiSelect } = useWorkspaceStore()
+
+  const applyRemoteNodeMove = useCallback((message: NodeMoveMessage) => {
+    setLocalNodes((nds) =>
+      nds.map((n) =>
+        n.id === message.processId
+          ? { ...n, position: { x: message.x, y: message.y } }
+          : n
+      )
+    )
+  }, [])
+
+  const { sendNodeMove } = useWorkflowSync(workflowId, applyRemoteNodeMove)
   const setHoveredEdgeId = useCanvasInteractionStore((s) => s.setHoveredEdgeId)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
 
   useEffect(() => {
     if (reactFlowInstance) {
       onFitViewReady?.(() => reactFlowInstance.fitView({ padding: 0.15, duration: 300 }))
+      onSelectAllReady?.(() => {
+        setLocalNodes((nds) => nds.map((n) => ({ ...n, selected: true })))
+      })
     }
-  }, [reactFlowInstance, onFitViewReady])
+  }, [reactFlowInstance, onFitViewReady, onSelectAllReady])
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([])
   const [nodesToUpdateInternals, setNodesToUpdateInternals] = useState<string[]>([])
 
@@ -442,7 +462,9 @@ export function CanvasViewport({
         others
       )
     )
-  }, [])
+
+    sendNodeMove(node.id, node.position.x, node.position.y)
+  }, [sendNodeMove])
 
   const handleNodeDragStop = useCallback(() => {
     setSnapGuides([])
@@ -614,6 +636,14 @@ export function CanvasViewport({
         onReconnect={handleReconnect}
         onConnectEnd={handleConnectEnd}
         onPaneClick={handlePaneClick}
+        onMouseMove={onSendPresence
+          ? (e: React.MouseEvent) => {
+              if (!reactFlowInstance) return
+              const pos = reactFlowInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY })
+              onSendPresence('CURSOR_MOVED', pos.x, pos.y)
+            }
+          : undefined
+        }
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         onEdgeMouseEnter={handleEdgeMouseEnter}

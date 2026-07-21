@@ -104,6 +104,7 @@ export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
   } = useWorkspaceStore()
   const requestDeleteNode = useCanvasInteractionStore((s) => s.requestDeleteNode)
   const requestColorChange = useCanvasInteractionStore((s) => s.requestColorChange)
+  const requestDuplicateNode = useCanvasInteractionStore((s) => s.requestDuplicateNode)
   const isColorPickerOpen = activeColorPickerNodeId === node.id
   const editing = inlineEditingNodeId === node.id
   const [draftName, setDraftName] = useState(node.name)
@@ -147,6 +148,14 @@ export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
               ))}
             </div>
           )}
+          <button
+            type="button"
+            className="node-toolbar__btn nodrag nopan"
+            title="노드 복제 (Ctrl+D)"
+            onClick={(e) => { e.stopPropagation(); requestDuplicateNode(node.id) }}
+          >
+            ⧉
+          </button>
           <button
             type="button"
             className="node-toolbar__btn node-toolbar__btn--delete nodrag nopan"

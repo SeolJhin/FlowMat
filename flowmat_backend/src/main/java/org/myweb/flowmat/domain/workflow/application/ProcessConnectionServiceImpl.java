@@ -110,9 +110,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         if (hasText(request.connectionType())) {
             connection.setConnectionType(request.connectionType().trim().toLowerCase());
         }
-        if (request.connectionLabel() != null) {
-            connection.setConnectionLabel(trimToNull(request.connectionLabel()));
-        }
+        connection.setConnectionLabel(trimToNull(request.connectionLabel()));
         if (request.flowRate() != null) {
             connection.setFlowRate(request.flowRate());
         }

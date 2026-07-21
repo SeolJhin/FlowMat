@@ -153,7 +153,12 @@ export interface FlowRuleViewModel {
   projectId: string
   targetType: string
   targetId: string
-  ruleType: string
-  ruleValue: string | null
+  ruleName: string
   ruleDesc: string | null
+  conditionType: string
+  conditionExpression: string
+  actionType: string
+  actionConfig: string
+  priority: number
+  enabledYn: string
 }
