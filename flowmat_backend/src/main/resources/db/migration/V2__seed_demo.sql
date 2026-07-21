@@ -6,7 +6,8 @@ INSERT INTO "users" (
     "user_birth", "user_tel", "user_role", "user_status", "delete_yn"
 ) VALUES (
     'demo-owner', 'Demo Owner', 'demo-owner@flowmat.local',
-    '$2a$10$demoplaceholderhashXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+    -- 임시 placeholder — DemoDataInitializer 가 시작 시 BCrypt 해시로 덮어씀
+    'PLACEHOLDER_REPLACED_BY_INITIALIZER',
     '1990-01-01', '010-0000-0000', 'admin', 'active', 'N'
 ) ON CONFLICT ("user_id") DO UPDATE
 SET user_name = EXCLUDED.user_name, user_status = EXCLUDED.user_status;

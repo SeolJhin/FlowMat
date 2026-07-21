@@ -4,8 +4,88 @@ import { useCreateProjectMutation } from '../../../entities/project/api/useCreat
 import { useProjectsQuery } from '../../../entities/project/api/useProjectsQuery'
 import { useCreateWorkflowMutation } from '../../../entities/workflow/api/useCreateWorkflowMutation'
 import { useWorkflowsQuery } from '../../../entities/workflow/api/useWorkflowsQuery'
+import {
+  tokenStorage,
+  useLoginMutation,
+  useLogoutMutation,
+  useSignupMutation,
+} from '../../../entities/auth/api/useLoginMutation'
 
 export function HomeRoute() {
+  const [isLoggedIn, setIsLoggedIn] = useState(() => !!tokenStorage.getAccess())
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
+  const [authUserId, setAuthUserId] = useState('')
+  const [authUserName, setAuthUserName] = useState('')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authError, setAuthError] = useState<string | null>(null)
+
+  const loginMutation = useLoginMutation()
+  const signupMutation = useSignupMutation()
+  const logoutMutation = useLogoutMutation()
+
+  async function handleAuthSubmit(e: FormEvent) {
+    e.preventDefault()
+    setAuthError(null)
+    try {
+      if (authMode === 'login') {
+        await loginMutation.mutateAsync({ userIdOrEmail: authUserId, password: authPassword })
+      } else {
+        await signupMutation.mutateAsync({
+          userId: authUserId, userName: authUserName,
+          userEmail: authEmail, password: authPassword,
+        })
+        await loginMutation.mutateAsync({ userIdOrEmail: authUserId, password: authPassword })
+      }
+      setIsLoggedIn(true)
+      setAuthUserId(''); setAuthPassword(''); setAuthUserName(''); setAuthEmail('')
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : '인증 실패')
+    }
+  }
+
+  function handleLogout() {
+    void logoutMutation.mutateAsync()
+    setIsLoggedIn(false)
+  }
+
+  if (!isLoggedIn) {
+    return (
+      <div style={{ minHeight: '100svh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <form onSubmit={handleAuthSubmit} style={{
+          width: 320, padding: 24, border: '1px solid var(--border)',
+          borderRadius: 16, display: 'grid', gap: 12, background: 'var(--bg)',
+        }}>
+          <h2 style={{ margin: 0 }}>FlowMat {authMode === 'login' ? '로그인' : '회원가입'}</h2>
+          {authMode === 'signup' && (
+            <>
+              <input value={authUserName} onChange={e => setAuthUserName(e.target.value)}
+                placeholder="이름" required />
+              <input type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)}
+                placeholder="이메일" required />
+            </>
+          )}
+          <input value={authUserId} onChange={e => setAuthUserId(e.target.value)}
+            placeholder={authMode === 'login' ? '아이디 또는 이메일' : '아이디'} required />
+          <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)}
+            placeholder="비밀번호" required />
+          {authError && <p style={{ color: '#dc2626', fontSize: 13, margin: 0 }}>{authError}</p>}
+          <button type="submit" disabled={loginMutation.isPending || signupMutation.isPending}>
+            {loginMutation.isPending || signupMutation.isPending
+              ? '처리 중…' : authMode === 'login' ? '로그인' : '가입하기'}
+          </button>
+          <button type="button"
+            style={{ background: 'transparent', border: 'none', fontSize: 13, color: 'var(--accent)', cursor: 'pointer' }}
+            onClick={() => { setAuthMode(m => m === 'login' ? 'signup' : 'login'); setAuthError(null) }}>
+            {authMode === 'login' ? '계정이 없으신가요? 회원가입' : '이미 계정이 있으신가요? 로그인'}
+          </button>
+          <p style={{ fontSize: 11, color: 'var(--text)', opacity: 0.5, margin: 0, textAlign: 'center' }}>
+            데모 계정: demo-owner / demo1234
+          </p>
+        </form>
+      </div>
+    )
+  }
   const {
     data: projects = [],
     isLoading: isProjectsLoading,
@@ -75,9 +155,15 @@ export function HomeRoute() {
         boxSizing: 'border-box',
       }}
     >
-      <header>
-        <h1 style={{ marginBottom: '12px' }}>FlowMat Workspace</h1>
-        <p>Select a project, then open one of its workflows.</p>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h1 style={{ marginBottom: '12px' }}>FlowMat Workspace</h1>
+          <p>Select a project, then open one of its workflows.</p>
+        </div>
+        <button type="button" onClick={handleLogout}
+          style={{ fontSize: 12, padding: '4px 10px', height: 30 }}>
+          로그아웃
+        </button>
       </header>
 
       <section

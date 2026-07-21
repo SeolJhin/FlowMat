@@ -1,6 +1,5 @@
 package org.myweb.flowmat.domain.user.application;
 
-import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.user.api.dto.response.UserResponse;
 import org.myweb.flowmat.domain.user.domain.entity.User;
@@ -18,16 +17,9 @@ public class UserServiceImpl implements UserService {
     private final UserRepository userRepository;
 
     @Override
-    public UserResponse me(UUID userId) {
-        User user = userRepository.findById(userId)
+    public UserResponse me(String userId) {
+        User user = userRepository.findByUserId(userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "사용자 정보를 찾을 수 없습니다."));
-
-        return new UserResponse(
-            user.getId(),
-            user.getUserId(),
-            user.getUserName(),
-            user.getUserEmail(),
-            user.getUserStatus()
-        );
+        return new UserResponse(user.getId(), user.getUserId(), user.getUserName(), user.getUserEmail(), user.getUserStatus());
     }
 }
