@@ -27,6 +27,14 @@ export interface PresenceMessage {
   timestamp: number
 }
 
+export interface GraphChangeMessage {
+  changeType: string
+  workflowId: string
+  entityId: string
+  userId: string | null
+  timestamp: number
+}
+
 // 실제 로그인 전까지 탭당 랜덤 ID를 STOMP Bearer 토큰으로 사용.
 // JwtProvider 스텁이 그대로 userId 로 반환 → echo 필터링 key로 활용.
 const CLIENT_ID =
@@ -46,7 +54,8 @@ const NODE_MOVE_THROTTLE_MS = 160
 export function useWorkflowSync(
   workflowId: string,
   onRemoteNodeMove: (message: NodeMoveMessage) => void,
-  onPresence?: (message: PresenceMessage) => void
+  onPresence?: (message: PresenceMessage) => void,
+  onGraphChange?: (message: GraphChangeMessage) => void
 ) {
   const clientRef = useRef<Client | null>(null)
   const connectedRef = useRef(false)
@@ -54,6 +63,8 @@ export function useWorkflowSync(
   onRemoteNodeMoveRef.current = onRemoteNodeMove
   const onPresenceRef = useRef(onPresence)
   onPresenceRef.current = onPresence
+  const onGraphChangeRef = useRef(onGraphChange)
+  onGraphChangeRef.current = onGraphChange
 
   const lastSentAtRef = useRef(0)
   const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -82,6 +93,12 @@ export function useWorkflowSync(
         let payload: PresenceMessage
         try { payload = JSON.parse(message.body) as PresenceMessage } catch { return }
         onPresenceRef.current?.(payload)
+      })
+
+      client.subscribe(`/topic/workflow/${workflowId}/graph`, (message: IMessage) => {
+        let payload: GraphChangeMessage
+        try { payload = JSON.parse(message.body) as GraphChangeMessage } catch { return }
+        onGraphChangeRef.current?.(payload)
       })
     }
 

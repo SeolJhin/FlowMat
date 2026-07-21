@@ -8,6 +8,7 @@ import { useDeleteProcessIoMutation } from '../../../entities/workflow/api/useDe
 import { useDeleteProcessMutation } from '../../../entities/workflow/api/useDeleteProcessMutation'
 import { useUpdateProcessIoMutation } from '../../../entities/workflow/api/useUpdateProcessIoMutation'
 import { useUpdateProcessMutation } from '../../../entities/workflow/api/useUpdateProcessMutation'
+import { useUpdateProcessPositionMutation } from '../../../entities/workflow/api/useUpdateProcessPositionMutation'
 import { useCommandHistory } from './commandHistory'
 import {
   buildDefaultConnectionPayload,
@@ -51,6 +52,7 @@ export function useWorkflowCanvasActions({
   const deleteConnectionMutation = useDeleteProcessConnectionMutation()
   const deleteProcessMutation = useDeleteProcessMutation()
   const updateProcessMutation = useUpdateProcessMutation()
+  const updateProcessPositionMutation = useUpdateProcessPositionMutation()
 
   const commandHistory = useCommandHistory()
 
@@ -408,7 +410,11 @@ export function useWorkflowCanvasActions({
     if (existing) clearTimeout(existing)
     const timer = setTimeout(() => {
       positionTimers.current.delete(processId)
-      void updateNode({ processId, posX: Math.round(x), posY: Math.round(y) })
+      void updateProcessPositionMutation.mutateAsync({
+        processId,
+        posX: Math.round(x),
+        posY: Math.round(y),
+      })
     }, 200)
     positionTimers.current.set(processId, timer)
   }

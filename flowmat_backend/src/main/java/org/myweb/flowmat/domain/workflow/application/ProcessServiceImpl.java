@@ -3,11 +3,14 @@ package org.myweb.flowmat.domain.workflow.application;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessCreateRequest;
+import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessPositionRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessUpdateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessResponse;
 import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
 import org.myweb.flowmat.domain.workflow.domain.enums.NodeType;
+import org.myweb.flowmat.domain.workflow.collab.GraphSyncService;
+import org.myweb.flowmat.domain.workflow.collab.dto.GraphChangeMessage.Type;
 import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
 import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
@@ -28,6 +31,7 @@ public class ProcessServiceImpl implements ProcessService {
     private final ProcessRepository processRepository;
     private final WorkflowRepository workflowRepository;
     private final IdGenerator idGenerator;
+    private final GraphSyncService graphSyncService;
 
     @Override
     public List<ProcessResponse> listProcesses(String workflowId) {
@@ -57,7 +61,9 @@ public class ProcessServiceImpl implements ProcessService {
         process.setHeight(defaultIfNull(request.height(), 60.0));
         process.setProcessDesc(trimToNull(request.processDesc()));
         process.setDeletedYn(NOT_DELETED);
-        return toResponse(processRepository.save(process));
+        ProcessResponse response = toResponse(processRepository.save(process));
+        graphSyncService.broadcast(Type.NODE_CREATED, response.workflowId(), response.processId());
+        return response;
     }
 
     @Override
@@ -99,16 +105,31 @@ public class ProcessServiceImpl implements ProcessService {
         if (request.processDesc() != null) {
             process.setProcessDesc(trimToNull(request.processDesc()));
         }
-        return toResponse(processRepository.save(process));
+        ProcessResponse response = toResponse(processRepository.save(process));
+        graphSyncService.broadcast(Type.NODE_UPDATED, response.workflowId(), response.processId());
+        return response;
+    }
+
+    @Override
+    @Transactional
+    public ProcessResponse updatePosition(String processId, ProcessPositionRequest request) {
+        Process process = findActiveProcess(processId);
+        process.setPosX(request.posX());
+        process.setPosY(request.posY());
+        ProcessResponse response = toResponse(processRepository.save(process));
+        graphSyncService.broadcast(Type.NODE_UPDATED, response.workflowId(), processId);
+        return response;
     }
 
     @Override
     @Transactional
     public void deleteProcess(String processId) {
         Process process = findActiveProcess(processId);
+        String workflowId = process.getWorkflowId();
         process.setDeletedYn(DELETED);
         process.setProcessStatus("deleted");
         processRepository.save(process);
+        graphSyncService.broadcast(Type.NODE_DELETED, workflowId, processId);
     }
 
     private Workflow findActiveWorkflow(String workflowId) {

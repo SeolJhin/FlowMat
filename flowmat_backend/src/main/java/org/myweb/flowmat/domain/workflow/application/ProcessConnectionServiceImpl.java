@@ -12,6 +12,8 @@ import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessConnection;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
+import org.myweb.flowmat.domain.workflow.collab.GraphSyncService;
+import org.myweb.flowmat.domain.workflow.collab.dto.GraphChangeMessage.Type;
 import org.myweb.flowmat.domain.workflow.repository.ProcessConnectionRepository;
 import org.myweb.flowmat.domain.workflow.repository.ProcessIoRepository;
 import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
@@ -36,6 +38,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     private final ProcessIoRepository processIoRepository;
     private final ItemRepository itemRepository;
     private final IdGenerator idGenerator;
+    private final GraphSyncService graphSyncService;
 
     @Override
     public List<ProcessConnectionResponse> listConnections(String workflowId) {
@@ -73,7 +76,9 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         connection.setLossRate(defaultIfNull(request.lossRate(), BigDecimal.ZERO));
         connection.setPriority(request.priority() != null ? request.priority() : 0);
         connection.setDeletedYn(NOT_DELETED);
-        return toResponse(processConnectionRepository.save(connection));
+        ProcessConnectionResponse response = toResponse(processConnectionRepository.save(connection));
+        graphSyncService.broadcast(Type.CONNECTION_CREATED, response.workflowId(), response.connectionId());
+        return response;
     }
 
     @Override
@@ -126,15 +131,19 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         if (request.priority() != null) {
             connection.setPriority(request.priority());
         }
-        return toResponse(processConnectionRepository.save(connection));
+        ProcessConnectionResponse response = toResponse(processConnectionRepository.save(connection));
+        graphSyncService.broadcast(Type.CONNECTION_UPDATED, response.workflowId(), response.connectionId());
+        return response;
     }
 
     @Override
     @Transactional
     public void deleteConnection(String connectionId) {
         ProcessConnection connection = findActiveConnection(connectionId);
+        String workflowId = connection.getWorkflowId();
         connection.setDeletedYn(DELETED);
         processConnectionRepository.save(connection);
+        graphSyncService.broadcast(Type.CONNECTION_DELETED, workflowId, connectionId);
     }
 
     private Workflow findActiveWorkflow(String workflowId) {

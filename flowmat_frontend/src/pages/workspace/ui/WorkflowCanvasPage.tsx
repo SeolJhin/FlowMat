@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useIsMutating } from '@tanstack/react-query'
+import { useIsMutating, useQueryClient } from '@tanstack/react-query'
 import type {
   ConnectCompletePayload,
   ConnectStartPayload,
@@ -113,11 +113,24 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
     })
   }, [])
 
+  const queryClient = useQueryClient()
+
+  const handleGraphChange = useCallback(() => {
+    void queryClient.invalidateQueries({
+      queryKey: ['workflow-canvas', canvas.workflow.workflowId],
+    })
+  }, [queryClient, canvas.workflow.workflowId])
+
   const { sendPresence, clientId } = useWorkflowSync(
     canvas.workflow.workflowId,
-    () => {},  // node-move handled in CanvasViewport
-    handlePresence
+    () => {},
+    handlePresence,
+    handleGraphChange
   )
+  useEffect(() => {
+    sendPresence({ type: 'NODE_EDITING', editingProcessId: selectedProcessId ?? undefined })
+  }, [selectedProcessId, sendPresence])
+
   const workflows = workflowsQuery.data ?? []
   const [editingWorkflowName, setEditingWorkflowName] = useState(false)
   const [draftWorkflowName, setDraftWorkflowName] = useState(canvas.workflow.workflowName)

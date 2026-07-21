@@ -10,6 +10,8 @@ import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessIoUpdateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessIoResponse;
 import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
+import org.myweb.flowmat.domain.workflow.collab.GraphSyncService;
+import org.myweb.flowmat.domain.workflow.collab.dto.GraphChangeMessage.Type;
 import org.myweb.flowmat.domain.workflow.repository.ProcessIoRepository;
 import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
@@ -31,6 +33,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
 
     private final ProcessIoRepository processIoRepository;
     private final ProcessRepository processRepository;
+    private final GraphSyncService graphSyncService;
     private final ItemRepository itemRepository;
     private final IdGenerator idGenerator;
 
@@ -63,7 +66,10 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         processIo.setRequiredYn(defaultYn(request.requiredYn(), "Y"));
         processIo.setAllowShortageYn(defaultYn(request.allowShortageYn(), "N"));
         processIo.setDeletedYn(NOT_DELETED);
-        return toResponse(processIoRepository.save(processIo));
+        ProcessIoResponse response = toResponse(processIoRepository.save(processIo));
+        Process parentProcess = findActiveProcess(request.processId());
+        graphSyncService.broadcast(Type.PORT_CREATED, parentProcess.getWorkflowId(), response.processIoId());
+        return response;
     }
 
     @Override
@@ -111,15 +117,21 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         if (request.allowShortageYn() != null) {
             processIo.setAllowShortageYn(defaultYn(request.allowShortageYn(), processIo.getAllowShortageYn()));
         }
-        return toResponse(processIoRepository.save(processIo));
+        ProcessIo saved = processIoRepository.save(processIo);
+        Process parentProcess = findActiveProcess(saved.getProcessId());
+        graphSyncService.broadcast(Type.PORT_UPDATED, parentProcess.getWorkflowId(), saved.getProcessIoId());
+        return toResponse(saved);
     }
 
     @Override
     @Transactional
     public void deleteProcessIo(String processIoId) {
         ProcessIo processIo = findActiveProcessIo(processIoId);
+        Process parentProcess = findActiveProcess(processIo.getProcessId());
+        String workflowId = parentProcess.getWorkflowId();
         processIo.setDeletedYn(DELETED);
         processIoRepository.save(processIo);
+        graphSyncService.broadcast(Type.PORT_DELETED, workflowId, processIoId);
     }
 
     private Process findActiveProcess(String processId) {
