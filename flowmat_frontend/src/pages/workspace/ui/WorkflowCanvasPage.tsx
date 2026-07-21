@@ -8,6 +8,7 @@ import { useWorkspaceStore } from '../model/workspaceStore'
 import { useWorkflowCanvasActions } from '../model/useWorkflowCanvasActions'
 import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
 import { getRelatedConnectionIds } from '../../../entities/workflow/model/connectionPolicy'
+import { useAutoLayout } from '../model/useAutoLayout'
 import { CanvasViewport, PALETTE_DRAG_MIME } from './CanvasViewport'
 import { ConnectionInspector } from './ConnectionInspector'
 import { NodeInspector } from './NodeInspector'
@@ -49,6 +50,12 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     deleteNode,
     createConnection,
   } = useWorkflowCanvasActions({ canvas, clearSelection })
+
+  const { applyLayout } = useAutoLayout({
+    nodes: canvas.nodes,
+    edges: canvas.edges,
+    onUpdateNode: updateNode,
+  })
 
   const nodePicker = useCanvasInteractionStore((s) => s.nodePicker)
   const openNodePicker = useCanvasInteractionStore((s) => s.openNodePicker)
@@ -185,6 +192,22 @@ export function WorkflowCanvasPage({ canvas }: Props) {
             title={future.length > 0 ? `Redo: ${future[0].label}` : 'Nothing to redo'}
           >
             Redo
+          </button>
+          <button
+            type="button"
+            onClick={() => void applyLayout('TB')}
+            disabled={canvas.nodes.length === 0}
+            title="세로 자동 정렬 (Top → Bottom)"
+          >
+            Layout ↓
+          </button>
+          <button
+            type="button"
+            onClick={() => void applyLayout('LR')}
+            disabled={canvas.nodes.length === 0}
+            title="가로 자동 정렬 (Left → Right)"
+          >
+            Layout →
           </button>
           <button type="button" onClick={() => void addNode()}>
             Add Node
