@@ -6,6 +6,7 @@ import {
   Controls,
   MiniMap,
   useViewport,
+  getBezierPath,
   type NodeChange,
   type EdgeChange,
   type Connection,
@@ -14,6 +15,7 @@ import {
   type ReactFlowInstance,
   type Node,
   type Edge,
+  type ConnectionLineComponentProps,
   applyNodeChanges,
   applyEdgeChanges,
 } from '@xyflow/react'
@@ -96,6 +98,40 @@ function calculateSnapGuides(
   }
 
   return [bestX?.guide, bestY?.guide].filter(Boolean) as SnapGuide[]
+}
+
+function CustomConnectionLine({
+  fromX,
+  fromY,
+  toX,
+  toY,
+  fromPosition,
+  toPosition,
+  connectionStatus,
+}: ConnectionLineComponentProps) {
+  const [path] = getBezierPath({
+    sourceX: fromX,
+    sourceY: fromY,
+    sourcePosition: fromPosition,
+    targetX: toX,
+    targetY: toY,
+    targetPosition: toPosition,
+  })
+
+  const stroke =
+    connectionStatus === 'valid'
+      ? '#22c55e'
+      : connectionStatus === 'invalid'
+        ? '#ef4444'
+        : '#94a3b8'
+
+  return (
+    <path
+      d={path}
+      fill="none"
+      style={{ stroke, strokeWidth: 2, strokeDasharray: '6 3' }}
+    />
+  )
 }
 
 // Renders alignment guide lines in screen space (must be inside ReactFlow for context)
@@ -431,6 +467,7 @@ export function CanvasViewport({
         onDrop={handleDrop}
         onEdgeMouseEnter={handleEdgeMouseEnter}
         onEdgeMouseLeave={handleEdgeMouseLeave}
+        connectionLineComponent={CustomConnectionLine}
         fitView
         minZoom={0.1}
         maxZoom={2.5}
