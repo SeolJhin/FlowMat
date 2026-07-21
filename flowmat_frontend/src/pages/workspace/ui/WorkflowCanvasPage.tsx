@@ -7,6 +7,7 @@ import type {
 import { useWorkspaceStore } from '../model/workspaceStore'
 import { useWorkflowCanvasActions } from '../model/useWorkflowCanvasActions'
 import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
+import { getRelatedConnectionIds } from '../../../entities/workflow/model/connectionPolicy'
 import { CanvasViewport, PALETTE_DRAG_MIME } from './CanvasViewport'
 import { ConnectionInspector } from './ConnectionInspector'
 import { NodeInspector } from './NodeInspector'
@@ -77,7 +78,15 @@ export function WorkflowCanvasPage({ canvas }: Props) {
       if (!isEditing && (e.key === 'Delete' || e.key === 'Backspace')) {
         if (selectedProcessId) {
           e.preventDefault()
-          void deleteNode(selectedProcessId)
+          const relatedCount = getRelatedConnectionIds(canvas.edges, selectedProcessId).length
+          if (
+            relatedCount === 0 ||
+            window.confirm(
+              `이 노드를 삭제하면 연결된 연결선 ${relatedCount}개도 함께 삭제됩니다. 계속하시겠습니까?`
+            )
+          ) {
+            void deleteNode(selectedProcessId)
+          }
         } else if (selectedConnectionId) {
           e.preventDefault()
           void deleteConnection(selectedConnectionId)
