@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useIsMutating } from '@tanstack/react-query'
 import type {
   ConnectCompletePayload,
   ConnectStartPayload,
@@ -9,6 +10,9 @@ import { useWorkflowCanvasActions } from '../model/useWorkflowCanvasActions'
 import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
 import { getRelatedConnectionIds } from '../../../entities/workflow/model/connectionPolicy'
 import { useAutoLayout } from '../model/useAutoLayout'
+import { CANVAS_ACTIONS } from '../model/canvasActions'
+import { useWorkflowsQuery } from '../../../entities/workflow/api/useWorkflowsQuery'
+import { useNavigate } from 'react-router-dom'
 import { CanvasViewport, PALETTE_DRAG_MIME } from './CanvasViewport'
 import { ConnectionInspector } from './ConnectionInspector'
 import { NodeInspector } from './NodeInspector'
@@ -31,7 +35,33 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     setConnectionDraft,
     pendingRename,
     clearPendingRename,
+    inlineEditingEdgeId,
+    stopInlineEditEdge,
+    panelWidths,
   } = useWorkspaceStore()
+
+  const panelWidthRef = useRef(panelWidths)
+  panelWidthRef.current = panelWidths
+  const [localPanelWidths, setLocalPanelWidths] = useState(panelWidths)
+
+  function makeResizeHandler(side: 'left' | 'right') {
+    return (e: React.MouseEvent) => {
+      e.preventDefault()
+      const startX = e.clientX
+      const startWidth = side === 'left' ? localPanelWidths.left : localPanelWidths.right
+      function onMove(ev: MouseEvent) {
+        const delta = side === 'left' ? ev.clientX - startX : startX - ev.clientX
+        const next = Math.max(160, Math.min(400, startWidth + delta))
+        setLocalPanelWidths((w) => ({ ...w, [side]: next }))
+      }
+      function onUp() {
+        window.removeEventListener('mousemove', onMove)
+        window.removeEventListener('mouseup', onUp)
+      }
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
+    }
+  }
 
   const {
     activeTool,
@@ -55,10 +85,28 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     createConnection,
   } = useWorkflowCanvasActions({ canvas, clearSelection })
 
+  const navigate = useNavigate()
+  const workflowsQuery = useWorkflowsQuery(canvas.workflow.projectId)
+  const workflows = workflowsQuery.data ?? []
+  const isMutating = useIsMutating()
+  const [savedLabel, setSavedLabel] = useState<'saving' | 'saved' | null>(null)
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (isMutating > 0) {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+      setSavedLabel('saving')
+    } else if (savedLabel === 'saving') {
+      setSavedLabel('saved')
+      savedTimerRef.current = setTimeout(() => setSavedLabel(null), 2000)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMutating])
+
   const { applyLayout } = useAutoLayout({
     nodes: canvas.nodes,
     edges: canvas.edges,
-    onUpdateNode: updateNode,
+    onBatchUpdate: batchUpdateNodePositions,
     onFitView: () => fitViewRef.current(),
   })
 
@@ -68,6 +116,8 @@ export function WorkflowCanvasPage({ canvas }: Props) {
   const pendingDeleteNodeId = useCanvasInteractionStore((s) => s.pendingDeleteNodeId)
   const pendingDeleteEdgeId = useCanvasInteractionStore((s) => s.pendingDeleteEdgeId)
   const clearDeleteRequest = useCanvasInteractionStore((s) => s.clearDeleteRequest)
+  const pendingColorChange = useCanvasInteractionStore((s) => s.pendingColorChange)
+  const clearColorChange = useCanvasInteractionStore((s) => s.clearColorChange)
 
   const { past, future, undo, redo } = commandHistory
 
@@ -79,40 +129,35 @@ export function WorkflowCanvasPage({ canvas }: Props) {
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable
 
-      if (e.ctrlKey || e.metaKey) {
-        if (e.key === 'z' && !e.shiftKey) {
-          e.preventDefault()
-          void undo()
-        } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
-          e.preventDefault()
-          void redo()
-        }
-        return
+      const ctx = {
+        selectedProcessId,
+        selectedConnectionId,
+        isEditing,
+        deleteNodeWithConfirm,
+        deleteConnection,
+        clearSelection,
+        undo,
+        redo,
       }
 
-      if (!isEditing && (e.key === 'Delete' || e.key === 'Backspace')) {
-        if (selectedProcessId) {
+      for (const action of CANVAS_ACTIONS) {
+        if (action.keyTest(e) && action.predicate(ctx)) {
           e.preventDefault()
-          void deleteNodeWithConfirm(selectedProcessId)
-        } else if (selectedConnectionId) {
-          e.preventDefault()
-          void deleteConnection(selectedConnectionId)
+          void action.handler(ctx)
+          break
         }
-      }
-
-      if (e.key === 'Escape') {
-        clearSelection()
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo, selectedProcessId, selectedConnectionId, deleteNode, deleteConnection, clearSelection])
+  }, [undo, redo, selectedProcessId, selectedConnectionId, deleteNodeWithConfirm, deleteConnection, clearSelection])
 
   // Ref to avoid stale closure in the effect below
   const canvasRef = useRef(canvas)
   canvasRef.current = canvas
   const fitViewRef = useRef<() => void>(() => {})
+  const exportPngRef = useRef<(filename: string) => void>(() => {})
 
   useEffect(() => {
     if (pendingDeleteNodeId) {
@@ -131,6 +176,13 @@ export function WorkflowCanvasPage({ canvas }: Props) {
   }, [pendingDeleteEdgeId, clearDeleteRequest, deleteConnection])
 
   useEffect(() => {
+    if (pendingColorChange) {
+      clearColorChange()
+      void updateNode({ processId: pendingColorChange.nodeId, colorScheme: pendingColorChange.colorScheme })
+    }
+  }, [pendingColorChange, clearColorChange, updateNode])
+
+  useEffect(() => {
     if (pendingRename) {
       clearPendingRename()
       void updateNode({ processId: pendingRename.nodeId, processName: pendingRename.name })
@@ -142,6 +194,46 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     ? canvas.edges.find((edge) => edge.id === selectedConnectionId) ?? null
     : null
   const selectedPort = selectedPortId ? canvas.portMap[selectedPortId] ?? null : null
+
+  function exportJson() {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      workflow: { id: canvas.workflow.workflowId, name: canvas.workflow.workflowName },
+      nodes: canvas.nodes.map((n) => ({
+        id: n.id,
+        name: n.name,
+        nodeType: n.nodeType,
+        processType: n.processType,
+        colorScheme: n.colorScheme,
+        posX: Math.round(n.position.x),
+        posY: Math.round(n.position.y),
+        width: n.size.width,
+        height: n.size.height,
+        description: n.description,
+        inputs: n.inputs.map((p) => ({ name: p.name, ioType: p.ioType, direction: p.direction, quantity: p.quantity, unit: p.unit, colorScheme: p.colorScheme })),
+        outputs: n.outputs.map((p) => ({ name: p.name, ioType: p.ioType, direction: p.direction, quantity: p.quantity, unit: p.unit, colorScheme: p.colorScheme })),
+      })),
+      edges: canvas.edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        connectionType: e.connectionType,
+        label: e.label,
+        flowRate: e.flowRate,
+        unit: e.unit,
+        delayTimeSec: e.delayTimeSec,
+        lossRate: e.lossRate,
+        priority: e.priority,
+      })),
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${canvas.workflow.workflowName}.flowmat.json`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
 
   async function deleteNodeWithConfirm(processId: string) {
     const relatedCount = getRelatedConnectionIds(canvas.edges, processId).length
@@ -189,12 +281,35 @@ export function WorkflowCanvasPage({ canvas }: Props) {
   return (
     <div className="workspace-layout">
       <header className="workspace-topbar">
-        <div style={{ display: 'grid', gap: '4px' }}>
-          <span className="workspace-topbar__project">{canvas.workflow.workflowName}</span>
-          <span className="workspace-topbar__status">
-            {canvas.workflow.workflowStatus} | {canvas.workflow.workflowType}
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ display: 'grid', gap: '4px' }}>
+            <span className="workspace-topbar__project">{canvas.workflow.workflowName}</span>
+            <span className="workspace-topbar__status">
+              {canvas.workflow.workflowStatus} | {canvas.workflow.workflowType}
+            </span>
+          </div>
+          {workflows.length > 1 && (
+            <select
+              className="workflow-switcher"
+              value={canvas.workflow.workflowId}
+              onChange={(e) => {
+                navigate(`/projects/${canvas.workflow.projectId}/workflows/${e.target.value}`)
+              }}
+              title="워크플로우 전환"
+            >
+              {workflows.map((wf) => (
+                <option key={wf.workflowId} value={wf.workflowId}>
+                  {wf.workflowName}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
+        {savedLabel && (
+          <span className={`save-status save-status--${savedLabel}`}>
+            {savedLabel === 'saving' ? 'Saving…' : 'Saved ✓'}
+          </span>
+        )}
         <div
           style={{
             display: 'flex',
@@ -254,6 +369,22 @@ export function WorkflowCanvasPage({ canvas }: Props) {
           >
             Layout →
           </button>
+          <button
+            type="button"
+            onClick={exportJson}
+            disabled={canvas.nodes.length === 0}
+            title="JSON으로 내보내기 (백업/공유)"
+          >
+            Export JSON
+          </button>
+          <button
+            type="button"
+            onClick={() => exportPngRef.current(canvas.workflow.workflowName)}
+            disabled={canvas.nodes.length === 0}
+            title="PNG로 내보내기"
+          >
+            Export PNG
+          </button>
           <button type="button" onClick={() => void addNode()}>
             Add Node
           </button>
@@ -283,7 +414,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
       )}
 
       <div className="workspace-body">
-        <aside className="workspace-panel workspace-panel--left">
+        <aside className="workspace-panel workspace-panel--left" style={{ width: localPanelWidths.left }}>
           <div style={{ display: 'grid', gap: '10px' }}>
             <h3 style={{ margin: 0 }}>Node Palette</h3>
             <p className="panel-placeholder" style={{ margin: 0 }}>
@@ -339,6 +470,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
           </div>
         </aside>
 
+        <div className="panel-resize-handle" onMouseDown={makeResizeHandler('left')} />
         <main className="workspace-canvas">
           <CanvasViewport
             workflowId={canvas.workflow.workflowId}
@@ -357,6 +489,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
             onCanvasClick={(position) => void createNodeAt(position)}
             onNodeDrop={(tool, position) => void createNodeFromTool(tool, position)}
             onFitViewReady={(fn) => { fitViewRef.current = fn }}
+            onExportReady={(fn) => { exportPngRef.current = fn }}
             onEdgeReconnect={async (oldEdgeId, newConnection) => {
               await deleteConnection(oldEdgeId)
               await createConnection(newConnection)
@@ -384,7 +517,8 @@ export function WorkflowCanvasPage({ canvas }: Props) {
           )}
         </main>
 
-        <aside className="workspace-panel workspace-panel--right">
+        <div className="panel-resize-handle" onMouseDown={makeResizeHandler('right')} />
+        <aside className="workspace-panel workspace-panel--right" style={{ width: localPanelWidths.right }}>
           {inspectorMode === 'node' && (
             <NodeInspector
               node={selectedNode}
@@ -402,7 +536,8 @@ export function WorkflowCanvasPage({ canvas }: Props) {
             <ConnectionInspector
               edge={selectedEdge}
               rules={[]}
-              onSubmit={updateConnection}
+              onSubmit={async (input) => { stopInlineEditEdge(); await updateConnection(input) }}
+              focusLabel={inlineEditingEdgeId === selectedEdge?.id}
               onDelete={deleteConnection}
               onOpenRuleBuilder={() => {}}
             />

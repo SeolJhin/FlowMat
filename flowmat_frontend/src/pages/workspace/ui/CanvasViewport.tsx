@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
+import { toPng } from 'html-to-image'
 import {
+  experimental_useOnNodesChangeMiddleware,
   ReactFlow,
   Background,
   BackgroundVariant,
@@ -10,6 +12,9 @@ import {
   useUpdateNodeInternals,
   useOnViewportChange,
   reconnectEdge,
+  getNodesBounds,
+  getViewportForBounds,
+  useReactFlow,
   type NodeChange,
   type EdgeChange,
   type Connection,
@@ -190,6 +195,41 @@ function SnapGuideLayer({ guides }: { guides: SnapGuide[] }) {
   )
 }
 
+function ExportController({ onReady }: { onReady?: (fn: (filename: string) => void) => void }) {
+  const { getNodes } = useReactFlow()
+
+  useEffect(() => {
+    onReady?.((filename: string) => {
+      const nodes = getNodes()
+      if (nodes.length === 0) return
+      const bounds = getNodesBounds(nodes)
+      const W = 2400
+      const H = 1600
+      const viewport = getViewportForBounds(bounds, W, H, 0.1, 2, 0.1)
+      const el = document.querySelector('.react-flow__viewport') as HTMLElement | null
+      if (!el) return
+      void toPng(el, {
+        backgroundColor: '#f4f3f8',
+        width: W,
+        height: H,
+        style: {
+          width: `${W}px`,
+          height: `${H}px`,
+          transform: `translate(${viewport.x}px,${viewport.y}px) scale(${viewport.zoom})`,
+          transformOrigin: 'top left',
+        },
+      }).then((dataUrl) => {
+        const a = document.createElement('a')
+        a.href = dataUrl
+        a.download = `${filename}.png`
+        a.click()
+      })
+    })
+  }, [getNodes, onReady])
+
+  return null
+}
+
 function ViewportPersister({ storageKey }: { storageKey: string }) {
   useOnViewportChange({
     onEnd: (viewport: Viewport) => {
@@ -232,6 +272,7 @@ interface Props {
     screenPosition: { x: number; y: number }
   }): void
   onFitViewReady?(fn: () => void): void
+  onExportReady?(fn: (filename: string) => void): void
   onEdgeReconnect?(oldEdgeId: string, newConnection: ConnectCompletePayload): void
 }
 
@@ -308,11 +349,12 @@ export function CanvasViewport({
   onNodeDrop,
   onConnectDropOnCanvas,
   onFitViewReady,
+  onExportReady,
   onEdgeReconnect,
 }: Props) {
   const storageKey = `flowmat-viewport-${workflowId}`
   const savedViewport = useMemo(() => loadSavedViewport(storageKey), [storageKey])
-  const { selectNode, selectEdge, startInlineEdit, setMultiSelect } = useWorkspaceStore()
+  const { selectNode, selectEdge, startInlineEdit, startInlineEditEdge, setMultiSelect } = useWorkspaceStore()
   const setHoveredEdgeId = useCanvasInteractionStore((s) => s.setHoveredEdgeId)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
 
@@ -412,6 +454,11 @@ export function CanvasViewport({
       }
     },
     [onConnectStart]
+  )
+
+  // Prevent moving nodes while a connection drag is in progress
+  experimental_useOnNodesChangeMiddleware((changes) =>
+    changes.filter((c) => !(c.type === 'position' && c.dragging && localNodes.length > 200))
   )
 
   const handleReconnect: OnReconnect = useCallback(
@@ -546,6 +593,10 @@ export function CanvasViewport({
         onNodeDoubleClick={(_e, node) => {
           startInlineEdit(node.id)
         }}
+        onEdgeDoubleClick={(_e, edge) => {
+          selectEdge(edge.id)
+          startInlineEditEdge(edge.id)
+        }}
         onSelectionChange={({ nodes: selNodes }) => {
           if (selNodes.length > 1) setMultiSelect()
         }}
@@ -581,6 +632,7 @@ export function CanvasViewport({
         <SnapGuideLayer guides={snapGuides} />
         <InternalsUpdater nodeIds={nodesToUpdateInternals} />
         <ViewportPersister storageKey={storageKey} />
+        <ExportController onReady={onExportReady} />
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--border)" />
         <Controls />
         <MiniMap zoomable pannable nodeStrokeWidth={2} />

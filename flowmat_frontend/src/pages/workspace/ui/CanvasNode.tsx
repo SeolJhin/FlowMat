@@ -98,8 +98,13 @@ interface CanvasNodeComponentProps extends NodeProps {
 }
 
 export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
-  const { inlineEditingNodeId, selectPort, stopInlineEdit, commitRename } = useWorkspaceStore()
+  const {
+    inlineEditingNodeId, selectPort, stopInlineEdit, commitRename,
+    activeColorPickerNodeId, openColorPicker, closeColorPicker,
+  } = useWorkspaceStore()
   const requestDeleteNode = useCanvasInteractionStore((s) => s.requestDeleteNode)
+  const requestColorChange = useCanvasInteractionStore((s) => s.requestColorChange)
+  const isColorPickerOpen = activeColorPickerNodeId === node.id
   const editing = inlineEditingNodeId === node.id
   const [draftName, setDraftName] = useState(node.name)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -116,17 +121,41 @@ export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
       style={getWorkflowNodeStyle(node.nodeType) as CSSProperties}
     >
       <NodeToolbar isVisible={selected} position={Position.Top} offset={6} align="end">
-        <button
-          type="button"
-          className="node-toolbar__btn node-toolbar__btn--delete nodrag nopan"
-          title="노드 삭제 (Delete)"
-          onClick={(e) => {
-            e.stopPropagation()
-            requestDeleteNode(node.id)
-          }}
-        >
-          ×
-        </button>
+        <div style={{ display: 'flex', gap: '4px', alignItems: 'center', position: 'relative' }}>
+          <button
+            type="button"
+            className="node-toolbar__btn nodrag nopan"
+            title="색상 변경"
+            onClick={(e) => { e.stopPropagation(); isColorPickerOpen ? closeColorPicker() : openColorPicker(node.id) }}
+            style={{ background: resolveColor(node.colorScheme), border: '2px solid white' }}
+          />
+          {isColorPickerOpen && (
+            <div className="color-picker-popup nodrag nopan">
+              {Object.entries(COLOR_MAP).map(([scheme, hex]) => (
+                <button
+                  key={scheme}
+                  type="button"
+                  className="color-picker-popup__chip"
+                  style={{ background: hex, outline: node.colorScheme === scheme ? '2px solid var(--accent)' : 'none' }}
+                  title={scheme}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    closeColorPicker()
+                    requestColorChange(node.id, scheme)
+                  }}
+                />
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            className="node-toolbar__btn node-toolbar__btn--delete nodrag nopan"
+            title="노드 삭제 (Delete)"
+            onClick={(e) => { e.stopPropagation(); requestDeleteNode(node.id) }}
+          >
+            ×
+          </button>
+        </div>
       </NodeToolbar>
       <NodeResizer
         isVisible={selected}

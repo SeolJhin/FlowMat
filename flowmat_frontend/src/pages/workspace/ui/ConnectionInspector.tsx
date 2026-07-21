@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type {
   CanvasEdgeViewModel,
   FlowRuleViewModel,
@@ -12,6 +12,7 @@ interface Props {
   onSubmit(input: UpdateProcessConnectionInput): Promise<void>
   onDelete(connectionId: string): Promise<void>
   onOpenRuleBuilder(target: RuleTargetInput): void
+  focusLabel?: boolean
 }
 
 const CONNECTION_TYPE_OPTIONS = [
@@ -19,7 +20,8 @@ const CONNECTION_TYPE_OPTIONS = [
   'data_flow', 'event_flow', 'control_flow', 'human_flow', 'equipment_flow',
 ]
 
-export function ConnectionInspector({ edge, onSubmit, onDelete }: Props) {
+export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Props) {
+  const labelRef = useRef<HTMLInputElement>(null)
   const [label, setLabel] = useState('')
   const [connectionType, setConnectionType] = useState('material')
   const [flowRate, setFlowRate] = useState('')
@@ -27,6 +29,10 @@ export function ConnectionInspector({ edge, onSubmit, onDelete }: Props) {
   const [delayTimeSec, setDelayTimeSec] = useState('')
   const [lossRate, setLossRate] = useState('')
   const [priority, setPriority] = useState('')
+
+  useEffect(() => {
+    if (focusLabel) setTimeout(() => labelRef.current?.focus(), 50)
+  }, [focusLabel, edge?.id])
 
   useEffect(() => {
     if (!edge) return
@@ -68,7 +74,7 @@ export function ConnectionInspector({ edge, onSubmit, onDelete }: Props) {
       <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '10px', marginTop: '16px' }}>
         <label style={{ display: 'grid', gap: '4px' }}>
           <span>Label</span>
-          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="(none)" />
+          <input ref={labelRef} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="(none)" />
         </label>
 
         <label style={{ display: 'grid', gap: '4px' }}>

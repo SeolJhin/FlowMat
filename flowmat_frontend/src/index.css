@@ -185,13 +185,23 @@ code {
 }
 
 .workspace-panel--left {
-  width: 220px;
-  border-right: 1px solid var(--border);
+  border-right: none;
 }
 
 .workspace-panel--right {
-  width: 296px;
-  border-left: 1px solid var(--border);
+  border-left: none;
+}
+
+.panel-resize-handle {
+  width: 4px;
+  flex-shrink: 0;
+  background: var(--border);
+  cursor: col-resize;
+  transition: background 0.15s;
+}
+
+.panel-resize-handle:hover {
+  background: var(--accent);
 }
 
 .workspace-canvas {
@@ -529,6 +539,36 @@ code {
 }
 
 /* ============================================================
+   Save status indicator
+   ============================================================ */
+.save-status {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 10px;
+  transition: opacity 0.3s;
+}
+
+.save-status--saving {
+  color: var(--text);
+  opacity: 0.6;
+}
+
+.save-status--saved {
+  color: #16a34a;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .save-status--saved {
+    color: #4ade80;
+    background: #052e16;
+    border-color: #166534;
+  }
+}
+
+/* ============================================================
    Node inline name editor
    ============================================================ */
 .canvas-node__name-input {
@@ -544,6 +584,39 @@ code {
   outline: none;
   min-width: 0;
   line-height: 1.4;
+}
+
+/* ============================================================
+   Color picker popup
+   ============================================================ */
+.color-picker-popup {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  width: 108px;
+  z-index: 100;
+}
+
+.color-picker-popup__chip {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid white;
+  cursor: pointer;
+  transition: transform 0.1s;
+  padding: 0;
+}
+
+.color-picker-popup__chip:hover {
+  transform: scale(1.2);
 }
 
 /* ============================================================
@@ -628,6 +701,18 @@ code {
   cursor: pointer;
   height: 30px;
   white-space: nowrap;
+}
+
+.workflow-switcher {
+  font-size: 12px;
+  font-family: var(--sans);
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-h);
+  cursor: pointer;
+  max-width: 180px;
 }
 
 .workspace-topbar button:disabled {
