@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useCreateProcessConnectionMutation } from '../../../entities/workflow/api/useCreateProcessConnectionMutation'
 import { useCreateProcessIoMutation } from '../../../entities/workflow/api/useCreateProcessIoMutation'
 import { useCreateProcessMutation } from '../../../entities/workflow/api/useCreateProcessMutation'
@@ -51,6 +51,7 @@ export function useWorkflowCanvasActions({
 
   const [workspaceMessage, setWorkspaceMessage] = useState<string | null>(null)
   const [activeTool, setActiveTool] = useState<WorkflowPaletteTool>('process')
+  const positionTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
 
   const paletteDefinitions = getWorkflowPaletteDefinitions()
   const defaultDefinition = getWorkflowDefaultNodeDefinition()
@@ -361,11 +362,46 @@ export function useWorkflowCanvasActions({
     }
   }
 
-  async function saveNodePosition(processId: string, x: number, y: number) {
-    await updateNode({
-      processId,
-      posX: Math.round(x),
-      posY: Math.round(y),
+  function saveNodePosition(processId: string, x: number, y: number) {
+    const existing = positionTimers.current.get(processId)
+    if (existing) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      positionTimers.current.delete(processId)
+      void updateNode({ processId, posX: Math.round(x), posY: Math.round(y) })
+    }, 200)
+    positionTimers.current.set(processId, timer)
+  }
+
+  async function batchUpdateNodePositions(
+    positions: Array<{ processId: string; posX: number; posY: number }>
+  ) {
+    if (positions.length === 0) return
+    setWorkspaceMessage(null)
+
+    const oldPositions = positions.flatMap(({ processId }) => {
+      const node = canvas.nodeMap[processId]
+      return node
+        ? [{ processId, posX: Math.round(node.position.x), posY: Math.round(node.position.y) }]
+        : []
+    })
+
+    try {
+      await Promise.all(
+        positions.map((p) => updateProcessMutation.mutateAsync(p))
+      )
+    } catch (error) {
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to apply layout.')
+      return
+    }
+
+    commandHistory.push({
+      label: 'Auto layout',
+      undo: async () => {
+        await Promise.all(oldPositions.map((p) => updateProcessMutation.mutateAsync(p)))
+      },
+      redo: async () => {
+        await Promise.all(positions.map((p) => updateProcessMutation.mutateAsync(p)))
+      },
     })
   }
 
@@ -490,6 +526,7 @@ export function useWorkflowCanvasActions({
     updatePort,
     deletePort,
     saveNodePosition,
+    batchUpdateNodePositions,
     updateConnection,
     deleteConnection,
     deleteNode,
