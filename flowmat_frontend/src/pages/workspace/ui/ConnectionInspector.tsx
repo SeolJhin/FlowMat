@@ -51,7 +51,7 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
     event.preventDefault()
     await onSubmit({
       connectionId: edge!.id,
-      connectionLabel: label.trim() || null,
+      connectionLabel: label.trim() || undefined,
       connectionType: connectionType.trim(),
       flowRate: flowRate !== '' ? Number(flowRate) : null,
       unit: unit.trim() || null,

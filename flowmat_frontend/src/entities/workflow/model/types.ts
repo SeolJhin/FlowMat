@@ -110,7 +110,7 @@ export interface UpdateProcessIoInput extends Partial<Omit<CreateProcessIoInput,
 
 export interface UpdateProcessConnectionInput {
   connectionId: string
-  connectionLabel?: string
+  connectionLabel?: string | null
   connectionType?: string
   flowRate?: number | null
   unit?: string | null

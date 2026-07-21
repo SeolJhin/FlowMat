@@ -20,6 +20,7 @@ import {
   type Connection,
   type OnConnectStart,
   type OnConnectEnd,
+  type OnNodeDrag,
   type OnReconnect,
   type ReactFlowInstance,
   type Node,
@@ -200,9 +201,9 @@ function ExportController({ onReady }: { onReady?: (fn: (filename: string) => vo
 
   useEffect(() => {
     onReady?.((filename: string) => {
-      const nodes = getNodes()
+      const nodes = getNodes() as unknown as RfNode[]
       if (nodes.length === 0) return
-      const bounds = getNodesBounds(nodes)
+      const bounds = getNodesBounds(nodes as unknown as Node[])
       const W = 2400
       const H = 1600
       const viewport = getViewportForBounds(bounds, W, H, 0.1, 2, 0.1)
@@ -405,7 +406,7 @@ export function CanvasViewport({
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       setLocalNodes((nds) => {
-        const updated = applyNodeChanges(changes, nds) as RfNode[]
+        const updated = applyNodeChanges(changes, nds as unknown as Node[]) as unknown as RfNode[]
         localNodesRef.current = updated
         return updated
       })
@@ -423,10 +424,10 @@ export function CanvasViewport({
   )
 
   const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
-    setLocalEdges((eds) => applyEdgeChanges(changes, eds) as RfEdge[])
+    setLocalEdges((eds) => applyEdgeChanges(changes, eds as unknown as Edge[]) as unknown as RfEdge[])
   }, [])
 
-  const handleNodeDrag = useCallback((_event: MouseEvent, node: Node) => {
+  const handleNodeDrag = useCallback((_event: unknown, node: Node) => {
     const current = localNodesRef.current
     const dragging = current.find((n) => n.id === node.id)
     if (!dragging) return
@@ -463,7 +464,7 @@ export function CanvasViewport({
 
   const handleReconnect: OnReconnect = useCallback(
     (oldEdge, newConnection) => {
-      setLocalEdges((eds) => reconnectEdge(oldEdge, newConnection, eds) as RfEdge[])
+      setLocalEdges((eds) => reconnectEdge(oldEdge, newConnection, eds as unknown as Edge[]) as unknown as RfEdge[])
       if (onEdgeReconnect && newConnection.source && newConnection.target) {
         onEdgeReconnect(oldEdge.id, {
           fromProcessId: newConnection.source,
@@ -479,14 +480,16 @@ export function CanvasViewport({
   )
 
   const handleIsValidConnection = useCallback(
-    (connection: Connection) => {
+    (connection: Connection | Edge) => {
       if (connection.source === connection.target) return false
+      const sh = 'sourceHandle' in connection ? (connection.sourceHandle ?? null) : null
+      const th = 'targetHandle' in connection ? (connection.targetHandle ?? null) : null
       return !localEdges.some(
         (e) =>
           e.source === connection.source &&
           e.target === connection.target &&
-          e.sourceHandle === connection.sourceHandle &&
-          e.targetHandle === connection.targetHandle
+          e.sourceHandle === sh &&
+          e.targetHandle === th
       )
     },
     [localEdges]
@@ -580,8 +583,8 @@ export function CanvasViewport({
     <div style={{ width: '100%', height: '100%', cursor: drawingEnabled ? 'crosshair' : 'default' }}>
       <ReactFlow
         onInit={setReactFlowInstance}
-        nodes={localNodes}
-        edges={localEdges}
+        nodes={localNodes as unknown as Node[]}
+        edges={localEdges as unknown as Edge[]}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={handleNodesChange}
@@ -604,7 +607,7 @@ export function CanvasViewport({
           selectEdge(edge.id)
           onEdgeSelect(edge.id)
         }}
-        onNodeDrag={handleNodeDrag}
+        onNodeDrag={handleNodeDrag as OnNodeDrag}
         onNodeDragStop={handleNodeDragStop}
         onConnectStart={handleConnectStart}
         onConnect={handleConnect}

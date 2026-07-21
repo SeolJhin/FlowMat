@@ -4,14 +4,13 @@ import {
   getBezierPath,
   getSmoothStepPath,
   getStraightPath,
-  MarkerType,
   Position,
   type EdgeProps,
 } from '@xyflow/react'
 import type { CanvasEdgeViewModel } from '../../../entities/workflow/model/types'
 import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
 
-interface CanvasEdgeComponentProps extends EdgeProps {
+type CanvasEdgeComponentProps = Omit<EdgeProps, 'data'> & {
   data: CanvasEdgeViewModel
 }
 
@@ -37,7 +36,8 @@ function resolveEdgePath(
   const { sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition } = params
 
   if (connectionType === 'control_flow' || connectionType === 'energy_flow') {
-    return getStraightPath({ sourceX, sourceY, targetX, targetY })
+    const [path, lx, ly] = getStraightPath({ sourceX, sourceY, targetX, targetY })
+    return [path, lx, ly]
   }
 
   if (
@@ -47,15 +47,16 @@ function resolveEdgePath(
     connectionType === 'human_flow' ||
     connectionType === 'equipment_flow'
   ) {
-    return getSmoothStepPath({
+    const [path, lx, ly] = getSmoothStepPath({
       sourceX, sourceY, sourcePosition,
       targetX, targetY, targetPosition,
       borderRadius: 8,
     })
+    return [path, lx, ly]
   }
 
-  // data_flow, event_flow, and unknown types → bezier curve
-  return getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
+  const [path, lx, ly] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
+  return [path, lx, ly]
 }
 
 export function CanvasEdge({
@@ -78,19 +79,28 @@ export function CanvasEdge({
   const openNodePicker = useCanvasInteractionStore((s) => s.openNodePicker)
   const requestDeleteEdge = useCanvasInteractionStore((s) => s.requestDeleteEdge)
 
+  const arrowColor = selected ? '#6366f1' : typeStyle.stroke
+
   return (
     <>
+      <defs>
+        <marker
+          id={`${id}-arrow`}
+          markerWidth="16"
+          markerHeight="16"
+          refX="8"
+          refY="4"
+          orient="auto"
+        >
+          <path d="M0,0 L0,8 L8,4 z" fill={arrowColor} />
+        </marker>
+      </defs>
       <BaseEdge
         id={id}
         path={edgePath}
-        markerEnd={{
-          type: MarkerType.ArrowClosed,
-          color: selected ? '#6366f1' : typeStyle.stroke,
-          width: 16,
-          height: 16,
-        }}
+        markerEnd={`url(#${id}-arrow)`}
         style={{
-          stroke: selected ? '#6366f1' : typeStyle.stroke,
+          stroke: arrowColor,
           strokeWidth: selected ? 2.5 : 1.5,
           strokeDasharray: selected ? undefined : typeStyle.strokeDasharray,
         }}

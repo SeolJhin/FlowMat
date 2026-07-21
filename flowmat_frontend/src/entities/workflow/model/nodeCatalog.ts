@@ -21,6 +21,8 @@ export interface WorkflowNodeDefinition {
   height: number
   shapeKind: WorkflowShapeKind
   aliases?: string[]
+  defaultConnectionType: string
+  isTerminal: boolean
 }
 
 const WORKFLOW_NODE_DEFINITIONS: WorkflowNodeDefinition[] = [
@@ -34,6 +36,8 @@ const WORKFLOW_NODE_DEFINITIONS: WorkflowNodeDefinition[] = [
     width: 180,
     height: 88,
     shapeKind: 'block',
+    defaultConnectionType: 'material_flow',
+    isTerminal: false,
   },
   {
     tool: 'equipment',
@@ -45,6 +49,8 @@ const WORKFLOW_NODE_DEFINITIONS: WorkflowNodeDefinition[] = [
     width: 200,
     height: 96,
     shapeKind: 'block',
+    defaultConnectionType: 'equipment_flow',
+    isTerminal: false,
   },
   {
     tool: 'storage',
@@ -56,6 +62,8 @@ const WORKFLOW_NODE_DEFINITIONS: WorkflowNodeDefinition[] = [
     width: 188,
     height: 88,
     shapeKind: 'pill',
+    defaultConnectionType: 'material_flow',
+    isTerminal: false,
   },
   {
     tool: 'input',
@@ -67,6 +75,8 @@ const WORKFLOW_NODE_DEFINITIONS: WorkflowNodeDefinition[] = [
     width: 168,
     height: 88,
     shapeKind: 'circle',
+    defaultConnectionType: 'material_flow',
+    isTerminal: true,
   },
   {
     tool: 'output',
@@ -79,6 +89,8 @@ const WORKFLOW_NODE_DEFINITIONS: WorkflowNodeDefinition[] = [
     height: 88,
     shapeKind: 'pill',
     aliases: ['decision'],
+    defaultConnectionType: 'material_flow',
+    isTerminal: true,
   },
 ]
 
@@ -100,6 +112,10 @@ export function getWorkflowDefaultNodeDefinition() {
 export function getWorkflowNodeDefinition(nodeType: string | null | undefined) {
   if (!nodeType) return getWorkflowDefaultNodeDefinition()
   return definitionMap.get(nodeType.trim().toLowerCase()) ?? getWorkflowDefaultNodeDefinition()
+}
+
+export function getDefaultConnectionType(fromNodeType: string | null | undefined): string {
+  return getWorkflowNodeDefinition(fromNodeType).defaultConnectionType
 }
 
 export function getWorkflowNodeStyle(nodeType: string | null | undefined): CSSProperties {

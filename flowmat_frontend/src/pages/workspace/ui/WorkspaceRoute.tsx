@@ -11,12 +11,7 @@ export function WorkspaceRoute() {
   }
 
   if (isError || !canvas) {
-    const msg =
-      error instanceof Error
-        ? error.message
-        : typeof error === 'object' && error !== null && 'message' in error
-          ? String(error.message)
-          : 'Failed to load canvas.'
+    const msg = error instanceof Error ? error.message : 'Failed to load canvas.'
     return <div className="workspace-error">{msg}</div>
   }
 

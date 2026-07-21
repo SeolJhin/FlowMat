@@ -79,6 +79,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     updatePort,
     deletePort,
     saveNodePosition,
+    batchUpdateNodePositions,
     updateConnection,
     deleteConnection,
     deleteNode,

@@ -93,7 +93,7 @@ function OutputPortRow({ port, onSelect }: PortRowProps) {
   )
 }
 
-interface CanvasNodeComponentProps extends NodeProps {
+type CanvasNodeComponentProps = Omit<NodeProps, 'data'> & {
   data: CanvasNodeViewModel
 }
 

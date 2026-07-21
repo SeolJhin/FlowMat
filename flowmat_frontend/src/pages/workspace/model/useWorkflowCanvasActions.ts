@@ -495,7 +495,7 @@ export function useWorkflowCanvasActions({
   async function createConnection(payload: ConnectCompletePayload) {
     setWorkspaceMessage(null)
 
-    const connectionInput = buildDefaultConnectionPayload(canvas.workflow.workflowId, payload)
+    const connectionInput = buildDefaultConnectionPayload(canvas.workflow.workflowId, payload, canvas)
     try {
       const created = await createConnectionMutation.mutateAsync(connectionInput)
       let currentConnectionId = created.connectionId
