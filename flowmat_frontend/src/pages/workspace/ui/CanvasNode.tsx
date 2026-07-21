@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
+import { Handle, NodeResizer, Position, useConnection, type NodeProps } from '@xyflow/react'
 import type { CanvasNodeViewModel, CanvasPortViewModel } from '../../../entities/workflow/model/types'
 import {
   getWorkflowNodeDefinition,
@@ -28,13 +28,24 @@ interface PortRowProps {
 }
 
 function InputPortRow({ port, onSelect }: PortRowProps) {
+  const connection = useConnection()
+  const isConnecting = connection.inProgress
+  const isTargeted =
+    isConnecting &&
+    connection.toHandle?.nodeId === port.processId &&
+    connection.toHandle?.id === port.handleId
+
   return (
     <div className="canvas-node__port canvas-node__port--input">
       <Handle
         type="target"
         position={Position.Left}
         id={port.handleId}
-        style={{ background: resolveColor(port.colorScheme) }}
+        style={{
+          background: isTargeted ? '#22c55e' : resolveColor(port.colorScheme),
+          boxShadow: isTargeted ? '0 0 0 3px #bbf7d0' : undefined,
+          transition: 'background 0.15s, box-shadow 0.15s',
+        }}
         onClick={() => onSelect(port.processIoId)}
       />
       <span className="canvas-node__port-name">{port.name}</span>
@@ -43,6 +54,12 @@ function InputPortRow({ port, onSelect }: PortRowProps) {
 }
 
 function OutputPortRow({ port, onSelect }: PortRowProps) {
+  const connection = useConnection()
+  const isSource =
+    connection.inProgress &&
+    connection.fromNode?.id === port.processId &&
+    connection.fromHandle?.id === port.handleId
+
   return (
     <div className="canvas-node__port canvas-node__port--output">
       <span className="canvas-node__port-name">{port.name}</span>
@@ -50,7 +67,11 @@ function OutputPortRow({ port, onSelect }: PortRowProps) {
         type="source"
         position={Position.Right}
         id={port.handleId}
-        style={{ background: resolveColor(port.colorScheme) }}
+        style={{
+          background: isSource ? '#6366f1' : resolveColor(port.colorScheme),
+          boxShadow: isSource ? '0 0 0 3px #c7d2fe' : undefined,
+          transition: 'background 0.15s, box-shadow 0.15s',
+        }}
         onClick={() => onSelect(port.processIoId)}
       />
     </div>
