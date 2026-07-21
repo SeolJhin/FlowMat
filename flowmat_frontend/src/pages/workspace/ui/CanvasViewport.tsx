@@ -7,6 +7,7 @@ import {
   MiniMap,
   useViewport,
   getBezierPath,
+  useUpdateNodeInternals,
   type NodeChange,
   type EdgeChange,
   type Connection,
@@ -185,6 +186,15 @@ function SnapGuideLayer({ guides }: { guides: SnapGuide[] }) {
   )
 }
 
+/** Calls updateNodeInternals for nodes whose handle count changed. Must be inside ReactFlow. */
+function InternalsUpdater({ nodeIds }: { nodeIds: string[] }) {
+  const updateNodeInternals = useUpdateNodeInternals()
+  useEffect(() => {
+    if (nodeIds.length > 0) updateNodeInternals(nodeIds)
+  }, [nodeIds, updateNodeInternals])
+  return null
+}
+
 interface Props {
   nodes: CanvasNodeViewModel[]
   edges: CanvasEdgeViewModel[]
@@ -275,14 +285,26 @@ export function CanvasViewport({
   const setHoveredEdgeId = useCanvasInteractionStore((s) => s.setHoveredEdgeId)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([])
+  const [nodesToUpdateInternals, setNodesToUpdateInternals] = useState<string[]>([])
 
   const [localNodes, setLocalNodes] = useState<RfNode[]>(() => toRfNodes(nodes, selectedNodeId))
   const [localEdges, setLocalEdges] = useState<RfEdge[]>(() => toRfEdges(edges, selectedEdgeId))
 
   // Keep a ref so snap calculation always reads the latest positions without deps churn
   const localNodesRef = useRef<RfNode[]>(localNodes)
+  // Track I/O counts per node to detect handle additions/removals
+  const ioCountRef = useRef<Map<string, number>>(new Map())
 
   useEffect(() => {
+    const changed: string[] = []
+    for (const node of nodes) {
+      const ioCount = node.inputs.length + node.outputs.length
+      const prev = ioCountRef.current.get(node.id)
+      if (prev !== undefined && prev !== ioCount) changed.push(node.id)
+      ioCountRef.current.set(node.id, ioCount)
+    }
+    if (changed.length > 0) setNodesToUpdateInternals(changed)
+
     setLocalNodes((prev) => {
       const next = toRfNodes(nodes, selectedNodeId)
       const updated = next.map((n) => {
@@ -476,6 +498,7 @@ export function CanvasViewport({
         deleteKeyCode={null}
       >
         <SnapGuideLayer guides={snapGuides} />
+        <InternalsUpdater nodeIds={nodesToUpdateInternals} />
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--border)" />
         <Controls />
         <MiniMap zoomable pannable nodeStrokeWidth={2} />
