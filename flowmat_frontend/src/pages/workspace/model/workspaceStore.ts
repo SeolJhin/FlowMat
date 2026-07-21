@@ -8,6 +8,7 @@ interface WorkspaceState {
   inspectorMode: 'none' | 'node' | 'connection' | 'multi'
   canvasMode: CanvasMode
   pendingConnectionDraft: ConnectionDraftState | null
+  pendingRename: { nodeId: string; name: string } | null
   isRuleDrawerOpen: boolean
   isTemplateDrawerOpen: boolean
   activeColorPickerNodeId: string | null
@@ -25,6 +26,9 @@ interface WorkspaceState {
   closeRuleDrawer(): void
   startInlineEdit(nodeId: string): void
   stopInlineEdit(): void
+  commitRename(nodeId: string, name: string): void
+  clearPendingRename(): void
+  setMultiSelect(): void
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set) => ({
@@ -34,6 +38,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   inspectorMode: 'none',
   canvasMode: 'select',
   pendingConnectionDraft: null,
+  pendingRename: null,
   isRuleDrawerOpen: false,
   isTemplateDrawerOpen: false,
   activeColorPickerNodeId: null,
@@ -67,6 +72,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       inspectorMode: 'none',
     }),
 
+  setMultiSelect: () =>
+    set({
+      selectedProcessId: null,
+      selectedConnectionId: null,
+      inspectorMode: 'multi',
+    }),
+
   setCanvasMode: (mode) => set({ canvasMode: mode }),
 
   setConnectionDraft: (draft) => set({ pendingConnectionDraft: draft }),
@@ -76,6 +88,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   closeRuleDrawer: () => set({ isRuleDrawerOpen: false }),
 
   startInlineEdit: (nodeId) => set({ inlineEditingNodeId: nodeId }),
-
   stopInlineEdit: () => set({ inlineEditingNodeId: null }),
+  commitRename: (nodeId, name) => set({ inlineEditingNodeId: null, pendingRename: { nodeId, name } }),
+  clearPendingRename: () => set({ pendingRename: null }),
 }))

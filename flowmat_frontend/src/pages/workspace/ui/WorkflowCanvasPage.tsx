@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import type {
   ConnectCompletePayload,
   ConnectStartPayload,
@@ -28,6 +28,9 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     selectNode,
     selectEdge,
     clearSelection,
+    setConnectionDraft,
+    pendingRename,
+    clearPendingRename,
   } = useWorkspaceStore()
 
   const {
@@ -46,6 +49,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     updatePort,
     deletePort,
     saveNodePosition,
+    updateConnection,
     deleteConnection,
     deleteNode,
     createConnection,
@@ -55,11 +59,15 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     nodes: canvas.nodes,
     edges: canvas.edges,
     onUpdateNode: updateNode,
+    onFitView: () => fitViewRef.current(),
   })
 
   const nodePicker = useCanvasInteractionStore((s) => s.nodePicker)
   const openNodePicker = useCanvasInteractionStore((s) => s.openNodePicker)
   const closeNodePicker = useCanvasInteractionStore((s) => s.closeNodePicker)
+  const pendingDeleteNodeId = useCanvasInteractionStore((s) => s.pendingDeleteNodeId)
+  const pendingDeleteEdgeId = useCanvasInteractionStore((s) => s.pendingDeleteEdgeId)
+  const clearDeleteRequest = useCanvasInteractionStore((s) => s.clearDeleteRequest)
 
   const { past, future, undo, redo } = commandHistory
 
@@ -85,15 +93,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
       if (!isEditing && (e.key === 'Delete' || e.key === 'Backspace')) {
         if (selectedProcessId) {
           e.preventDefault()
-          const relatedCount = getRelatedConnectionIds(canvas.edges, selectedProcessId).length
-          if (
-            relatedCount === 0 ||
-            window.confirm(
-              `이 노드를 삭제하면 연결된 연결선 ${relatedCount}개도 함께 삭제됩니다. 계속하시겠습니까?`
-            )
-          ) {
-            void deleteNode(selectedProcessId)
-          }
+          void deleteNodeWithConfirm(selectedProcessId)
         } else if (selectedConnectionId) {
           e.preventDefault()
           void deleteConnection(selectedConnectionId)
@@ -109,11 +109,51 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [undo, redo, selectedProcessId, selectedConnectionId, deleteNode, deleteConnection, clearSelection])
 
+  // Ref to avoid stale closure in the effect below
+  const canvasRef = useRef(canvas)
+  canvasRef.current = canvas
+  const fitViewRef = useRef<() => void>(() => {})
+
+  useEffect(() => {
+    if (pendingDeleteNodeId) {
+      clearDeleteRequest()
+      void deleteNodeWithConfirm(pendingDeleteNodeId)
+    }
+  // deleteNodeWithConfirm captures canvas via canvasRef so no dep needed
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingDeleteNodeId, clearDeleteRequest])
+
+  useEffect(() => {
+    if (pendingDeleteEdgeId) {
+      clearDeleteRequest()
+      void deleteConnection(pendingDeleteEdgeId)
+    }
+  }, [pendingDeleteEdgeId, clearDeleteRequest, deleteConnection])
+
+  useEffect(() => {
+    if (pendingRename) {
+      clearPendingRename()
+      void updateNode({ processId: pendingRename.nodeId, processName: pendingRename.name })
+    }
+  }, [pendingRename, clearPendingRename, updateNode])
+
   const selectedNode = selectedProcessId ? canvas.nodeMap[selectedProcessId] ?? null : null
   const selectedEdge = selectedConnectionId
     ? canvas.edges.find((edge) => edge.id === selectedConnectionId) ?? null
     : null
   const selectedPort = selectedPortId ? canvas.portMap[selectedPortId] ?? null : null
+
+  async function deleteNodeWithConfirm(processId: string) {
+    const relatedCount = getRelatedConnectionIds(canvas.edges, processId).length
+    if (
+      relatedCount === 0 ||
+      window.confirm(
+        `이 노드를 삭제하면 연결된 연결선 ${relatedCount}개도 함께 삭제됩니다. 계속하시겠습니까?`
+      )
+    ) {
+      await deleteNode(processId)
+    }
+  }
 
   async function handleNodeDragEnd(processId: string, x: number, y: number) {
     await saveNodePosition(processId, x, y)
@@ -124,10 +164,15 @@ export function WorkflowCanvasPage({ canvas }: Props) {
   }
 
   function handleConnectStart(payload: ConnectStartPayload) {
-    console.log('connect start', payload)
+    setConnectionDraft({
+      fromProcessId: payload.processId,
+      fromIoId: payload.ioId,
+      sourceHandle: payload.handleId,
+    })
   }
 
   async function handleConnectComplete(payload: ConnectCompletePayload) {
+    setConnectionDraft(null)
     await createConnection(payload)
   }
 
@@ -296,6 +341,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
 
         <main className="workspace-canvas">
           <CanvasViewport
+            workflowId={canvas.workflow.workflowId}
             nodes={canvas.nodes}
             edges={canvas.edges}
             selectedNodeId={selectedProcessId}
@@ -310,6 +356,11 @@ export function WorkflowCanvasPage({ canvas }: Props) {
             onConnectComplete={handleConnectComplete}
             onCanvasClick={(position) => void createNodeAt(position)}
             onNodeDrop={(tool, position) => void createNodeFromTool(tool, position)}
+            onFitViewReady={(fn) => { fitViewRef.current = fn }}
+            onEdgeReconnect={async (oldEdgeId, newConnection) => {
+              await deleteConnection(oldEdgeId)
+              await createConnection(newConnection)
+            }}
             onConnectDropOnCanvas={(payload) =>
               openNodePicker({
                 kind: 'connect-drop',
@@ -340,7 +391,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
               selectedPort={selectedPort}
               rules={[]}
               onNodeSubmit={updateNode}
-              onNodeDelete={deleteNode}
+              onNodeDelete={deleteNodeWithConfirm}
               onPortCreate={createPort}
               onPortUpdate={updatePort}
               onPortDelete={deletePort}
@@ -351,10 +402,18 @@ export function WorkflowCanvasPage({ canvas }: Props) {
             <ConnectionInspector
               edge={selectedEdge}
               rules={[]}
-              onSubmit={async () => {}}
+              onSubmit={updateConnection}
               onDelete={deleteConnection}
               onOpenRuleBuilder={() => {}}
             />
+          )}
+          {inspectorMode === 'multi' && (
+            <div className="inspector-summary">
+              <p>여러 노드가 선택됨</p>
+              <p className="inspector-hint">
+                Shift+클릭 또는 드래그로 다중 선택. Delete로 일괄 삭제는 아직 지원되지 않습니다.
+              </p>
+            </div>
           )}
           {inspectorMode === 'none' && (
             <div className="inspector-summary">

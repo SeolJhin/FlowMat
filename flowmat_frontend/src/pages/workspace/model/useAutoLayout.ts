@@ -8,9 +8,10 @@ interface UseAutoLayoutOptions {
   nodes: CanvasNodeViewModel[]
   edges: CanvasEdgeViewModel[]
   onUpdateNode(input: UpdateProcessInput): Promise<void>
+  onFitView?(): void
 }
 
-export function useAutoLayout({ nodes, edges, onUpdateNode }: UseAutoLayoutOptions) {
+export function useAutoLayout({ nodes, edges, onUpdateNode, onFitView }: UseAutoLayoutOptions) {
   const applyLayout = useCallback(
     async (direction: LayoutDirection) => {
       if (nodes.length === 0) return
@@ -38,8 +39,10 @@ export function useAutoLayout({ nodes, edges, onUpdateNode }: UseAutoLayoutOptio
           })
         })
       )
+
+      setTimeout(() => onFitView?.(), 100)
     },
-    [nodes, edges, onUpdateNode]
+    [nodes, edges, onUpdateNode, onFitView]
   )
 
   return { applyLayout }

@@ -33,17 +33,27 @@ export type NodePickerState =
 interface CanvasInteractionState {
   nodePicker: NodePickerState | null
   hoveredEdgeId: string | null
+  pendingDeleteNodeId: string | null
+  pendingDeleteEdgeId: string | null
 
   openNodePicker(state: NodePickerState): void
   closeNodePicker(): void
   setHoveredEdgeId(id: string | null): void
+  requestDeleteNode(id: string): void
+  requestDeleteEdge(id: string): void
+  clearDeleteRequest(): void
 }
 
 export const useCanvasInteractionStore = create<CanvasInteractionState>((set) => ({
   nodePicker: null,
   hoveredEdgeId: null,
+  pendingDeleteNodeId: null,
+  pendingDeleteEdgeId: null,
 
   openNodePicker: (state) => set({ nodePicker: state }),
   closeNodePicker: () => set({ nodePicker: null }),
   setHoveredEdgeId: (id) => set({ hoveredEdgeId: id }),
+  requestDeleteNode: (id) => set({ pendingDeleteNodeId: id }),
+  requestDeleteEdge: (id) => set({ pendingDeleteEdgeId: id }),
+  clearDeleteRequest: () => set({ pendingDeleteNodeId: null, pendingDeleteEdgeId: null }),
 }))

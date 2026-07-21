@@ -3,6 +3,7 @@ import { useCreateProcessConnectionMutation } from '../../../entities/workflow/a
 import { useCreateProcessIoMutation } from '../../../entities/workflow/api/useCreateProcessIoMutation'
 import { useCreateProcessMutation } from '../../../entities/workflow/api/useCreateProcessMutation'
 import { useDeleteProcessConnectionMutation } from '../../../entities/workflow/api/useDeleteProcessConnectionMutation'
+import { useUpdateProcessConnectionMutation } from '../../../entities/workflow/api/useUpdateProcessConnectionMutation'
 import { useDeleteProcessIoMutation } from '../../../entities/workflow/api/useDeleteProcessIoMutation'
 import { useDeleteProcessMutation } from '../../../entities/workflow/api/useDeleteProcessMutation'
 import { useUpdateProcessIoMutation } from '../../../entities/workflow/api/useUpdateProcessIoMutation'
@@ -41,6 +42,7 @@ export function useWorkflowCanvasActions({
   const updateProcessIoMutation = useUpdateProcessIoMutation()
   const deleteProcessIoMutation = useDeleteProcessIoMutation()
   const createConnectionMutation = useCreateProcessConnectionMutation()
+  const updateConnectionMutation = useUpdateProcessConnectionMutation()
   const deleteConnectionMutation = useDeleteProcessConnectionMutation()
   const deleteProcessMutation = useDeleteProcessMutation()
   const updateProcessMutation = useUpdateProcessMutation()
@@ -367,6 +369,36 @@ export function useWorkflowCanvasActions({
     })
   }
 
+  async function updateConnection(input: import('../../../entities/workflow/model/types').UpdateProcessConnectionInput) {
+    setWorkspaceMessage(null)
+    const edge = canvas.edges.find((e) => e.id === input.connectionId)
+
+    try {
+      await updateConnectionMutation.mutateAsync(input)
+    } catch (error) {
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to update connection.')
+      throw error
+    }
+
+    if (edge) {
+      const oldInput: import('../../../entities/workflow/model/types').UpdateProcessConnectionInput = {
+        connectionId: input.connectionId,
+        ...(input.connectionLabel !== undefined && { connectionLabel: edge.label ?? null }),
+        ...(input.connectionType !== undefined && { connectionType: edge.connectionType }),
+        ...(input.flowRate !== undefined && { flowRate: edge.flowRate !== null ? Number(edge.flowRate) : null }),
+        ...(input.unit !== undefined && { unit: edge.unit }),
+        ...(input.delayTimeSec !== undefined && { delayTimeSec: edge.delayTimeSec }),
+        ...(input.lossRate !== undefined && { lossRate: edge.lossRate }),
+        ...(input.priority !== undefined && { priority: edge.priority }),
+      }
+      commandHistory.push({
+        label: 'Edit connection',
+        undo: async () => { await updateConnectionMutation.mutateAsync(oldInput) },
+        redo: async () => { await updateConnectionMutation.mutateAsync(input) },
+      })
+    }
+  }
+
   async function deleteConnection(connectionId: string) {
     setWorkspaceMessage(null)
 
@@ -458,6 +490,7 @@ export function useWorkflowCanvasActions({
     updatePort,
     deletePort,
     saveNodePosition,
+    updateConnection,
     deleteConnection,
     deleteNode,
     createConnection,

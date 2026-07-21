@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
 import {
   ReactFlow,
   Background,
@@ -8,14 +8,18 @@ import {
   useViewport,
   getBezierPath,
   useUpdateNodeInternals,
+  useOnViewportChange,
+  reconnectEdge,
   type NodeChange,
   type EdgeChange,
   type Connection,
   type OnConnectStart,
   type OnConnectEnd,
+  type OnReconnect,
   type ReactFlowInstance,
   type Node,
   type Edge,
+  type Viewport,
   type ConnectionLineComponentProps,
   applyNodeChanges,
   applyEdgeChanges,
@@ -186,6 +190,15 @@ function SnapGuideLayer({ guides }: { guides: SnapGuide[] }) {
   )
 }
 
+function ViewportPersister({ storageKey }: { storageKey: string }) {
+  useOnViewportChange({
+    onEnd: (viewport: Viewport) => {
+      localStorage.setItem(storageKey, JSON.stringify(viewport))
+    },
+  })
+  return null
+}
+
 /** Calls updateNodeInternals for nodes whose handle count changed. Must be inside ReactFlow. */
 function InternalsUpdater({ nodeIds }: { nodeIds: string[] }) {
   const updateNodeInternals = useUpdateNodeInternals()
@@ -196,6 +209,7 @@ function InternalsUpdater({ nodeIds }: { nodeIds: string[] }) {
 }
 
 interface Props {
+  workflowId: string
   nodes: CanvasNodeViewModel[]
   edges: CanvasEdgeViewModel[]
   selectedNodeId: string | null
@@ -217,6 +231,8 @@ interface Props {
     flowPosition: { x: number; y: number }
     screenPosition: { x: number; y: number }
   }): void
+  onFitViewReady?(fn: () => void): void
+  onEdgeReconnect?(oldEdgeId: string, newConnection: ConnectCompletePayload): void
 }
 
 type RfNode = {
@@ -265,7 +281,18 @@ function toRfEdges(edges: CanvasEdgeViewModel[], selectedId: string | null): RfE
   }))
 }
 
+function loadSavedViewport(storageKey: string): Viewport | undefined {
+  try {
+    const raw = localStorage.getItem(storageKey)
+    if (!raw) return undefined
+    return JSON.parse(raw) as Viewport
+  } catch {
+    return undefined
+  }
+}
+
 export function CanvasViewport({
+  workflowId,
   nodes,
   edges,
   selectedNodeId,
@@ -280,10 +307,20 @@ export function CanvasViewport({
   onCanvasClick,
   onNodeDrop,
   onConnectDropOnCanvas,
+  onFitViewReady,
+  onEdgeReconnect,
 }: Props) {
-  const { selectNode, selectEdge } = useWorkspaceStore()
+  const storageKey = `flowmat-viewport-${workflowId}`
+  const savedViewport = useMemo(() => loadSavedViewport(storageKey), [storageKey])
+  const { selectNode, selectEdge, startInlineEdit, setMultiSelect } = useWorkspaceStore()
   const setHoveredEdgeId = useCanvasInteractionStore((s) => s.setHoveredEdgeId)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
+
+  useEffect(() => {
+    if (reactFlowInstance) {
+      onFitViewReady?.(() => reactFlowInstance.fitView({ padding: 0.15, duration: 300 }))
+    }
+  }, [reactFlowInstance, onFitViewReady])
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([])
   const [nodesToUpdateInternals, setNodesToUpdateInternals] = useState<string[]>([])
 
@@ -375,6 +412,23 @@ export function CanvasViewport({
       }
     },
     [onConnectStart]
+  )
+
+  const handleReconnect: OnReconnect = useCallback(
+    (oldEdge, newConnection) => {
+      setLocalEdges((eds) => reconnectEdge(oldEdge, newConnection, eds) as RfEdge[])
+      if (onEdgeReconnect && newConnection.source && newConnection.target) {
+        onEdgeReconnect(oldEdge.id, {
+          fromProcessId: newConnection.source,
+          toProcessId: newConnection.target,
+          fromIoId: newConnection.sourceHandle ?? null,
+          toIoId: newConnection.targetHandle ?? null,
+          sourceHandle: newConnection.sourceHandle ?? 'out-default',
+          targetHandle: newConnection.targetHandle ?? 'in-default',
+        })
+      }
+    },
+    [onEdgeReconnect]
   )
 
   const handleIsValidConnection = useCallback(
@@ -489,6 +543,12 @@ export function CanvasViewport({
           selectNode(node.id)
           onNodeSelect(node.id)
         }}
+        onNodeDoubleClick={(_e, node) => {
+          startInlineEdit(node.id)
+        }}
+        onSelectionChange={({ nodes: selNodes }) => {
+          if (selNodes.length > 1) setMultiSelect()
+        }}
         onEdgeClick={(_e, edge) => {
           selectEdge(edge.id)
           onEdgeSelect(edge.id)
@@ -497,6 +557,7 @@ export function CanvasViewport({
         onNodeDragStop={handleNodeDragStop}
         onConnectStart={handleConnectStart}
         onConnect={handleConnect}
+        onReconnect={handleReconnect}
         onConnectEnd={handleConnectEnd}
         onPaneClick={handlePaneClick}
         onDragOver={handleDragOver}
@@ -504,8 +565,13 @@ export function CanvasViewport({
         onEdgeMouseEnter={handleEdgeMouseEnter}
         onEdgeMouseLeave={handleEdgeMouseLeave}
         connectionLineComponent={CustomConnectionLine}
+        colorMode="system"
         isValidConnection={handleIsValidConnection}
-        fitView
+        onlyRenderVisibleElements={localNodes.length > 50}
+        {...(savedViewport
+          ? { defaultViewport: savedViewport }
+          : { fitView: true, fitViewOptions: { padding: 0.15 } }
+        )}
         minZoom={0.1}
         maxZoom={2.5}
         snapToGrid
@@ -514,6 +580,7 @@ export function CanvasViewport({
       >
         <SnapGuideLayer guides={snapGuides} />
         <InternalsUpdater nodeIds={nodesToUpdateInternals} />
+        <ViewportPersister storageKey={storageKey} />
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--border)" />
         <Controls />
         <MiniMap zoomable pannable nodeStrokeWidth={2} />

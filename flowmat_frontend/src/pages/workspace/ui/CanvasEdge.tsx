@@ -76,6 +76,7 @@ export function CanvasEdge({
   const typeStyle = CONNECTION_TYPE_STYLE[edge.connectionType] ?? { stroke: '#94a3b8' }
   const hovered = useCanvasInteractionStore((s) => s.hoveredEdgeId === id)
   const openNodePicker = useCanvasInteractionStore((s) => s.openNodePicker)
+  const requestDeleteEdge = useCanvasInteractionStore((s) => s.requestDeleteEdge)
 
   return (
     <>
@@ -94,30 +95,46 @@ export function CanvasEdge({
           strokeDasharray: selected ? undefined : typeStyle.strokeDasharray,
         }}
       />
-      {/* Center "+" insert handle (ported from tldraw's
-          ConnectionCenterHandleOverlayUtil): click to split this connection
-          with a new node. */}
       {(hovered || selected) && (
         <EdgeLabelRenderer>
-          <button
-            type="button"
-            className="edge-insert-button nodrag nopan"
+          <div
+            className="nodrag nopan"
             style={{
+              position: 'absolute',
               transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-            }}
-            title="Insert node into connection"
-            onClick={(event) => {
-              event.stopPropagation()
-              openNodePicker({
-                kind: 'insert-on-edge',
-                edgeId: id,
-                flowPosition: { x: labelX, y: labelY },
-                screenPosition: { x: event.clientX, y: event.clientY },
-              })
+              display: 'flex',
+              gap: '4px',
+              pointerEvents: 'all',
             }}
           >
-            +
-          </button>
+            <button
+              type="button"
+              className="edge-insert-button"
+              title="Insert node into connection"
+              onClick={(event) => {
+                event.stopPropagation()
+                openNodePicker({
+                  kind: 'insert-on-edge',
+                  edgeId: id,
+                  flowPosition: { x: labelX, y: labelY },
+                  screenPosition: { x: event.clientX, y: event.clientY },
+                })
+              }}
+            >
+              +
+            </button>
+            <button
+              type="button"
+              className="edge-delete-button"
+              title="연결선 삭제 (Delete)"
+              onClick={(event) => {
+                event.stopPropagation()
+                requestDeleteEdge(id)
+              }}
+            >
+              ×
+            </button>
+          </div>
         </EdgeLabelRenderer>
       )}
       {edge.label && (

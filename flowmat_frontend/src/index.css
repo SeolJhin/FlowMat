@@ -529,6 +529,96 @@ code {
 }
 
 /* ============================================================
+   Node inline name editor
+   ============================================================ */
+.canvas-node__name-input {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--sans);
+  color: var(--text-h);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  outline: none;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+/* ============================================================
+   Node toolbar (NodeToolbar floating buttons)
+   ============================================================ */
+.node-toolbar__btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: var(--node-shadow);
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.node-toolbar__btn--delete:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+
+/* ============================================================
+   Edge delete button
+   ============================================================ */
+.edge-delete-button {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid #fca5a5;
+  background: var(--bg);
+  color: #ef4444;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: var(--node-shadow);
+  transition: scale 0.12s ease, background 0.12s ease;
+}
+
+.edge-delete-button:hover {
+  scale: 1.15;
+  background: #fef2f2;
+}
+
+/* ============================================================
+   Port connection count badge
+   ============================================================ */
+.canvas-node__port-badge {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--mono);
+  line-height: 1;
+  color: var(--bg);
+  background: var(--accent);
+  border-radius: 10px;
+  padding: 1px 4px;
+  min-width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ============================================================
    Topbar button overrides (workspace context)
    ============================================================ */
 .workspace-topbar button {
