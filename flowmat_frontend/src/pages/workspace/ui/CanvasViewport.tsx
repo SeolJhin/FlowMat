@@ -377,6 +377,20 @@ export function CanvasViewport({
     [onConnectStart]
   )
 
+  const handleIsValidConnection = useCallback(
+    (connection: Connection) => {
+      if (connection.source === connection.target) return false
+      return !localEdges.some(
+        (e) =>
+          e.source === connection.source &&
+          e.target === connection.target &&
+          e.sourceHandle === connection.sourceHandle &&
+          e.targetHandle === connection.targetHandle
+      )
+    },
+    [localEdges]
+  )
+
   const handleConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return
@@ -490,6 +504,7 @@ export function CanvasViewport({
         onEdgeMouseEnter={handleEdgeMouseEnter}
         onEdgeMouseLeave={handleEdgeMouseLeave}
         connectionLineComponent={CustomConnectionLine}
+        isValidConnection={handleIsValidConnection}
         fitView
         minZoom={0.1}
         maxZoom={2.5}
