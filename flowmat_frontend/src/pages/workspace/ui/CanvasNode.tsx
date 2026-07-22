@@ -201,6 +201,11 @@ export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
           <span className="canvas-node__name">{node.name}</span>
         )}
         <span className="canvas-node__type">{nodeDefinition.label}</span>
+        {node.editingByUserId && (
+          <span className="canvas-node__editing-badge" title={`${node.editingByUserId} 편집 중`}>
+            ✏
+          </span>
+        )}
       </div>
 
       {node.inputs.length > 0 && (

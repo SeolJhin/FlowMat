@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { Client, type IMessage } from '@stomp/stompjs'
+import { tokenStorage, parseJwtUserId } from '../../auth/api/useLoginMutation'
 
-// 브라우저 네이티브 WebSocket으로 SockJS raw-transport 서브패스에 직접 연결.
-// sockjs-client 는 Node.js `global` 을 참조해 브라우저에서 크래시를 일으키므로 사용하지 않는다.
+// Browser-native WebSocket — sockjs-client references Node.js `global` and crashes in browsers.
 function wsUrl(path: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocol}//${window.location.host}${path}`
@@ -13,6 +13,8 @@ export interface NodeMoveMessage {
   x: number
   y: number
   userId: string | null
+  /** Per-tab random UUID sent by the client, relayed unchanged by the server. Used for echo filtering. */
+  clientId: string
   workflowId: string
   timestamp: number
 }
@@ -20,6 +22,8 @@ export interface NodeMoveMessage {
 export interface PresenceMessage {
   type: 'JOIN' | 'LEAVE' | 'CURSOR_MOVED' | 'NODE_EDITING'
   userId: string | null
+  /** Per-tab random UUID. null for server-generated JOIN/LEAVE events. */
+  clientId: string | null
   workflowId: string
   cursorX?: number | null
   cursorY?: number | null
@@ -35,8 +39,7 @@ export interface GraphChangeMessage {
   timestamp: number
 }
 
-// 실제 로그인 전까지 탭당 랜덤 ID를 STOMP Bearer 토큰으로 사용.
-// JwtProvider 스텁이 그대로 userId 로 반환 → echo 필터링 key로 활용.
+/** Stable per-tab identifier — survives re-renders, used for STOMP echo filtering. */
 const CLIENT_ID =
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -45,11 +48,12 @@ const CLIENT_ID =
 const NODE_MOVE_THROTTLE_MS = 160
 
 /**
- * STOMP-over-SockJS 연결 훅.
- * - 노드 드래그 중 sendNodeMove (160ms 스로틀, instldraw 패턴 참고)
- * - /topic/workflow/{id}/node-move 구독 → onRemoteNodeMove 콜백
- * - /topic/workflow/{id}/presence  구독 → onPresence 콜백 (선택)
- * - sendPresence: CURSOR_MOVED / NODE_EDITING 전송
+ * STOMP-over-WebSocket collaboration hook.
+ * - Authenticates with the real JWT access token (server extracts userId from it).
+ * - clientId (per-tab UUID) is sent alongside messages for echo filtering.
+ * - sendNodeMove: 160 ms throttled drag relay (instldraw pattern).
+ * - sendPresence: CURSOR_MOVED / NODE_EDITING broadcast.
+ * - onReconnect: called on every reconnect after the first connect.
  */
 export function useWorkflowSync(
   workflowId: string,
@@ -77,9 +81,14 @@ export function useWorkflowSync(
   useEffect(() => {
     if (!workflowId) return
 
+    // Use the real JWT so the server can extract the authenticated userId.
+    const accessToken = tokenStorage.getAccess() ?? ''
+    // Parse our own userId to filter self-presence (server-generated JOIN for us).
+    const ownUserId = parseJwtUserId(accessToken)
+
     const client = new Client({
       brokerURL: wsUrl('/api/ws/websocket'),
-      connectHeaders: { Authorization: `Bearer ${CLIENT_ID}` },
+      connectHeaders: { Authorization: `Bearer ${accessToken}` },
       reconnectDelay: 3000,
     })
 
@@ -93,13 +102,18 @@ export function useWorkflowSync(
       client.subscribe(`/topic/workflow/${workflowId}/node-move`, (message: IMessage) => {
         let payload: NodeMoveMessage
         try { payload = JSON.parse(message.body) as NodeMoveMessage } catch { return }
-        if (payload.userId === CLIENT_ID) return
+        // Filter echo: server preserves clientId, so this matches only our own tab's messages.
+        if (payload.clientId === CLIENT_ID) return
         onRemoteNodeMoveRef.current(payload)
       })
 
       client.subscribe(`/topic/workflow/${workflowId}/presence`, (message: IMessage) => {
         let payload: PresenceMessage
         try { payload = JSON.parse(message.body) as PresenceMessage } catch { return }
+        // Skip our own client-sent messages (CURSOR_MOVED, NODE_EDITING).
+        if (payload.clientId === CLIENT_ID) return
+        // Skip server-generated JOIN broadcast for our own userId to avoid self-cursor display.
+        if (payload.type === 'JOIN' && payload.clientId == null && payload.userId === ownUserId) return
         onPresenceRef.current?.(payload)
       })
 
@@ -128,9 +142,10 @@ export function useWorkflowSync(
     (processId: string, x: number, y: number) => {
       const client = clientRef.current
       if (!client || !connectedRef.current) return
+      // userId is intentionally omitted — the server fills it from the JWT principal.
       client.publish({
         destination: `/app/workflow/${workflowId}/node-move`,
-        body: JSON.stringify({ processId, x, y, userId: CLIENT_ID, workflowId, timestamp: Date.now() }),
+        body: JSON.stringify({ processId, x, y, clientId: CLIENT_ID, workflowId, timestamp: Date.now() }),
       })
     },
     [workflowId]
@@ -158,12 +173,13 @@ export function useWorkflowSync(
   )
 
   const sendPresence = useCallback(
-    (message: Omit<PresenceMessage, 'userId' | 'workflowId' | 'timestamp'>) => {
+    (message: Omit<PresenceMessage, 'userId' | 'clientId' | 'workflowId' | 'timestamp'>) => {
       const client = clientRef.current
       if (!client || !connectedRef.current) return
+      // userId is intentionally omitted — the server fills it from the JWT principal.
       client.publish({
         destination: `/app/workflow/${workflowId}/presence`,
-        body: JSON.stringify({ ...message, userId: CLIENT_ID, workflowId, timestamp: Date.now() }),
+        body: JSON.stringify({ ...message, clientId: CLIENT_ID, workflowId, timestamp: Date.now() }),
       })
     },
     [workflowId]

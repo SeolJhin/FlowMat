@@ -20,6 +20,18 @@ export interface TokenResponse {
   refreshToken: string
 }
 
+/** Decode the `sub` claim from a JWT without verifying the signature. */
+export function parseJwtUserId(token: string): string | null {
+  try {
+    const b64 = token.split('.')[1]
+    if (!b64) return null
+    const payload = JSON.parse(atob(b64.replace(/-/g, '+').replace(/_/g, '/'))) as Record<string, unknown>
+    return typeof payload.sub === 'string' ? payload.sub : null
+  } catch {
+    return null
+  }
+}
+
 export const tokenStorage = {
   getAccess:  () => localStorage.getItem('access_token'),
   getRefresh: () => localStorage.getItem('refresh_token'),
@@ -54,17 +66,22 @@ export function useSignupMutation() {
   return useMutation({ mutationFn: signup })
 }
 
+// Cannot use httpClient for refresh/logout — these endpoints authenticate
+// with the refresh token, not the access token that httpClient attaches.
+// Calling httpClient here would also risk an infinite 401-retry loop.
+
 export async function refreshAccessToken(): Promise<boolean> {
   const rt = tokenStorage.getRefresh()
   if (!rt) return false
   try {
     const res = await fetch('/api/auth/refresh', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${rt}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${rt}`, 'Content-Type': 'application/json' },
     })
     if (!res.ok) return false
-    const body = await res.json() as { data: TokenResponse }
-    tokenStorage.set(body.data.accessToken, body.data.refreshToken)
+    const json = await res.json() as ApiEnvelope<TokenResponse>
+    if (!json.success || !json.data) return false
+    tokenStorage.set(json.data.accessToken, json.data.refreshToken)
     return true
   } catch {
     return false
@@ -75,14 +92,13 @@ export function useLogoutMutation() {
   return useMutation({
     mutationFn: async () => {
       const rt = tokenStorage.getRefresh()
-      if (rt) {
-        try {
-          await fetch('/api/auth/logout', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${rt}`, 'Content-Type': 'application/json' },
-          })
-        } catch { /* ignore */ }
-      }
+      if (!rt) return
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${rt}`, 'Content-Type': 'application/json' },
+        })
+      } catch { /* ignore — local session is cleared in onSettled regardless */ }
     },
     onSettled: () => tokenStorage.clear(),
   })

@@ -285,8 +285,9 @@ interface Props {
   onPresence?(msg: PresenceMessage): void
   onGraphChange?(msg: GraphChangeMessage): void
   onReconnect?(): void
+  editingPresence?: ReadonlyMap<string, string>
   onSyncReady?(api: {
-    sendPresence: (msg: Omit<PresenceMessage, 'userId' | 'workflowId' | 'timestamp'>) => void
+    sendPresence: (msg: Omit<PresenceMessage, 'userId' | 'clientId' | 'workflowId' | 'timestamp'>) => void
     clientId: string
   }): void
 }
@@ -371,6 +372,7 @@ export function CanvasViewport({
   onGraphChange,
   onReconnect,
   onSyncReady,
+  editingPresence,
 }: Props) {
   const storageKey = `flowmat-viewport-${workflowId}`
   const savedViewport = useMemo(() => loadSavedViewport(storageKey), [storageKey])
@@ -435,15 +437,17 @@ export function CanvasViewport({
       const next = toRfNodes(nodes, selectedNodeId)
       const updated = next.map((n) => {
         const existing = prev.find((p) => p.id === n.id)
+        const editingByUserId = editingPresence?.get(n.id) ?? null
+        const nodeWithEditing: RfNode = { ...n, data: { ...n.data, editingByUserId } }
         if (existing && (existing.width !== n.width || existing.height !== n.height)) {
-          return { ...n, width: existing.width, height: existing.height }
+          return { ...nodeWithEditing, width: existing.width, height: existing.height }
         }
-        return n
+        return nodeWithEditing
       })
       localNodesRef.current = updated
       return updated
     })
-  }, [nodes, selectedNodeId])
+  }, [nodes, selectedNodeId, editingPresence])
 
   useEffect(() => {
     setLocalEdges(toRfEdges(edges, selectedEdgeId))

@@ -10,6 +10,7 @@ import {
   useLogoutMutation,
   useSignupMutation,
 } from '../../../entities/auth/api/useLoginMutation'
+import { useCurrentUserQuery } from '../../../entities/auth/api/useCurrentUserQuery'
 
 export function HomeRoute() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!tokenStorage.getAccess())
@@ -86,6 +87,9 @@ export function HomeRoute() {
       </div>
     )
   }
+  const currentUserQuery = useCurrentUserQuery()
+  const currentUser = currentUserQuery.data
+
   const {
     data: projects = [],
     isLoading: isProjectsLoading,
@@ -94,7 +98,6 @@ export function HomeRoute() {
   } = useProjectsQuery()
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [projectName, setProjectName] = useState('')
-  const [projectOwnerId, setProjectOwnerId] = useState('')
   const [projectDesc, setProjectDesc] = useState('')
   const [workflowName, setWorkflowName] = useState('')
   const [workflowDesc, setWorkflowDesc] = useState('')
@@ -119,7 +122,7 @@ export function HomeRoute() {
     event.preventDefault()
     const createdProject = await createProjectMutation.mutateAsync({
       projectName,
-      ownerId: projectOwnerId,
+      ownerId: currentUser?.userId ?? '',
       projectDesc,
       visibility: 'private',
     })
@@ -158,7 +161,11 @@ export function HomeRoute() {
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1 style={{ marginBottom: '12px' }}>FlowMat Workspace</h1>
-          <p>Select a project, then open one of its workflows.</p>
+          <p>
+            {currentUser
+              ? `${currentUser.userName} (${currentUser.userId})님 — 프로젝트를 선택하거나 새로 만드세요.`
+              : 'Select a project, then open one of its workflows.'}
+          </p>
         </div>
         <button type="button" onClick={handleLogout}
           style={{ fontSize: 12, padding: '4px 10px', height: 30 }}>
@@ -191,10 +198,10 @@ export function HomeRoute() {
             required
           />
           <input
-            value={projectOwnerId}
-            onChange={(event) => setProjectOwnerId(event.target.value)}
-            placeholder="Owner ID"
-            required
+            value={currentUser?.userId ?? ''}
+            readOnly
+            placeholder="Owner (로그인 계정)"
+            style={{ opacity: 0.6, cursor: 'not-allowed' }}
           />
           <textarea
             value={projectDesc}

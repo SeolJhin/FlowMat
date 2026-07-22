@@ -93,28 +93,44 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   const updateWorkflowMutation = useUpdateWorkflowMutation()
   const workflowsQuery = useWorkflowsQuery(canvas.workflow.projectId)
 
-  // Presence: remote cursor state
+  // Presence: remote cursor + node-editing state
   const [remoteCursors, setRemoteCursors] = useState<
     Map<string, { x: number; y: number; type: string }>
   >(new Map())
+  const [editingPresence, setEditingPresence] = useState<ReadonlyMap<string, string>>(new Map())
   const [syncClientId, setSyncClientId] = useState('')
   const sendPresenceRef = useRef<
-    (msg: Omit<PresenceMessage, 'userId' | 'workflowId' | 'timestamp'>) => void
+    (msg: Omit<PresenceMessage, 'userId' | 'clientId' | 'workflowId' | 'timestamp'>) => void
   >(() => {})
 
   const handlePresence = useCallback((msg: PresenceMessage) => {
     if (!msg.userId) return
+    const uid = msg.userId
+
     setRemoteCursors((prev) => {
       const next = new Map(prev)
       if (msg.type === 'LEAVE') {
-        next.delete(msg.userId!)
+        next.delete(uid)
       } else if (msg.type === 'CURSOR_MOVED' && msg.cursorX != null && msg.cursorY != null) {
-        next.set(msg.userId!, { x: msg.cursorX, y: msg.cursorY, type: msg.type })
+        next.set(uid, { x: msg.cursorX, y: msg.cursorY, type: msg.type })
       } else if (msg.type === 'JOIN') {
-        next.set(msg.userId!, { x: 0, y: 0, type: msg.type })
+        next.set(uid, { x: 0, y: 0, type: msg.type })
       }
       return next
     })
+
+    if (msg.type === 'NODE_EDITING' || msg.type === 'LEAVE') {
+      setEditingPresence((prev) => {
+        const next = new Map(prev)
+        for (const [nodeId, editUid] of next) {
+          if (editUid === uid) next.delete(nodeId)
+        }
+        if (msg.type === 'NODE_EDITING' && msg.editingProcessId) {
+          next.set(msg.editingProcessId, uid)
+        }
+        return next
+      })
+    }
   }, [])
 
   const queryClient = useQueryClient()
@@ -136,7 +152,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   }, [queryClient, canvas.workflow.workflowId])
 
   const handleSyncReady = useCallback((api: {
-    sendPresence: (msg: Omit<PresenceMessage, 'userId' | 'workflowId' | 'timestamp'>) => void
+    sendPresence: (msg: Omit<PresenceMessage, 'userId' | 'clientId' | 'workflowId' | 'timestamp'>) => void
     clientId: string
   }) => {
     sendPresenceRef.current = api.sendPresence
@@ -146,6 +162,16 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   useEffect(() => {
     sendPresenceRef.current({ type: 'NODE_EDITING', editingProcessId: selectedProcessId ?? undefined })
   }, [selectedProcessId])
+
+  // Item I: broadcast LEAVE when the tab closes or navigates away
+  useEffect(() => {
+    const onUnload = () => sendPresenceRef.current({ type: 'LEAVE' })
+    window.addEventListener('beforeunload', onUnload)
+    return () => {
+      window.removeEventListener('beforeunload', onUnload)
+      sendPresenceRef.current({ type: 'LEAVE' })
+    }
+  }, [])
 
   const workflows = workflowsQuery.data ?? []
   const [editingWorkflowName, setEditingWorkflowName] = useState(false)
@@ -623,6 +649,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
             onGraphChange={handleGraphChange}
             onReconnect={handleReconnect}
             onSyncReady={handleSyncReady}
+            editingPresence={editingPresence}
             onEdgeReconnect={async (oldEdgeId, newConnection) => {
               await deleteConnection(oldEdgeId)
               await createConnection(newConnection)

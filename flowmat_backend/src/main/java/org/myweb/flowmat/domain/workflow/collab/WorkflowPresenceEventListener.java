@@ -50,7 +50,8 @@ public class WorkflowPresenceEventListener {
         if (sessionId == null || userId == null) return;
 
         sessionRegistry.register(sessionId, userId, workflowId);
-        messagingTemplate.convertAndSend(destination, PresenceMessage.join(userId, workflowId));
+        // clientId is null for server-generated events — only client-sent messages carry it.
+        messagingTemplate.convertAndSend(destination, PresenceMessage.join(userId, null, workflowId));
     }
 
     @EventListener
@@ -65,7 +66,7 @@ public class WorkflowPresenceEventListener {
         if (userId == null || workflowId == null) return;
 
         String destination = "/topic/workflow/" + workflowId + "/presence";
-        messagingTemplate.convertAndSend(destination, PresenceMessage.leave(userId, workflowId));
+        messagingTemplate.convertAndSend(destination, PresenceMessage.leave(userId, null, workflowId));
     }
 
     private String resolveUserId(Principal principal) {

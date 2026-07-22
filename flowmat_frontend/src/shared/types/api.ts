@@ -12,6 +12,26 @@ export type UiError = {
 
 // Raw DTOs from the backend.
 
+export interface UserDto {
+  id: string
+  userId: string
+  userName: string
+  userEmail: string
+  userStatus: string
+}
+
+export interface ProductionRunDto {
+  productionRunId: string
+  projectId: string
+  workflowId: string
+  runNumber: string
+  runType: string | null
+  runStatus: string
+  targetItemId: string | null
+  plannedOutputQty: number
+  actualOutputQty: number | null
+}
+
 export interface ProjectSummaryDto {
   projectId: string
   projectName: string

@@ -45,6 +45,8 @@ export interface CanvasNodeViewModel {
   outputCount: number
   version: number
   versionNonce: number
+  /** Set to the remote user's userId when they are actively editing this node. */
+  editingByUserId?: string | null
 }
 
 export interface CanvasEdgeViewModel {
