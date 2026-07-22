@@ -40,6 +40,7 @@ import type {
 import type { WorkflowPaletteTool } from '../../../entities/workflow/model/nodeCatalog'
 import { CanvasNode } from './CanvasNode'
 import { CanvasEdge } from './CanvasEdge'
+import { PALETTE_DRAG_MIME } from './canvasConstants'
 import { useWorkspaceStore } from '../model/workspaceStore'
 import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
 import {
@@ -48,9 +49,6 @@ import {
   type PresenceMessage,
   type GraphChangeMessage,
 } from '../../../entities/workflow/api/useWorkflowSync'
-
-/** dataTransfer MIME type used by palette drag-to-create. */
-export const PALETTE_DRAG_MIME = 'application/flowmat-node-tool'
 
 const nodeTypes = { flowmatNode: CanvasNode }
 const edgeTypes = { flowmatEdge: CanvasEdge }
@@ -285,6 +283,13 @@ interface Props {
   onPresence?(msg: PresenceMessage): void
   onGraphChange?(msg: GraphChangeMessage): void
   onReconnect?(): void
+  onBeforeDelete?(params: { nodeIds: string[]; edgeIds: string[] }): Promise<boolean>
+  onDeleteElements?(params: { nodeIds: string[]; edgeIds: string[] }): Promise<void>
+  onDeleteReady?(api: {
+    deleteSelection(): Promise<void>
+    deleteNode(nodeId: string): Promise<void>
+    deleteEdge(edgeId: string): Promise<void>
+  }): void
   editingPresence?: ReadonlyMap<string, string>
   onSyncReady?(api: {
     sendPresence: (msg: Omit<PresenceMessage, 'userId' | 'clientId' | 'workflowId' | 'timestamp'>) => void
@@ -371,6 +376,9 @@ export function CanvasViewport({
   onPresence,
   onGraphChange,
   onReconnect,
+  onBeforeDelete,
+  onDeleteElements,
+  onDeleteReady,
   onSyncReady,
   editingPresence,
 }: Props) {
@@ -410,8 +418,21 @@ export function CanvasViewport({
       onSelectAllReady?.(() => {
         setLocalNodes((nds) => nds.map((n) => ({ ...n, selected: true })))
       })
+      onDeleteReady?.({
+        deleteSelection: async () => {
+          const selectedNodes = reactFlowInstance.getNodes().filter((node) => node.selected)
+          const selectedEdges = reactFlowInstance.getEdges().filter((edge) => edge.selected)
+          await reactFlowInstance.deleteElements({ nodes: selectedNodes, edges: selectedEdges })
+        },
+        deleteNode: async (nodeId: string) => {
+          await reactFlowInstance.deleteElements({ nodes: [{ id: nodeId }] })
+        },
+        deleteEdge: async (edgeId: string) => {
+          await reactFlowInstance.deleteElements({ edges: [{ id: edgeId }] })
+        },
+      })
     }
-  }, [reactFlowInstance, onFitViewReady, onSelectAllReady])
+  }, [reactFlowInstance, onDeleteReady, onFitViewReady, onSelectAllReady])
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([])
   const [nodesToUpdateInternals, setNodesToUpdateInternals] = useState<string[]>([])
 
@@ -631,6 +652,28 @@ export function CanvasViewport({
     [onCanvasClick, reactFlowInstance]
   )
 
+  const handleBeforeDelete = useCallback(
+    async ({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) => {
+      if (!onBeforeDelete) return true
+      return onBeforeDelete({
+        nodeIds: nodes.map((node) => node.id),
+        edgeIds: edges.map((edge) => edge.id),
+      })
+    },
+    [onBeforeDelete]
+  )
+
+  const handleDelete = useCallback(
+    async ({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) => {
+      if (!onDeleteElements) return
+      await onDeleteElements({
+        nodeIds: nodes.map((node) => node.id),
+        edgeIds: edges.map((edge) => edge.id),
+      })
+    },
+    [onDeleteElements]
+  )
+
   return (
     <div style={{ width: '100%', height: '100%', cursor: drawingEnabled ? 'crosshair' : 'default' }}>
       <ReactFlow
@@ -676,6 +719,13 @@ export function CanvasViewport({
         connectionLineComponent={CustomConnectionLine}
         colorMode="system"
         isValidConnection={handleIsValidConnection}
+        onBeforeDelete={handleBeforeDelete}
+        onDelete={(payload) => {
+          void handleDelete({
+            nodes: payload.nodes as unknown as Node[],
+            edges: payload.edges as unknown as Edge[],
+          })
+        }}
         onlyRenderVisibleElements={localNodes.length > 50}
         {...(savedViewport
           ? { defaultViewport: savedViewport }

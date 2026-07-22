@@ -1,15 +1,14 @@
-/**
- * Canvas Action 패턴 (excalidraw actions/ 참고):
- * 각 액션은 keyTest(단축키 조건) + predicate(활성 조건) + handler(실행 로직)를 가진다.
- * 키보드 핸들러와 버튼 UI가 동일한 액션 객체를 공유한다.
+﻿/**
+ * Shared canvas action definitions inspired by Excalidraw's action model.
+ * Each action combines a keyboard matcher, an availability predicate, and a handler.
+ * The keyboard layer and toolbar UI consume the same action objects.
  */
 
 export interface CanvasActionContext {
   selectedProcessId: string | null
   selectedConnectionId: string | null
   isEditing: boolean
-  deleteNodeWithConfirm(id: string): Promise<void>
-  deleteConnection(id: string): Promise<void>
+  deleteSelection(): Promise<void>
   duplicateNode(id: string): Promise<void>
   clearSelection(): void
   selectAll(): void
@@ -45,8 +44,8 @@ export const CANVAS_ACTIONS: CanvasAction[] = [
     label: 'Delete Node',
     keyTest: (e) => !e.ctrlKey && !e.metaKey && (e.key === 'Delete' || e.key === 'Backspace'),
     predicate: ({ selectedProcessId, isEditing }) => !!selectedProcessId && !isEditing,
-    handler: ({ selectedProcessId, deleteNodeWithConfirm }) =>
-      selectedProcessId ? deleteNodeWithConfirm(selectedProcessId) : Promise.resolve(),
+    handler: ({ selectedProcessId, deleteSelection }) =>
+      selectedProcessId ? deleteSelection() : Promise.resolve(),
   },
   {
     id: 'delete-edge',
@@ -54,8 +53,8 @@ export const CANVAS_ACTIONS: CanvasAction[] = [
     keyTest: (e) => !e.ctrlKey && !e.metaKey && (e.key === 'Delete' || e.key === 'Backspace'),
     predicate: ({ selectedConnectionId, selectedProcessId, isEditing }) =>
       !!selectedConnectionId && !selectedProcessId && !isEditing,
-    handler: ({ selectedConnectionId, deleteConnection }) =>
-      selectedConnectionId ? deleteConnection(selectedConnectionId) : Promise.resolve(),
+    handler: ({ selectedConnectionId, deleteSelection }) =>
+      selectedConnectionId ? deleteSelection() : Promise.resolve(),
   },
   {
     id: 'duplicate',

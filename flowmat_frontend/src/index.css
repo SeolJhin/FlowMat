@@ -306,6 +306,43 @@ code {
   white-space: nowrap;
 }
 
+.canvas-node__port--candidate {
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.canvas-node__port--targeted {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.canvas-node__port--rejected {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.canvas-node__port--origin .canvas-node__port-name,
+.canvas-node__port--candidate .canvas-node__port-name,
+.canvas-node__port--targeted .canvas-node__port-name,
+.canvas-node__port--rejected .canvas-node__port-name {
+  color: var(--text-h);
+}
+
+.canvas-node__editing-badge {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: #0369a1;
+  background: #e0f2fe;
+  border-radius: 999px;
+  padding: 3px 5px;
+  flex-shrink: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .canvas-node__editing-badge {
+    color: #7dd3fc;
+    background: rgba(14, 116, 144, 0.32);
+  }
+}
+
 /* ============================================================
    React Flow overrides
    ============================================================ */
@@ -731,29 +768,56 @@ code {
 /* ============================================================
    Node toolbar (NodeToolbar floating buttons)
    ============================================================ */
+.node-toolbar__group {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  position: relative;
+}
+
 .node-toolbar__btn {
-  width: 24px;
+  min-width: 24px;
   height: 24px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  padding: 0;
+  padding: 0 7px;
   box-shadow: var(--node-shadow);
   transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.node-toolbar__btn--swatch {
+  width: 24px;
+  min-width: 24px;
+  padding: 0;
+}
+
+.node-toolbar__btn:hover {
+  background: var(--surface);
+  border-color: var(--accent-border);
 }
 
 .node-toolbar__btn--delete:hover {
   background: #fef2f2;
   border-color: #fca5a5;
   color: #dc2626;
+}
+
+/* ============================================================
+   Edge toolbar
+   ============================================================ */
+.edge-toolbar__group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* ============================================================
@@ -781,6 +845,23 @@ code {
 .edge-delete-button:hover {
   scale: 1.15;
   background: #fef2f2;
+}
+
+.edge-label {
+  font-size: 11px;
+  color: #475569;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .edge-label {
+    color: #cbd5e1;
+    background: #0f172a;
+    border-color: #334155;
+  }
 }
 
 /* ============================================================

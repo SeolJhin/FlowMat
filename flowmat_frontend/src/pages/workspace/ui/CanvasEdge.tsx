@@ -1,6 +1,7 @@
 import {
   BaseEdge,
   EdgeLabelRenderer,
+  EdgeToolbar,
   getBezierPath,
   getSmoothStepPath,
   getStraightPath,
@@ -15,29 +16,32 @@ type CanvasEdgeComponentProps = Omit<EdgeProps, 'data'> & {
 }
 
 const CONNECTION_TYPE_STYLE: Record<string, { stroke: string; strokeDasharray?: string }> = {
-  material:       { stroke: '#94a3b8' },
-  material_flow:  { stroke: '#94a3b8' },
-  fluid_flow:     { stroke: '#38bdf8' },
-  energy_flow:    { stroke: '#fbbf24', strokeDasharray: '6 3' },
-  data_flow:      { stroke: '#a78bfa' },
-  event_flow:     { stroke: '#a78bfa', strokeDasharray: '4 2' },
-  control_flow:   { stroke: '#f87171', strokeDasharray: '8 4' },
-  human_flow:     { stroke: '#34d399' },
+  material: { stroke: '#94a3b8' },
+  material_flow: { stroke: '#94a3b8' },
+  fluid_flow: { stroke: '#38bdf8' },
+  energy_flow: { stroke: '#fbbf24', strokeDasharray: '6 3' },
+  data_flow: { stroke: '#a78bfa' },
+  event_flow: { stroke: '#a78bfa', strokeDasharray: '4 2' },
+  control_flow: { stroke: '#f87171', strokeDasharray: '8 4' },
+  human_flow: { stroke: '#34d399' },
   equipment_flow: { stroke: '#fb923c' },
 }
 
 function resolveEdgePath(
   connectionType: string,
   params: {
-    sourceX: number; sourceY: number; sourcePosition: Position
-    targetX: number; targetY: number; targetPosition: Position
+    sourceX: number
+    sourceY: number
+    sourcePosition: Position
+    targetX: number
+    targetY: number
+    targetPosition: Position
   }
 ): [string, number, number] {
   const { sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition } = params
 
   if (connectionType === 'control_flow' || connectionType === 'energy_flow') {
-    const [path, lx, ly] = getStraightPath({ sourceX, sourceY, targetX, targetY })
-    return [path, lx, ly]
+    return getStraightPath({ sourceX, sourceY, targetX, targetY })
   }
 
   if (
@@ -47,16 +51,25 @@ function resolveEdgePath(
     connectionType === 'human_flow' ||
     connectionType === 'equipment_flow'
   ) {
-    const [path, lx, ly] = getSmoothStepPath({
-      sourceX, sourceY, sourcePosition,
-      targetX, targetY, targetPosition,
+    return getSmoothStepPath({
+      sourceX,
+      sourceY,
+      sourcePosition,
+      targetX,
+      targetY,
+      targetPosition,
       borderRadius: 8,
     })
-    return [path, lx, ly]
   }
 
-  const [path, lx, ly] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
-  return [path, lx, ly]
+  return getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  })
 }
 
 export function CanvasEdge({
@@ -71,30 +84,30 @@ export function CanvasEdge({
   data: edge,
 }: CanvasEdgeComponentProps) {
   const [edgePath, labelX, labelY] = resolveEdgePath(edge.connectionType, {
-    sourceX, sourceY, sourcePosition: sourcePosition ?? Position.Right,
-    targetX, targetY, targetPosition: targetPosition ?? Position.Left,
+    sourceX,
+    sourceY,
+    sourcePosition: sourcePosition ?? Position.Right,
+    targetX,
+    targetY,
+    targetPosition: targetPosition ?? Position.Left,
   })
+
   const typeStyle = CONNECTION_TYPE_STYLE[edge.connectionType] ?? { stroke: '#94a3b8' }
   const hovered = useCanvasInteractionStore((s) => s.hoveredEdgeId === id)
   const openNodePicker = useCanvasInteractionStore((s) => s.openNodePicker)
   const requestDeleteEdge = useCanvasInteractionStore((s) => s.requestDeleteEdge)
 
   const arrowColor = selected ? '#6366f1' : typeStyle.stroke
+  const controlsVisible = hovered || selected
 
   return (
     <>
       <defs>
-        <marker
-          id={`${id}-arrow`}
-          markerWidth="16"
-          markerHeight="16"
-          refX="8"
-          refY="4"
-          orient="auto"
-        >
+        <marker id={`${id}-arrow`} markerWidth="16" markerHeight="16" refX="8" refY="4" orient="auto">
           <path d="M0,0 L0,8 L8,4 z" fill={arrowColor} />
         </marker>
       </defs>
+
       <BaseEdge
         id={id}
         path={edgePath}
@@ -105,7 +118,25 @@ export function CanvasEdge({
           strokeDasharray: selected ? undefined : typeStyle.strokeDasharray,
         }}
       />
-      {(hovered || selected) && (
+
+      <EdgeToolbar edgeId={id} x={labelX} y={labelY} isVisible={controlsVisible} alignY="top">
+        <div className="edge-toolbar__group nodrag nopan">
+          <button
+            type="button"
+            className="edge-delete-button"
+            title="Delete connection (Delete)"
+            aria-label="Delete connection"
+            onClick={(event) => {
+              event.stopPropagation()
+              requestDeleteEdge(id)
+            }}
+          >
+            Del
+          </button>
+        </div>
+      </EdgeToolbar>
+
+      {controlsVisible && (
         <EdgeLabelRenderer>
           <div
             className="nodrag nopan"
@@ -121,6 +152,7 @@ export function CanvasEdge({
               type="button"
               className="edge-insert-button"
               title="Insert node into connection"
+              aria-label="Insert node into connection"
               onClick={(event) => {
                 event.stopPropagation()
                 openNodePicker({
@@ -133,35 +165,19 @@ export function CanvasEdge({
             >
               +
             </button>
-            <button
-              type="button"
-              className="edge-delete-button"
-              title="연결선 삭제 (Delete)"
-              onClick={(event) => {
-                event.stopPropagation()
-                requestDeleteEdge(id)
-              }}
-            >
-              ×
-            </button>
           </div>
         </EdgeLabelRenderer>
       )}
+
       {edge.label && (
         <EdgeLabelRenderer>
           <div
+            className="edge-label nodrag nopan"
             style={{
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
               pointerEvents: 'all',
-              fontSize: 11,
-              background: 'white',
-              border: '1px solid #e2e8f0',
-              borderRadius: 4,
-              padding: '1px 6px',
-              color: '#475569',
             }}
-            className="nodrag nopan"
           >
             {edge.label}
           </div>

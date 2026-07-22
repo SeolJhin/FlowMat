@@ -1,8 +1,8 @@
-import { useState, type FormEvent } from 'react'
-import { useParams, Link } from 'react-router-dom'
+﻿import { useState, type FormEvent } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { useApplyProcessTemplateMutation } from '../../../entities/workflow/api/useApplyProcessTemplateMutation'
 import { useProcessTemplatesQuery } from '../../../entities/workflow/api/useProcessTemplatesQuery'
 import { useWorkflowsQuery } from '../../../entities/workflow/api/useWorkflowsQuery'
-import { useApplyProcessTemplateMutation } from '../../../entities/workflow/api/useApplyProcessTemplateMutation'
 
 export function TemplatesRoute() {
   const { projectId = '' } = useParams<{ projectId: string }>()
@@ -21,7 +21,7 @@ export function TemplatesRoute() {
     setApplyingId(templateId)
     try {
       await applyMutation.mutateAsync({ templateId, workflowId: selectedWorkflowId })
-      alert('템플릿이 적용됐습니다. 해당 워크플로우 캔버스를 확인하세요.')
+      alert('Template applied. Open the workflow canvas to review the result.')
     } finally {
       setApplyingId(null)
     }
@@ -29,50 +29,40 @@ export function TemplatesRoute() {
 
   return (
     <div style={{ padding: 32, maxWidth: 900, margin: '0 auto' }}>
-      <Link to="/" style={{ fontSize: 13, color: 'var(--accent)' }}>← 홈</Link>
-      <h1>프로세스 템플릿</h1>
-      <p style={{ color: 'var(--text)', opacity: 0.6, marginTop: 0 }}>프로젝트 <code>{projectId}</code></p>
+      <Link to="/" style={{ fontSize: 13, color: 'var(--accent)' }}>Back to home</Link>
+      <h1>Process Templates</h1>
+      <p style={{ color: 'var(--text)', opacity: 0.6, marginTop: 0 }}>
+        Project <code>{projectId}</code>
+      </p>
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 24 }}>
-        <span style={{ fontWeight: 500 }}>적용할 워크플로우:</span>
-        <select
-          value={selectedWorkflowId}
-          onChange={(e) => setSelectedWorkflowId(e.target.value)}
-          style={{ minWidth: 200 }}
-        >
-          <option value="">선택…</option>
-          {workflows.map((wf) => (
-            <option key={wf.workflowId} value={wf.workflowId}>{wf.workflowName}</option>
+        <span style={{ fontWeight: 500 }}>Target workflow</span>
+        <select value={selectedWorkflowId} onChange={(e) => setSelectedWorkflowId(e.target.value)} style={{ minWidth: 200 }}>
+          <option value="">Select...</option>
+          {workflows.map((workflow) => (
+            <option key={workflow.workflowId} value={workflow.workflowId}>{workflow.workflowName}</option>
           ))}
         </select>
       </label>
 
-      {templatesQuery.isLoading && <p>불러오는 중…</p>}
-      {templatesQuery.isError && <p style={{ color: '#dc2626' }}>템플릿 불러오기 실패</p>}
-      {!templatesQuery.isLoading && templates.length === 0 && (
-        <p className="inspector-hint">등록된 템플릿이 없습니다.</p>
-      )}
+      {templatesQuery.isLoading && <p>Loading templates...</p>}
+      {templatesQuery.isError && <p style={{ color: '#dc2626' }}>Failed to load templates.</p>}
+      {!templatesQuery.isLoading && templates.length === 0 && <p className="inspector-hint">No templates available.</p>}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
-        {templates.map((tpl) => (
+        {templates.map((template) => (
           <div
-            key={tpl.templateId}
+            key={template.templateId}
             style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 16, display: 'grid', gap: 8 }}
           >
-            <div style={{ fontWeight: 600, fontSize: 15 }}>{tpl.templateName}</div>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>{template.templateName}</div>
             <div style={{ fontSize: 12, opacity: 0.7 }}>
-              {tpl.templateCategory} · {tpl.templateType}
+              {template.templateCategory} | {template.templateType}
             </div>
-            {tpl.defaultDesc && (
-              <div style={{ fontSize: 12, opacity: 0.6 }}>{tpl.defaultDesc}</div>
-            )}
-            <form onSubmit={(e) => void handleApply(e, tpl.templateId)}>
-              <button
-                type="submit"
-                disabled={!selectedWorkflowId || applyingId === tpl.templateId}
-                style={{ width: '100%', marginTop: 4 }}
-              >
-                {applyingId === tpl.templateId ? '적용 중…' : '캔버스에 적용'}
+            {template.defaultDesc && <div style={{ fontSize: 12, opacity: 0.6 }}>{template.defaultDesc}</div>}
+            <form onSubmit={(e) => void handleApply(e, template.templateId)}>
+              <button type="submit" disabled={!selectedWorkflowId || applyingId === template.templateId} style={{ width: '100%', marginTop: 4 }}>
+                {applyingId === template.templateId ? 'Applying...' : 'Apply to Canvas'}
               </button>
             </form>
           </div>

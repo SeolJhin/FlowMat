@@ -1,5 +1,13 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react'
-import { Handle, NodeResizer, NodeToolbar, Position, useConnection, useNodeConnections, type NodeProps } from '@xyflow/react'
+import {
+  Handle,
+  NodeResizer,
+  NodeToolbar,
+  Position,
+  useConnection,
+  useNodeConnections,
+  type NodeProps,
+} from '@xyflow/react'
 import type { CanvasNodeViewModel, CanvasPortViewModel } from '../../../entities/workflow/model/types'
 import {
   getWorkflowNodeDefinition,
@@ -8,7 +16,6 @@ import {
 import { useWorkspaceStore } from '../model/workspaceStore'
 import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
 
-// Color scheme → CSS color approximation
 const COLOR_MAP: Record<string, string> = {
   sky: '#0ea5e9',
   emerald: '#10b981',
@@ -28,32 +35,89 @@ interface PortRowProps {
   onSelect(processIoId: string): void
 }
 
-function InputPortRow({ port, onSelect }: PortRowProps) {
+function usePortHandleState(port: CanvasPortViewModel, handleType: 'source' | 'target') {
   const connection = useConnection()
-  const connections = useNodeConnections({ handleType: 'target', handleId: port.handleId })
+  const baseColor = resolveColor(port.colorScheme)
   const isConnecting = connection.inProgress
-  const isTargeted =
+  const draggedFromType = isConnecting ? connection.fromHandle.type : null
+  const expectsThisHandleType =
+    isConnecting &&
+    ((handleType === 'target' && draggedFromType === 'source') ||
+      (handleType === 'source' && draggedFromType === 'target'))
+
+  const isOrigin =
+    isConnecting &&
+    connection.fromHandle.nodeId === port.processId &&
+    connection.fromHandle.id === port.handleId
+
+  const isHovered =
     isConnecting &&
     connection.toHandle?.nodeId === port.processId &&
     connection.toHandle?.id === port.handleId
+
+  const isTargeted = isHovered && connection.isValid === true
+  const isRejected = isHovered && connection.isValid === false
+  const isCandidate = expectsThisHandleType && !isTargeted && !isRejected
+
+  const background = isOrigin
+    ? '#6366f1'
+    : isTargeted
+      ? '#22c55e'
+      : isRejected
+        ? '#ef4444'
+        : isCandidate
+          ? '#f8fafc'
+          : baseColor
+
+  const boxShadow = isOrigin
+    ? '0 0 0 3px #c7d2fe'
+    : isTargeted
+      ? '0 0 0 3px #bbf7d0'
+      : isRejected
+        ? '0 0 0 3px #fecaca'
+        : isCandidate
+          ? '0 0 0 2px rgba(99, 102, 241, 0.18)'
+          : undefined
+
+  return {
+    rowClassName: [
+      'canvas-node__port',
+      handleType === 'target' ? 'canvas-node__port--input' : 'canvas-node__port--output',
+      isCandidate ? 'canvas-node__port--candidate' : '',
+      isTargeted ? 'canvas-node__port--targeted' : '',
+      isRejected ? 'canvas-node__port--rejected' : '',
+      isOrigin ? 'canvas-node__port--origin' : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
+    handleStyle: {
+      background,
+      boxShadow,
+      transition: 'background 0.15s, box-shadow 0.15s',
+    },
+  }
+}
+
+function InputPortRow({ port, onSelect }: PortRowProps) {
+  const { rowClassName, handleStyle } = usePortHandleState(port, 'target')
+  const connections = useNodeConnections({ handleType: 'target', handleId: port.handleId })
   const connCount = connections.length
 
   return (
-    <div className="canvas-node__port canvas-node__port--input">
+    <div className={rowClassName}>
       <Handle
         type="target"
         position={Position.Left}
         id={port.handleId}
-        style={{
-          background: isTargeted ? '#22c55e' : resolveColor(port.colorScheme),
-          boxShadow: isTargeted ? '0 0 0 3px #bbf7d0' : undefined,
-          transition: 'background 0.15s, box-shadow 0.15s',
-        }}
+        style={handleStyle}
         onClick={() => onSelect(port.processIoId)}
       />
       <span className="canvas-node__port-name">{port.name}</span>
       {connCount > 0 && (
-        <span className="canvas-node__port-badge" title={`${connCount}개 연결됨`}>
+        <span
+          className="canvas-node__port-badge"
+          title={`${connCount} connection${connCount === 1 ? '' : 's'}`}
+        >
           {connCount}
         </span>
       )}
@@ -62,18 +126,17 @@ function InputPortRow({ port, onSelect }: PortRowProps) {
 }
 
 function OutputPortRow({ port, onSelect }: PortRowProps) {
-  const connection = useConnection()
+  const { rowClassName, handleStyle } = usePortHandleState(port, 'source')
   const connections = useNodeConnections({ handleType: 'source', handleId: port.handleId })
-  const isSource =
-    connection.inProgress &&
-    connection.fromNode?.id === port.processId &&
-    connection.fromHandle?.id === port.handleId
   const connCount = connections.length
 
   return (
-    <div className="canvas-node__port canvas-node__port--output">
+    <div className={rowClassName}>
       {connCount > 0 && (
-        <span className="canvas-node__port-badge" title={`${connCount}개 연결됨`}>
+        <span
+          className="canvas-node__port-badge"
+          title={`${connCount} connection${connCount === 1 ? '' : 's'}`}
+        >
           {connCount}
         </span>
       )}
@@ -82,11 +145,7 @@ function OutputPortRow({ port, onSelect }: PortRowProps) {
         type="source"
         position={Position.Right}
         id={port.handleId}
-        style={{
-          background: isSource ? '#6366f1' : resolveColor(port.colorScheme),
-          boxShadow: isSource ? '0 0 0 3px #c7d2fe' : undefined,
-          transition: 'background 0.15s, box-shadow 0.15s',
-        }}
+        style={handleStyle}
         onClick={() => onSelect(port.processIoId)}
       />
     </div>
@@ -99,8 +158,14 @@ type CanvasNodeComponentProps = Omit<NodeProps, 'data'> & {
 
 export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
   const {
-    inlineEditingNodeId, selectPort, stopInlineEdit, commitRename,
-    activeColorPickerNodeId, openColorPicker, closeColorPicker,
+    inlineEditingNodeId,
+    selectPort,
+    startInlineEdit,
+    stopInlineEdit,
+    commitRename,
+    activeColorPickerNodeId,
+    openColorPicker,
+    closeColorPicker,
   } = useWorkspaceStore()
   const requestDeleteNode = useCanvasInteractionStore((s) => s.requestDeleteNode)
   const requestColorChange = useCanvasInteractionStore((s) => s.requestColorChange)
@@ -110,8 +175,17 @@ export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
   const [draftName, setDraftName] = useState(node.name)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { setDraftName(node.name) }, [node.name])
-  useEffect(() => { if (editing) inputRef.current?.select() }, [editing])
+  useEffect(() => {
+    setDraftName(node.name)
+  }, [node.name])
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select()
+  }, [editing])
+
+  useEffect(() => {
+    if (!selected && isColorPickerOpen) closeColorPicker()
+  }, [selected, isColorPickerOpen, closeColorPicker])
 
   const headerColor = resolveColor(node.colorScheme)
   const nodeDefinition = getWorkflowNodeDefinition(node.nodeType)
@@ -122,12 +196,16 @@ export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
       style={getWorkflowNodeStyle(node.nodeType) as CSSProperties}
     >
       <NodeToolbar isVisible={selected} position={Position.Top} offset={6} align="end">
-        <div style={{ display: 'flex', gap: '4px', alignItems: 'center', position: 'relative' }}>
+        <div className="node-toolbar__group">
           <button
             type="button"
-            className="node-toolbar__btn nodrag nopan"
-            title="색상 변경"
-            onClick={(e) => { e.stopPropagation(); isColorPickerOpen ? closeColorPicker() : openColorPicker(node.id) }}
+            className="node-toolbar__btn node-toolbar__btn--swatch nodrag nopan"
+            title="Change node color"
+            aria-label="Change node color"
+            onClick={(e) => {
+              e.stopPropagation()
+              isColorPickerOpen ? closeColorPicker() : openColorPicker(node.id)
+            }}
             style={{ background: resolveColor(node.colorScheme), border: '2px solid white' }}
           />
           {isColorPickerOpen && (
@@ -137,7 +215,10 @@ export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
                   key={scheme}
                   type="button"
                   className="color-picker-popup__chip"
-                  style={{ background: hex, outline: node.colorScheme === scheme ? '2px solid var(--accent)' : 'none' }}
+                  style={{
+                    background: hex,
+                    outline: node.colorScheme === scheme ? '2px solid var(--accent)' : 'none',
+                  }}
                   title={scheme}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -151,18 +232,41 @@ export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
           <button
             type="button"
             className="node-toolbar__btn nodrag nopan"
-            title="노드 복제 (Ctrl+D)"
-            onClick={(e) => { e.stopPropagation(); requestDuplicateNode(node.id) }}
+            title="Rename node"
+            aria-label="Rename node"
+            onClick={(e) => {
+              e.stopPropagation()
+              closeColorPicker()
+              startInlineEdit(node.id)
+            }}
           >
-            ⧉
+            Aa
+          </button>
+          <button
+            type="button"
+            className="node-toolbar__btn nodrag nopan"
+            title="Duplicate node (Ctrl+D)"
+            aria-label="Duplicate node"
+            onClick={(e) => {
+              e.stopPropagation()
+              closeColorPicker()
+              requestDuplicateNode(node.id)
+            }}
+          >
+            Copy
           </button>
           <button
             type="button"
             className="node-toolbar__btn node-toolbar__btn--delete nodrag nopan"
-            title="노드 삭제 (Delete)"
-            onClick={(e) => { e.stopPropagation(); requestDeleteNode(node.id) }}
+            title="Delete node (Delete)"
+            aria-label="Delete node"
+            onClick={(e) => {
+              e.stopPropagation()
+              closeColorPicker()
+              requestDeleteNode(node.id)
+            }}
           >
-            ×
+            Del
           </button>
         </div>
       </NodeToolbar>
@@ -194,7 +298,10 @@ export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
             onBlur={() => commitRename(node.id, draftName.trim() || node.name)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') commitRename(node.id, draftName.trim() || node.name)
-              if (e.key === 'Escape') { setDraftName(node.name); stopInlineEdit() }
+              if (e.key === 'Escape') {
+                setDraftName(node.name)
+                stopInlineEdit()
+              }
             }}
           />
         ) : (
@@ -202,8 +309,8 @@ export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
         )}
         <span className="canvas-node__type">{nodeDefinition.label}</span>
         {node.editingByUserId && (
-          <span className="canvas-node__editing-badge" title={`${node.editingByUserId} 편집 중`}>
-            ✏
+          <span className="canvas-node__editing-badge" title={`${node.editingByUserId} is editing`}>
+            Edit
           </span>
         )}
       </div>
@@ -224,13 +331,8 @@ export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
         </div>
       )}
 
-      {/* Default handles when no I/O rows exist */}
-      {node.inputs.length === 0 && (
-        <Handle type="target" position={Position.Left} id="in-default" />
-      )}
-      {node.outputs.length === 0 && (
-        <Handle type="source" position={Position.Right} id="out-default" />
-      )}
+      {node.inputs.length === 0 && <Handle type="target" position={Position.Left} id="in-default" />}
+      {node.outputs.length === 0 && <Handle type="source" position={Position.Right} id="out-default" />}
     </div>
   )
 }

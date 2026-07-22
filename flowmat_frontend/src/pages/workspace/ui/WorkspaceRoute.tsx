@@ -1,6 +1,11 @@
+﻿import { Suspense, lazy } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useWorkflowCanvasQuery } from '../../../entities/workflow/api/useWorkflowCanvasQuery'
-import { WorkflowCanvasPage } from './WorkflowCanvasPage'
+import { preloadWorkflowCanvasPage } from './workspacePreload'
+
+const WorkflowCanvasPage = lazy(() =>
+  preloadWorkflowCanvasPage().then((module) => ({ default: module.WorkflowCanvasPage }))
+)
 
 export function WorkspaceRoute() {
   const { projectId = '', workflowId = '' } = useParams<{ projectId: string; workflowId: string }>()
@@ -15,10 +20,16 @@ export function WorkspaceRoute() {
     return (
       <div className="workspace-error" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <span>{msg}</span>
-        <Link to="/" style={{ fontSize: 13, color: 'var(--accent)' }}>← 홈으로 돌아가기</Link>
+        <Link to="/" style={{ fontSize: 13, color: 'var(--accent)' }}>
+          Back to home
+        </Link>
       </div>
     )
   }
 
-  return <WorkflowCanvasPage canvas={canvas} projectId={projectId} />
+  return (
+    <Suspense fallback={<div className="workspace-loading">Loading workspace...</div>}>
+      <WorkflowCanvasPage canvas={canvas} projectId={projectId} />
+    </Suspense>
+  )
 }

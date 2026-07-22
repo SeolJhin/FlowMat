@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+﻿import { useRef, useState } from 'react'
 import { useCreateProcessConnectionMutation } from '../../../entities/workflow/api/useCreateProcessConnectionMutation'
 import { useCreateProcessIoMutation } from '../../../entities/workflow/api/useCreateProcessIoMutation'
 import { useCreateProcessMutation } from '../../../entities/workflow/api/useCreateProcessMutation'
@@ -22,7 +22,7 @@ import {
 } from '../../../entities/workflow/model/nodeCatalog'
 import type { NodePickerState } from './canvasInteractionStore'
 
-// Module-level constants — computed once, never change at runtime
+// Module-level constants computed once and reused for the lifetime of the module
 const PALETTE_DEFINITIONS = getWorkflowPaletteDefinitions()
 const DEFAULT_NODE_DEFINITION = getWorkflowDefaultNodeDefinition()
 import type {
@@ -199,7 +199,7 @@ export function useWorkflowCanvasActions({
     )
     if (!created) return
 
-    // Drag started at an output handle → new node is the target, and vice versa.
+    // Drag started at an output handle, so the new node becomes the target, and vice versa.
     const payload: ConnectCompletePayload =
       draft.fromHandleType === 'source'
         ? {
@@ -237,7 +237,7 @@ export function useWorkflowCanvasActions({
   /**
    * On-canvas picker, insert-on-edge mode (ported from tldraw's
    * insertNodeWithinConnection): split an existing connection with a new
-   * node — original edge is replaced by source→new and new→target.
+   * node: the original edge is replaced by source->new and new->target.
    */
   async function insertNodeOnEdge(
     edgeId: string,
@@ -387,7 +387,7 @@ export function useWorkflowCanvasActions({
     try {
       const created = await createProcessMutation.mutateAsync({
         workflowId: canvas.workflow.workflowId,
-        processName: `${node.name} (복사)`,
+        processName: `${node.name} (Copy)`, 
         processType: node.processType,
         nodeType: node.nodeType,
         colorScheme: node.colorScheme,
@@ -520,9 +520,42 @@ export function useWorkflowCanvasActions({
     }
   }
 
+  async function deleteElements(input: { nodeIds: string[]; edgeIds: string[] }) {
+    const { nodeIds, edgeIds } = input
+    if (nodeIds.length === 0 && edgeIds.length === 0) return
+
+    setWorkspaceMessage(null)
+
+    const allEdgeIds = new Set(edgeIds)
+    for (const nodeId of nodeIds) {
+      for (const connectionId of getRelatedConnectionIds(canvas.edges, nodeId)) {
+        allEdgeIds.add(connectionId)
+      }
+    }
+
+    if (nodeIds.length > 0) {
+      // Multi-node delete invalidates history because connected edges disappear as well.
+      commandHistory.clear()
+    }
+
+    try {
+      for (const connectionId of allEdgeIds) {
+        await deleteConnectionMutation.mutateAsync(connectionId)
+      }
+
+      for (const processId of nodeIds) {
+        await deleteProcessMutation.mutateAsync(processId)
+      }
+
+      clearSelection()
+    } catch (error) {
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to delete selection.')
+    }
+  }
+
   async function deleteNode(processId: string) {
     setWorkspaceMessage(null)
-    // Node deletion cascades to connections — stale undo commands would reference
+    // Node deletion cascades to connections, so stale undo commands would reference
     // deleted entities, so clear history to prevent invalid operations.
     commandHistory.clear()
 
@@ -578,7 +611,10 @@ export function useWorkflowCanvasActions({
     batchUpdateNodePositions,
     updateConnection,
     deleteConnection,
+    deleteElements,
     deleteNode,
     createConnection,
   }
 }
+
+

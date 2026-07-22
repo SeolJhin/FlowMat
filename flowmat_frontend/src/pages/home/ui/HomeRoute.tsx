@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+﻿import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { useCreateProjectMutation } from '../../../entities/project/api/useCreateProjectMutation'
 import { useProjectsQuery } from '../../../entities/project/api/useProjectsQuery'
 import { useCreateWorkflowMutation } from '../../../entities/workflow/api/useCreateWorkflowMutation'
@@ -11,8 +11,16 @@ import {
   useSignupMutation,
 } from '../../../entities/auth/api/useLoginMutation'
 import { useCurrentUserQuery } from '../../../entities/auth/api/useCurrentUserQuery'
+import {
+  preloadInventoryRoute,
+  preloadRulesRoute,
+  preloadRunsRoute,
+  preloadTemplatesRoute,
+} from '../../../app/router/routePreload'
+import { preloadWorkspaceExperience } from '../../workspace/ui/workspacePreload'
 
 export function HomeRoute() {
+  const navigate = useNavigate()
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!tokenStorage.getAccess())
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
   const [authUserId, setAuthUserId] = useState('')
@@ -33,15 +41,20 @@ export function HomeRoute() {
         await loginMutation.mutateAsync({ userIdOrEmail: authUserId, password: authPassword })
       } else {
         await signupMutation.mutateAsync({
-          userId: authUserId, userName: authUserName,
-          userEmail: authEmail, password: authPassword,
+          userId: authUserId,
+          userName: authUserName,
+          userEmail: authEmail,
+          password: authPassword,
         })
         await loginMutation.mutateAsync({ userIdOrEmail: authUserId, password: authPassword })
       }
       setIsLoggedIn(true)
-      setAuthUserId(''); setAuthPassword(''); setAuthUserName(''); setAuthEmail('')
+      setAuthUserId('')
+      setAuthPassword('')
+      setAuthUserName('')
+      setAuthEmail('')
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : '인증 실패')
+      setAuthError(err instanceof Error ? err.message : 'Authentication failed.')
     }
   }
 
@@ -53,40 +66,64 @@ export function HomeRoute() {
   if (!isLoggedIn) {
     return (
       <div style={{ minHeight: '100svh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <form onSubmit={handleAuthSubmit} style={{
-          width: 320, padding: 24, border: '1px solid var(--border)',
-          borderRadius: 16, display: 'grid', gap: 12, background: 'var(--bg)',
-        }}>
-          <h2 style={{ margin: 0 }}>FlowMat {authMode === 'login' ? '로그인' : '회원가입'}</h2>
+        <form
+          onSubmit={handleAuthSubmit}
+          style={{
+            width: 320,
+            padding: 24,
+            border: '1px solid var(--border)',
+            borderRadius: 16,
+            display: 'grid',
+            gap: 12,
+            background: 'var(--bg)',
+          }}
+        >
+          <h2 style={{ margin: 0 }}>FlowMat {authMode === 'login' ? 'Login' : 'Sign Up'}</h2>
           {authMode === 'signup' && (
             <>
-              <input value={authUserName} onChange={e => setAuthUserName(e.target.value)}
-                placeholder="이름" required />
-              <input type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)}
-                placeholder="이메일" required />
+              <input value={authUserName} onChange={(e) => setAuthUserName(e.target.value)} placeholder="Name" required />
+              <input type="email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="Email" required />
             </>
           )}
-          <input value={authUserId} onChange={e => setAuthUserId(e.target.value)}
-            placeholder={authMode === 'login' ? '아이디 또는 이메일' : '아이디'} required />
-          <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)}
-            placeholder="비밀번호" required />
+          <input
+            value={authUserId}
+            onChange={(e) => setAuthUserId(e.target.value)}
+            placeholder={authMode === 'login' ? 'User ID or email' : 'User ID'}
+            required
+          />
+          <input
+            type="password"
+            value={authPassword}
+            onChange={(e) => setAuthPassword(e.target.value)}
+            placeholder="Password"
+            required
+          />
           {authError && <p style={{ color: '#dc2626', fontSize: 13, margin: 0 }}>{authError}</p>}
           <button type="submit" disabled={loginMutation.isPending || signupMutation.isPending}>
             {loginMutation.isPending || signupMutation.isPending
-              ? '처리 중…' : authMode === 'login' ? '로그인' : '가입하기'}
+              ? 'Working...'
+              : authMode === 'login'
+                ? 'Login'
+                : 'Create Account'}
           </button>
-          <button type="button"
+          <button
+            type="button"
             style={{ background: 'transparent', border: 'none', fontSize: 13, color: 'var(--accent)', cursor: 'pointer' }}
-            onClick={() => { setAuthMode(m => m === 'login' ? 'signup' : 'login'); setAuthError(null) }}>
-            {authMode === 'login' ? '계정이 없으신가요? 회원가입' : '이미 계정이 있으신가요? 로그인'}
+            onClick={() => {
+              setAuthMode((mode) => (mode === 'login' ? 'signup' : 'login'))
+              setAuthError(null)
+            }}
+          >
+            {authMode === 'login' ? 'Need an account? Sign up' : 'Already have an account? Login'}
           </button>
           <p style={{ fontSize: 11, color: 'var(--text)', opacity: 0.5, margin: 0, textAlign: 'center' }}>
-            데모 계정: demo-owner / demo1234
+            Demo account: demo-owner / demo1234
           </p>
         </form>
       </div>
     )
   }
+
   const currentUserQuery = useCurrentUserQuery()
   const currentUser = currentUserQuery.data
 
@@ -96,6 +133,7 @@ export function HomeRoute() {
     isError: isProjectsError,
     error: projectsError,
   } = useProjectsQuery()
+
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [projectName, setProjectName] = useState('')
   const [projectDesc, setProjectDesc] = useState('')
@@ -104,6 +142,39 @@ export function HomeRoute() {
 
   const createProjectMutation = useCreateProjectMutation()
   const createWorkflowMutation = useCreateWorkflowMutation()
+
+  function handleWorkflowIntent() {
+    void preloadWorkspaceExperience()
+  }
+
+  const projectLinks = useMemo(
+    () =>
+      selectedProjectId
+        ? [
+            {
+              label: 'Inventory',
+              to: `/projects/${selectedProjectId}/inventory`,
+              preload: preloadInventoryRoute,
+            },
+            {
+              label: 'Runs',
+              to: `/projects/${selectedProjectId}/runs`,
+              preload: preloadRunsRoute,
+            },
+            {
+              label: 'Templates',
+              to: `/projects/${selectedProjectId}/templates`,
+              preload: preloadTemplatesRoute,
+            },
+            {
+              label: 'Rules',
+              to: `/projects/${selectedProjectId}/rules`,
+              preload: preloadRulesRoute,
+            },
+          ]
+        : [],
+    [selectedProjectId]
+  )
 
   useEffect(() => {
     if (!selectedProjectId && projects.length > 0) {
@@ -136,7 +207,8 @@ export function HomeRoute() {
     event.preventDefault()
     if (!selectedProjectId) return
 
-    await createWorkflowMutation.mutateAsync({
+    const preload = preloadWorkspaceExperience()
+    const createdWorkflow = await createWorkflowMutation.mutateAsync({
       projectId: selectedProjectId,
       workflowName,
       workflowDesc,
@@ -145,6 +217,8 @@ export function HomeRoute() {
 
     setWorkflowName('')
     setWorkflowDesc('')
+    await preload
+    navigate(`/projects/${createdWorkflow.projectId}/workflows/${createdWorkflow.workflowId}`)
   }
 
   return (
@@ -163,15 +237,42 @@ export function HomeRoute() {
           <h1 style={{ marginBottom: '12px' }}>FlowMat Workspace</h1>
           <p>
             {currentUser
-              ? `${currentUser.userName} (${currentUser.userId})님 — 프로젝트를 선택하거나 새로 만드세요.`
+              ? `${currentUser.userName} (${currentUser.userId}), choose a project or create a new one.`
               : 'Select a project, then open one of its workflows.'}
           </p>
         </div>
-        <button type="button" onClick={handleLogout}
-          style={{ fontSize: 12, padding: '4px 10px', height: 30 }}>
-          로그아웃
+        <button type="button" onClick={handleLogout} style={{ fontSize: 12, padding: '4px 10px', height: 30 }}>
+          Logout
         </button>
       </header>
+
+      {projectLinks.length > 0 && (
+        <section style={{ display: 'grid', gap: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', opacity: 0.7 }}>
+            Selected Project Tools
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+            {projectLinks.map((item) => (
+              <Link
+                key={item.label}
+                to={item.to}
+                onMouseEnter={() => void item.preload()}
+                onFocus={() => void item.preload()}
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: '999px',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text-h)',
+                  textDecoration: 'none',
+                  background: 'var(--surface)',
+                }}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section
         style={{
@@ -191,24 +292,14 @@ export function HomeRoute() {
           }}
         >
           <h2>Create Project</h2>
-          <input
-            value={projectName}
-            onChange={(event) => setProjectName(event.target.value)}
-            placeholder="Project name"
-            required
-          />
+          <input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Project name" required />
           <input
             value={currentUser?.userId ?? ''}
             readOnly
-            placeholder="Owner (로그인 계정)"
+            placeholder="Owner (logged-in account)"
             style={{ opacity: 0.6, cursor: 'not-allowed' }}
           />
-          <textarea
-            value={projectDesc}
-            onChange={(event) => setProjectDesc(event.target.value)}
-            placeholder="Project description"
-            rows={3}
-          />
+          <textarea value={projectDesc} onChange={(event) => setProjectDesc(event.target.value)} placeholder="Project description" rows={3} />
           <button type="submit" disabled={createProjectMutation.isPending}>
             {createProjectMutation.isPending ? 'Creating...' : 'Create Project'}
           </button>
@@ -229,22 +320,9 @@ export function HomeRoute() {
         >
           <h2>Create Workflow</h2>
           <input value={selectedProjectId} readOnly placeholder="Select a project first" />
-          <input
-            value={workflowName}
-            onChange={(event) => setWorkflowName(event.target.value)}
-            placeholder="Workflow name"
-            required
-          />
-          <textarea
-            value={workflowDesc}
-            onChange={(event) => setWorkflowDesc(event.target.value)}
-            placeholder="Workflow description"
-            rows={3}
-          />
-          <button
-            type="submit"
-            disabled={!selectedProjectId || createWorkflowMutation.isPending}
-          >
+          <input value={workflowName} onChange={(event) => setWorkflowName(event.target.value)} placeholder="Workflow name" required />
+          <textarea value={workflowDesc} onChange={(event) => setWorkflowDesc(event.target.value)} placeholder="Workflow description" rows={3} />
+          <button type="submit" disabled={!selectedProjectId || createWorkflowMutation.isPending}>
             {createWorkflowMutation.isPending ? 'Creating...' : 'Create Workflow'}
           </button>
           {createWorkflowMutation.isError && (
@@ -256,9 +334,7 @@ export function HomeRoute() {
       <section>
         <h2>Projects</h2>
         {isProjectsLoading && <p>Loading projects...</p>}
-        {isProjectsError && (
-          <p>{projectsError instanceof Error ? projectsError.message : 'Failed to load projects.'}</p>
-        )}
+        {isProjectsError && <p>{projectsError instanceof Error ? projectsError.message : 'Failed to load projects.'}</p>}
         {!isProjectsLoading && !isProjectsError && projects.length === 0 && <p>No projects found.</p>}
         <div style={{ display: 'grid', gap: '12px', marginTop: '16px' }}>
           {projects.map((project) => {
@@ -294,17 +370,15 @@ export function HomeRoute() {
         <h2>Workflows</h2>
         {!selectedProjectId && <p>Select a project first.</p>}
         {selectedProjectId && isWorkflowsLoading && <p>Loading workflows...</p>}
-        {selectedProjectId && isWorkflowsError && (
-          <p>{workflowsError instanceof Error ? workflowsError.message : 'Failed to load workflows.'}</p>
-        )}
-        {selectedProjectId && !isWorkflowsLoading && !isWorkflowsError && workflows.length === 0 && (
-          <p>No workflows found for the selected project.</p>
-        )}
+        {selectedProjectId && isWorkflowsError && <p>{workflowsError instanceof Error ? workflowsError.message : 'Failed to load workflows.'}</p>}
+        {selectedProjectId && !isWorkflowsLoading && !isWorkflowsError && workflows.length === 0 && <p>No workflows found for the selected project.</p>}
         <div style={{ display: 'grid', gap: '12px', marginTop: '16px' }}>
           {workflows.map((workflow) => (
             <Link
               key={workflow.workflowId}
               to={`/projects/${workflow.projectId}/workflows/${workflow.workflowId}`}
+              onMouseEnter={handleWorkflowIntent}
+              onFocus={handleWorkflowIntent}
               style={{
                 display: 'block',
                 padding: '16px 18px',

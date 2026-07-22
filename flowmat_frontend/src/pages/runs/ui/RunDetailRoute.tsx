@@ -1,4 +1,4 @@
-import { useParams, Link } from 'react-router-dom'
+﻿import { Link, useParams } from 'react-router-dom'
 
 export function RunDetailRoute() {
   const { projectId = '', runId = '' } = useParams<{ projectId: string; runId: string }>()
@@ -6,11 +6,13 @@ export function RunDetailRoute() {
   return (
     <div style={{ padding: 32 }}>
       <Link to={`/projects/${projectId}/runs`} style={{ fontSize: 13, color: 'var(--accent)' }}>
-        ← 실행 목록
+        Back to runs
       </Link>
-      <h1>실행 상세</h1>
-      <p style={{ color: 'var(--text)', opacity: 0.6 }}>Run ID: <code>{runId}</code></p>
-      <p className="inspector-hint">이 페이지는 다음 스프린트에서 구현됩니다.</p>
+      <h1>Run Detail</h1>
+      <p style={{ color: 'var(--text)', opacity: 0.6 }}>
+        Run ID: <code>{runId}</code>
+      </p>
+      <p className="inspector-hint">This page is scheduled for a future sprint.</p>
     </div>
   )
 }
