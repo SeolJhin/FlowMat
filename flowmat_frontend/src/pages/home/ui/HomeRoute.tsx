@@ -171,6 +171,11 @@ export function HomeRoute() {
               to: `/projects/${selectedProjectId}/rules`,
               preload: preloadRulesRoute,
             },
+            {
+              label: 'Settings',
+              to: `/projects/${selectedProjectId}/settings`,
+              preload: async () => {},
+            },
           ]
         : [],
     [selectedProjectId]

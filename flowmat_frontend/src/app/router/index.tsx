@@ -30,6 +30,12 @@ const TemplatesRoute = lazy(() =>
 const RulesRoute = lazy(() =>
   preloadRulesRoute().then((module) => ({ default: module.RulesRoute }))
 )
+const InviteAcceptRoute = lazy(() =>
+  import('../../pages/invite/ui/InviteAcceptRoute').then((module) => ({ default: module.InviteAcceptRoute }))
+)
+const ProjectSettingsRoute = lazy(() =>
+  import('../../pages/project-settings/ui/ProjectSettingsRoute').then((module) => ({ default: module.ProjectSettingsRoute }))
+)
 
 function RouteFallback() {
   return <div className="workspace-loading">Loading...</div>
@@ -41,6 +47,8 @@ function withSuspense(element: React.ReactNode) {
 
 export const router = createBrowserRouter([
   { path: '/', element: withSuspense(<HomeRoute />) },
+  { path: '/invite/accept', element: withSuspense(<InviteAcceptRoute />) },
+  { path: '/projects/:projectId/settings', element: withSuspense(<ProjectSettingsRoute />) },
   { path: '/projects/:projectId/workflows/:workflowId', element: withSuspense(<WorkspaceRoute />) },
   { path: '/projects/:projectId/inventory', element: withSuspense(<InventoryRoute />) },
   { path: '/projects/:projectId/runs', element: withSuspense(<RunsRoute />) },

@@ -19,6 +19,8 @@ import org.myweb.flowmat.domain.user.repository.UserRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
+import org.myweb.flowmat.global.mail.MailService;
+import org.myweb.flowmat.global.slack.SlackNotificationService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,6 +42,8 @@ public class ProjectInviteServiceImpl implements ProjectInviteService {
     private final ProjectAccessService projectAccessService;
     private final UserRepository userRepository;
     private final IdGenerator idGenerator;
+    private final MailService mailService;
+    private final SlackNotificationService slackNotificationService;
 
     @Override
     public List<ProjectInviteResponse> listInvites(String projectId) {
@@ -92,7 +96,13 @@ public class ProjectInviteServiceImpl implements ProjectInviteService {
         invite.setInvitedBy(projectAccessService.requireCurrentUserId());
         invite.setExpiredAt(OffsetDateTime.now().plusDays(7));
 
-        return toResponse(projectInviteRepository.save(invite));
+        ProjectInviteResponse saved = toResponse(projectInviteRepository.save(invite));
+
+        String inviterName = resolveCurrentUser().getUserName();
+        mailService.sendProjectInvite(invitedEmail, project.getProjectName(), inviterName, saved.inviteToken(), role);
+        slackNotificationService.sendProjectInviteAlert(project.getProjectName(), inviterName, invitedEmail, role);
+
+        return saved;
     }
 
     @Override

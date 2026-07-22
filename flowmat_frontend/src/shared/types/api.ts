@@ -169,6 +169,27 @@ export interface FlowRuleDto {
   enabledYn: string
 }
 
+export interface ProjectMemberDto {
+  projectMemberId: string
+  projectId: string
+  userId: string
+  projectRole: string
+  memberStatus: string
+  joinedAt: string | null
+}
+
+export interface ProjectInviteDto {
+  inviteId: string
+  projectId: string
+  invitedEmail: string
+  invitedUserId: string | null
+  projectRole: string
+  inviteStatus: string
+  inviteToken: string
+  acceptedAt: string | null
+  expiredAt: string | null
+}
+
 export interface ProcessTemplateDto {
   templateId: string
   templateName: string

@@ -170,17 +170,47 @@ Frontend build passes under `npm run build` and `npm run lint`.
 
 ---
 
+## Notification Infrastructure
+
+### Email (`MailService`)
+
+- `@Async` + `JavaMailSender` + `MimeMessageHelper` (HTML)
+- Gmail SMTP via `MAIL_HOST`, `MAIL_USERNAME`, `MAIL_PASSWORD` env vars
+- If `MAIL_USERNAME` is blank, send is skipped silently (no startup failure)
+- `app.frontend-url` env var controls the accept link in the email body
+- Called from `ProjectInviteServiceImpl.createInvite()` after invite is persisted
+
+### Slack (`SlackNotificationService`)
+
+- Pure `java.net.http.HttpClient` POST to Incoming Webhook URL
+- Configured via `SLACK_WEBHOOK_URL` env var; silent no-op when unset
+- Called from `ProjectInviteServiceImpl.createInvite()` alongside email
+- Both notifications are `@Async` — invite API response is not blocked
+
+### Frontend invite acceptance (`/invite/accept?token=...`)
+
+- New route handled by `InviteAcceptRoute`
+- Guards: token missing → error state; user not logged in → redirect prompt
+- On accept: `POST /project-invites/accept` with `{ inviteToken }`
+- Success → join confirmation + link to home
+
+### Frontend member/invite management (`/projects/:projectId/settings`)
+
+- New route handled by `ProjectSettingsRoute`
+- **MembersPanel**: list active members, inline role selector (viewer/editor), Save + Remove per row
+- **InvitesPanel**: send invite form (email + role), list pending invites with Cancel action
+- Accessible from Home via "Settings" link in the selected-project tools bar
+- API hooks: `useProjectMembersQuery`, `useProjectInvitesQuery`, `useCreateInviteMutation`, `useCancelInviteMutation`, `useUpdateMemberRoleMutation`, `useRemoveMemberMutation`, `useAcceptInviteMutation`
+
 ## Remaining Gaps
 
-| Area                              | Status                                                                           |
-|-----------------------------------|----------------------------------------------------------------------------------|
-| Invite/member management UI       | API is complete; dedicated frontend screens have not been built yet.             |
-| Email transport for invites       | API returns token and status; mail delivery is not wired up.                    |
-| Admin policy engine               | Based on single `users.user_role` field; no central RBAC or policy engine yet. |
-| WorkflowTemplateServiceImplTest   | No test file yet; workflow template policy relies on process template tests.    |
+| Area                            | Status                                                                           |
+|---------------------------------|----------------------------------------------------------------------------------|
+| Admin policy engine             | Based on single `users.user_role` field; no central RBAC or policy engine yet. |
+| WorkflowTemplateServiceImplTest | No test file yet; workflow template policy relies on process template tests.    |
+| Invite email in CI              | SMTP credentials must be provided via env vars for email to actually send.      |
 
 The next planned steps are:
 
-1. Build project invite and member management UI.
-2. Wire invite acceptance to email delivery.
-3. Expand admin authorization from `user_role` to an explicit permission model.
+1. Expand admin authorization from `user_role` to an explicit permission model.
+2. Add `WorkflowTemplateServiceImplTest` to match process template test coverage.

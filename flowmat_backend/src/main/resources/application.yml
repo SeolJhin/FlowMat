@@ -35,7 +35,25 @@ server:
   servlet:
     context-path: /api
 
+spring:
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+
+slack:
+  webhook-url: ${SLACK_WEBHOOK_URL:}
+
 app:
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
   workflow-collab:

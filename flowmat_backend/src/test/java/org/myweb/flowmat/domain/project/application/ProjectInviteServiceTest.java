@@ -27,6 +27,8 @@ import org.myweb.flowmat.domain.user.repository.UserRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
+import org.myweb.flowmat.global.mail.MailService;
+import org.myweb.flowmat.global.slack.SlackNotificationService;
 
 @ExtendWith(MockitoExtension.class)
 class ProjectInviteServiceTest {
@@ -48,6 +50,12 @@ class ProjectInviteServiceTest {
 
     @Mock
     private IdGenerator idGenerator;
+
+    @Mock
+    private MailService mailService;
+
+    @Mock
+    private SlackNotificationService slackNotificationService;
 
     @InjectMocks
     private ProjectInviteServiceImpl projectInviteService;
@@ -161,6 +169,7 @@ class ProjectInviteServiceTest {
         User user = new User();
         user.setUserId(userId);
         user.setUserEmail(userEmail);
+        user.setUserName(userId);
         return user;
     }
 }
