@@ -81,7 +81,9 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
             process.getPosY(),
             process.getWidth(),
             process.getHeight(),
-            process.getProcessDesc()
+            process.getProcessDesc(),
+            process.getVersion(),
+            process.getVersionNonce()
         );
     }
 
@@ -120,7 +122,9 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
             connection.getUnit(),
             connection.getDelayTimeSec(),
             connection.getLossRate(),
-            connection.getPriority()
+            connection.getPriority(),
+            connection.getVersion(),
+            connection.getVersionNonce()
         );
     }
 }

@@ -2,6 +2,7 @@ package org.myweb.flowmat.domain.workflow.application;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
@@ -76,6 +77,8 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         connection.setLossRate(defaultIfNull(request.lossRate(), BigDecimal.ZERO));
         connection.setPriority(request.priority() != null ? request.priority() : 0);
         connection.setDeletedYn(NOT_DELETED);
+        connection.setVersion(1);
+        connection.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
         ProcessConnectionResponse response = toResponse(processConnectionRepository.save(connection));
         graphSyncService.broadcast(Type.CONNECTION_CREATED, response.workflowId(), response.connectionId());
         return response;
@@ -131,6 +134,8 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         if (request.priority() != null) {
             connection.setPriority(request.priority());
         }
+        connection.setVersion(connection.getVersion() + 1);
+        connection.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
         ProcessConnectionResponse response = toResponse(processConnectionRepository.save(connection));
         graphSyncService.broadcast(Type.CONNECTION_UPDATED, response.workflowId(), response.connectionId());
         return response;
@@ -210,7 +215,9 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
             connection.getUnit(),
             connection.getDelayTimeSec(),
             connection.getLossRate(),
-            connection.getPriority()
+            connection.getPriority(),
+            connection.getVersion(),
+            connection.getVersionNonce()
         );
     }
 

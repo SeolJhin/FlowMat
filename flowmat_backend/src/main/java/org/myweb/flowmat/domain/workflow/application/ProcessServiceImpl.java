@@ -1,6 +1,7 @@
 package org.myweb.flowmat.domain.workflow.application;
 
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessCreateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessPositionRequest;
@@ -61,6 +62,8 @@ public class ProcessServiceImpl implements ProcessService {
         process.setHeight(defaultIfNull(request.height(), 60.0));
         process.setProcessDesc(trimToNull(request.processDesc()));
         process.setDeletedYn(NOT_DELETED);
+        process.setVersion(1);
+        process.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
         ProcessResponse response = toResponse(processRepository.save(process));
         graphSyncService.broadcast(Type.NODE_CREATED, response.workflowId(), response.processId());
         return response;
@@ -105,6 +108,8 @@ public class ProcessServiceImpl implements ProcessService {
         if (request.processDesc() != null) {
             process.setProcessDesc(trimToNull(request.processDesc()));
         }
+        process.setVersion(process.getVersion() + 1);
+        process.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
         ProcessResponse response = toResponse(processRepository.save(process));
         graphSyncService.broadcast(Type.NODE_UPDATED, response.workflowId(), response.processId());
         return response;
@@ -116,6 +121,8 @@ public class ProcessServiceImpl implements ProcessService {
         Process process = findActiveProcess(processId);
         process.setPosX(request.posX());
         process.setPosY(request.posY());
+        process.setVersion(process.getVersion() + 1);
+        process.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
         ProcessResponse response = toResponse(processRepository.save(process));
         graphSyncService.broadcast(Type.NODE_UPDATED, response.workflowId(), processId);
         return response;
@@ -156,7 +163,9 @@ public class ProcessServiceImpl implements ProcessService {
             process.getPosY(),
             process.getWidth(),
             process.getHeight(),
-            process.getProcessDesc()
+            process.getProcessDesc(),
+            process.getVersion(),
+            process.getVersionNonce()
         );
     }
 

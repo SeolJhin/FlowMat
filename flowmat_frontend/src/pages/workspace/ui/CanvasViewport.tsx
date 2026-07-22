@@ -284,6 +284,7 @@ interface Props {
   onEdgeReconnect?(oldEdgeId: string, newConnection: ConnectCompletePayload): void
   onPresence?(msg: PresenceMessage): void
   onGraphChange?(msg: GraphChangeMessage): void
+  onReconnect?(): void
   onSyncReady?(api: {
     sendPresence: (msg: Omit<PresenceMessage, 'userId' | 'workflowId' | 'timestamp'>) => void
     clientId: string
@@ -368,6 +369,7 @@ export function CanvasViewport({
   onEdgeReconnect,
   onPresence,
   onGraphChange,
+  onReconnect,
   onSyncReady,
 }: Props) {
   const storageKey = `flowmat-viewport-${workflowId}`
@@ -389,6 +391,7 @@ export function CanvasViewport({
     applyRemoteNodeMove,
     onPresence,
     onGraphChange,
+    onReconnect,
   )
 
   const onSyncReadyRef = useRef(onSyncReady)

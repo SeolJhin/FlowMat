@@ -43,6 +43,8 @@ export interface CanvasNodeViewModel {
   outputs: CanvasPortViewModel[]
   inputCount: number
   outputCount: number
+  version: number
+  versionNonce: number
 }
 
 export interface CanvasEdgeViewModel {
@@ -64,6 +66,8 @@ export interface CanvasEdgeViewModel {
   delayTimeSec: number | null
   lossRate: number | null
   priority: number | null
+  version: number
+  versionNonce: number
 }
 
 export interface WorkflowCanvasViewModel {

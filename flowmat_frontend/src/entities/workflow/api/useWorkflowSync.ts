@@ -55,7 +55,8 @@ export function useWorkflowSync(
   workflowId: string,
   onRemoteNodeMove: (message: NodeMoveMessage) => void,
   onPresence?: (message: PresenceMessage) => void,
-  onGraphChange?: (message: GraphChangeMessage) => void
+  onGraphChange?: (message: GraphChangeMessage) => void,
+  onReconnect?: () => void,
 ) {
   const clientRef = useRef<Client | null>(null)
   const connectedRef = useRef(false)
@@ -69,6 +70,9 @@ export function useWorkflowSync(
   const lastSentAtRef = useRef(0)
   const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingMoveRef = useRef<{ processId: string; x: number; y: number } | null>(null)
+  const isFirstConnectRef = useRef(true)
+  const onReconnectRef = useRef(onReconnect)
+  onReconnectRef.current = onReconnect
 
   useEffect(() => {
     if (!workflowId) return
@@ -80,6 +84,10 @@ export function useWorkflowSync(
     })
 
     client.onConnect = () => {
+      if (!isFirstConnectRef.current) {
+        onReconnectRef.current?.()
+      }
+      isFirstConnectRef.current = false
       connectedRef.current = true
 
       client.subscribe(`/topic/workflow/${workflowId}/node-move`, (message: IMessage) => {

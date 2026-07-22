@@ -62,6 +62,8 @@ export interface ProcessDto {
   width: number
   height: number
   processDesc: string | null
+  version: number
+  versionNonce: number
 }
 
 export interface ProcessIoDto {
@@ -97,6 +99,8 @@ export interface ProcessConnectionDto {
   delayTimeSec: number | null
   lossRate: number | null
   priority: number | null
+  version: number
+  versionNonce: number
 }
 
 export interface WorkflowCanvasDto {

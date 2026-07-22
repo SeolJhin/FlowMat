@@ -56,6 +56,8 @@ export function toWorkflowCanvasViewModel(dto: WorkflowCanvasDto): WorkflowCanva
       outputs,
       inputCount: inputs.length,
       outputCount: outputs.length,
+      version: p.version,
+      versionNonce: p.versionNonce,
     }
   })
 
@@ -78,6 +80,8 @@ export function toWorkflowCanvasViewModel(dto: WorkflowCanvasDto): WorkflowCanva
     delayTimeSec: c.delayTimeSec,
     lossRate: c.lossRate,
     priority: c.priority,
+    version: c.version,
+    versionNonce: c.versionNonce,
   }))
 
   // Step 5: derive maps

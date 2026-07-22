@@ -119,7 +119,17 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
 
   const queryClient = useQueryClient()
 
-  const handleGraphChange = useCallback((_msg: GraphChangeMessage) => {
+  const handleGraphChange = useCallback((msg: GraphChangeMessage) => {
+    // Don't overwrite the node the local user is actively editing inline —
+    // their in-progress edit would be lost. The next mutation will re-sync.
+    const { inlineEditingNodeId } = useWorkspaceStore.getState()
+    if (msg.changeType === 'NODE_UPDATED' && msg.entityId === inlineEditingNodeId) return
+    void queryClient.invalidateQueries({
+      queryKey: ['workflow-canvas', canvas.workflow.workflowId],
+    })
+  }, [queryClient, canvas.workflow.workflowId])
+
+  const handleReconnect = useCallback(() => {
     void queryClient.invalidateQueries({
       queryKey: ['workflow-canvas', canvas.workflow.workflowId],
     })
@@ -611,6 +621,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
             onExportReady={(fn) => { exportPngRef.current = fn }}
             onPresence={handlePresence}
             onGraphChange={handleGraphChange}
+            onReconnect={handleReconnect}
             onSyncReady={handleSyncReady}
             onEdgeReconnect={async (oldEdgeId, newConnection) => {
               await deleteConnection(oldEdgeId)
