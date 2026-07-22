@@ -5,8 +5,9 @@ import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.project.domain.entity.Project;
 import org.myweb.flowmat.domain.project.repository.ProjectRepository;
-import org.myweb.flowmat.domain.user.application.AdminAccessService;
 import org.myweb.flowmat.domain.workflow.api.dto.request.WorkflowTemplateApplyRequest;
+import org.myweb.flowmat.global.rbac.PermissionService;
+import org.myweb.flowmat.global.rbac.SystemPermission;
 import org.myweb.flowmat.domain.workflow.api.dto.request.WorkflowTemplateCreateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.WorkflowTemplateUpdateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowResponse;
@@ -34,11 +35,11 @@ public class WorkflowTemplateServiceImpl implements WorkflowTemplateService {
     private final ProjectRepository projectRepository;
     private final IdGenerator idGenerator;
     private final ProjectAccessService projectAccessService;
-    private final AdminAccessService adminAccessService;
+    private final PermissionService permissionService;
 
     @Override
     public List<WorkflowTemplateResponse> listTemplates() {
-        List<WorkflowTemplate> templates = isAdmin()
+        List<WorkflowTemplate> templates = canReadPrivate()
             ? workflowTemplateRepository.findAllByOrderBySortOrderAscCreatedAtAsc()
             : workflowTemplateRepository.findAllByPublicYnOrderBySortOrderAscCreatedAtAsc(PUBLIC_YES);
         return templates.stream()
@@ -49,7 +50,7 @@ public class WorkflowTemplateServiceImpl implements WorkflowTemplateService {
     @Override
     @Transactional
     public WorkflowTemplateResponse createTemplate(WorkflowTemplateCreateRequest request) {
-        adminAccessService.requireAdmin();
+        permissionService.require(SystemPermission.TEMPLATE_MANAGE);
         WorkflowTemplate template = new WorkflowTemplate();
         template.setTemplateId(idGenerator.generate());
         applyTemplateFields(
@@ -76,7 +77,7 @@ public class WorkflowTemplateServiceImpl implements WorkflowTemplateService {
     @Override
     @Transactional
     public WorkflowTemplateResponse updateTemplate(String templateId, WorkflowTemplateUpdateRequest request) {
-        adminAccessService.requireAdmin();
+        permissionService.require(SystemPermission.TEMPLATE_MANAGE);
         WorkflowTemplate template = findTemplate(templateId);
         if (hasText(request.templateName())) {
             template.setTemplateName(request.templateName().trim());
@@ -114,7 +115,7 @@ public class WorkflowTemplateServiceImpl implements WorkflowTemplateService {
     @Override
     @Transactional
     public void deleteTemplate(String templateId) {
-        adminAccessService.requireAdmin();
+        permissionService.require(SystemPermission.TEMPLATE_MANAGE);
         workflowTemplateRepository.delete(findTemplate(templateId));
     }
 
@@ -151,22 +152,14 @@ public class WorkflowTemplateServiceImpl implements WorkflowTemplateService {
 
     private WorkflowTemplate findReadableTemplate(String templateId) {
         WorkflowTemplate template = findTemplate(templateId);
-        if (!isAdmin() && !PUBLIC_YES.equalsIgnoreCase(template.getPublicYn())) {
+        if (!canReadPrivate() && !PUBLIC_YES.equalsIgnoreCase(template.getPublicYn())) {
             throw new BusinessException(ErrorCode.FORBIDDEN, "Private workflow templates require admin access.");
         }
         return template;
     }
 
-    private boolean isAdmin() {
-        try {
-            adminAccessService.requireAdmin();
-            return true;
-        } catch (BusinessException e) {
-            if (e.getErrorCode() == ErrorCode.FORBIDDEN || e.getErrorCode() == ErrorCode.UNAUTHORIZED) {
-                return false;
-            }
-            throw e;
-        }
+    private boolean canReadPrivate() {
+        return permissionService.hasPermission(SystemPermission.TEMPLATE_READ_PRIVATE);
     }
 
     private static void applyTemplateFields(

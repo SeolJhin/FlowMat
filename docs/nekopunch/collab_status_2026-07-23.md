@@ -202,15 +202,50 @@ Frontend build passes under `npm run build` and `npm run lint`.
 - Accessible from Home via "Settings" link in the selected-project tools bar
 - API hooks: `useProjectMembersQuery`, `useProjectInvitesQuery`, `useCreateInviteMutation`, `useCancelInviteMutation`, `useUpdateMemberRoleMutation`, `useRemoveMemberMutation`, `useAcceptInviteMutation`
 
+## RBAC (Role-Based Access Control)
+
+The V1 schema already contained `roles`, `role_permissions`, and `user_roles` tables.
+These are now wired into a full permission service layer.
+
+### DB — V7 migration
+
+- Seeds built-in system roles: `admin`, `user`
+- Seeds admin permissions: `template:read_private`, `template:manage`, `user:manage`, `project:view_all`
+- Backfills existing admin users from `users.user_role = 'admin'` into `user_roles` (idempotent)
+
+### SystemPermission enum
+
+| Code | Used by |
+|------|---------|
+| `template:read_private` | list/get private templates |
+| `template:manage` | create/update/delete templates |
+| `user:manage` | `AdminAccessService.requireAdmin()` |
+| `project:view_all` | reserved for future admin panel |
+
+### PermissionService
+
+Resolves the current user's system roles from `user_roles` (scope_type='global'), then checks
+`role_permissions.permission_code`. Both `require(permission)` (throws on deny) and
+`hasPermission(permission)` (returns boolean) are provided.
+
+### Updated callers
+
+- `ProcessTemplateServiceImpl` — replaced `adminAccessService.requireAdmin()` with `permissionService.require(TEMPLATE_MANAGE)` and `isAdmin()` with `permissionService.hasPermission(TEMPLATE_READ_PRIVATE)`
+- `WorkflowTemplateServiceImpl` — same pattern
+- `AdminAccessService` — now delegates to `permissionService.require(USER_MANAGE)`
+
+### Tests
+
+- `AdminAccessServiceTest` — updated to verify delegation to `PermissionService`
+- `ProcessTemplateServiceImplTest` — updated to mock `PermissionService` directly
+- `WorkflowTemplateServiceImplTest` — **new**, covers public/private visibility and create permission
+
+All tests pass under `.\gradlew.bat test`.
+
 ## Remaining Gaps
 
-| Area                            | Status                                                                           |
-|---------------------------------|----------------------------------------------------------------------------------|
-| Admin policy engine             | Based on single `users.user_role` field; no central RBAC or policy engine yet. |
-| WorkflowTemplateServiceImplTest | No test file yet; workflow template policy relies on process template tests.    |
-| Invite email in CI              | SMTP credentials must be provided via env vars for email to actually send.      |
-
-The next planned steps are:
-
-1. Expand admin authorization from `user_role` to an explicit permission model.
-2. Add `WorkflowTemplateServiceImplTest` to match process template test coverage.
+| Area                       | Status                                                                      |
+|----------------------------|-----------------------------------------------------------------------------|
+| Invite email in CI         | SMTP credentials must be provided via env vars for email to actually send.  |
+| Role management API        | No REST endpoint yet for granting/revoking system roles to users.           |
+| `project:view_all` usage   | Permission exists in DB but no service code checks it yet.                  |

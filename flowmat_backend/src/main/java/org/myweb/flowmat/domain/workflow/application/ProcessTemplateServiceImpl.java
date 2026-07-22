@@ -4,8 +4,9 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
-import org.myweb.flowmat.domain.user.application.AdminAccessService;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessTemplateApplyRequest;
+import org.myweb.flowmat.global.rbac.PermissionService;
+import org.myweb.flowmat.global.rbac.SystemPermission;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessTemplateCreateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessTemplateUpdateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessResponse;
@@ -37,11 +38,11 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
     private final ProcessRepository processRepository;
     private final IdGenerator idGenerator;
     private final ProjectAccessService projectAccessService;
-    private final AdminAccessService adminAccessService;
+    private final PermissionService permissionService;
 
     @Override
     public List<ProcessTemplateResponse> listTemplates() {
-        List<ProcessTemplate> templates = isAdmin()
+        List<ProcessTemplate> templates = canReadPrivate()
             ? processTemplateRepository.findAllByOrderBySortOrderAscCreatedAtAsc()
             : processTemplateRepository.findAllByPublicYnOrderBySortOrderAscCreatedAtAsc(PUBLIC_YES);
         return templates.stream()
@@ -52,7 +53,7 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
     @Override
     @Transactional
     public ProcessTemplateResponse createTemplate(ProcessTemplateCreateRequest request) {
-        adminAccessService.requireAdmin();
+        permissionService.require(SystemPermission.TEMPLATE_MANAGE);
         ProcessTemplate template = new ProcessTemplate();
         template.setTemplateId(idGenerator.generate());
         applyTemplateFields(
@@ -80,7 +81,7 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
     @Override
     @Transactional
     public ProcessTemplateResponse updateTemplate(String templateId, ProcessTemplateUpdateRequest request) {
-        adminAccessService.requireAdmin();
+        permissionService.require(SystemPermission.TEMPLATE_MANAGE);
         ProcessTemplate template = findTemplate(templateId);
         if (hasText(request.templateName())) {
             template.setTemplateName(request.templateName().trim());
@@ -121,7 +122,7 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
     @Override
     @Transactional
     public void deleteTemplate(String templateId) {
-        adminAccessService.requireAdmin();
+        permissionService.require(SystemPermission.TEMPLATE_MANAGE);
         processTemplateRepository.delete(findTemplate(templateId));
     }
 
@@ -159,22 +160,14 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
 
     private ProcessTemplate findReadableTemplate(String templateId) {
         ProcessTemplate template = findTemplate(templateId);
-        if (!isAdmin() && !PUBLIC_YES.equalsIgnoreCase(template.getPublicYn())) {
+        if (!canReadPrivate() && !PUBLIC_YES.equalsIgnoreCase(template.getPublicYn())) {
             throw new BusinessException(ErrorCode.FORBIDDEN, "Private process templates require admin access.");
         }
         return template;
     }
 
-    private boolean isAdmin() {
-        try {
-            adminAccessService.requireAdmin();
-            return true;
-        } catch (BusinessException e) {
-            if (e.getErrorCode() == ErrorCode.FORBIDDEN || e.getErrorCode() == ErrorCode.UNAUTHORIZED) {
-                return false;
-            }
-            throw e;
-        }
+    private boolean canReadPrivate() {
+        return permissionService.hasPermission(SystemPermission.TEMPLATE_READ_PRIVATE);
     }
 
     private static void applyTemplateFields(

@@ -14,7 +14,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
-import org.myweb.flowmat.domain.user.application.AdminAccessService;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessTemplateCreateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessTemplateResponse;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessTemplate;
@@ -24,6 +23,8 @@ import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
+import org.myweb.flowmat.global.rbac.PermissionService;
+import org.myweb.flowmat.global.rbac.SystemPermission;
 
 @ExtendWith(MockitoExtension.class)
 class ProcessTemplateServiceImplTest {
@@ -44,7 +45,7 @@ class ProcessTemplateServiceImplTest {
     private ProjectAccessService projectAccessService;
 
     @Mock
-    private AdminAccessService adminAccessService;
+    private PermissionService permissionService;
 
     @InjectMocks
     private ProcessTemplateServiceImpl processTemplateService;
@@ -52,7 +53,7 @@ class ProcessTemplateServiceImplTest {
     @Test
     void nonAdminSeesOnlyPublicTemplates() {
         ProcessTemplate publicTemplate = template("public-1", "Y");
-        doThrow(new BusinessException(ErrorCode.FORBIDDEN)).when(adminAccessService).requireAdmin();
+        when(permissionService.hasPermission(SystemPermission.TEMPLATE_READ_PRIVATE)).thenReturn(false);
         when(processTemplateRepository.findAllByPublicYnOrderBySortOrderAscCreatedAtAsc("Y"))
             .thenReturn(List.of(publicTemplate));
 
@@ -63,9 +64,22 @@ class ProcessTemplateServiceImplTest {
     }
 
     @Test
-    void privateTemplateReadRequiresAdmin() {
+    void adminSeesAllTemplates() {
+        ProcessTemplate publicTemplate = template("public-1", "Y");
         ProcessTemplate privateTemplate = template("private-1", "N");
-        doThrow(new BusinessException(ErrorCode.FORBIDDEN)).when(adminAccessService).requireAdmin();
+        when(permissionService.hasPermission(SystemPermission.TEMPLATE_READ_PRIVATE)).thenReturn(true);
+        when(processTemplateRepository.findAllByOrderBySortOrderAscCreatedAtAsc())
+            .thenReturn(List.of(publicTemplate, privateTemplate));
+
+        List<ProcessTemplateResponse> response = processTemplateService.listTemplates();
+
+        assertThat(response).hasSize(2);
+    }
+
+    @Test
+    void privateTemplateReadRequiresPermission() {
+        ProcessTemplate privateTemplate = template("private-1", "N");
+        when(permissionService.hasPermission(SystemPermission.TEMPLATE_READ_PRIVATE)).thenReturn(false);
         when(processTemplateRepository.findById("private-1")).thenReturn(Optional.of(privateTemplate));
 
         assertThatThrownBy(() -> processTemplateService.getTemplate("private-1"))
@@ -75,8 +89,9 @@ class ProcessTemplateServiceImplTest {
     }
 
     @Test
-    void createTemplateRequiresAdmin() {
-        doThrow(new BusinessException(ErrorCode.FORBIDDEN)).when(adminAccessService).requireAdmin();
+    void createTemplateRequiresPermission() {
+        doThrow(new BusinessException(ErrorCode.FORBIDDEN))
+            .when(permissionService).require(SystemPermission.TEMPLATE_MANAGE);
 
         assertThatThrownBy(() -> processTemplateService.createTemplate(
             new ProcessTemplateCreateRequest("Template", "generic", "process", null, null, null, null, null, null, "Y", 0)
