@@ -2,11 +2,14 @@ package org.myweb.flowmat.domain.workflow.application;
 
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.project.domain.entity.Project;
 import org.myweb.flowmat.domain.project.repository.ProjectRepository;
 import org.myweb.flowmat.domain.workflow.api.dto.request.WorkflowCreateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.WorkflowUpdateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowResponse;
+import org.myweb.flowmat.domain.workflow.collab.GraphSyncService;
+import org.myweb.flowmat.domain.workflow.collab.dto.GraphChangeMessage.Type;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
 import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
@@ -26,10 +29,12 @@ public class WorkflowServiceImpl implements WorkflowService {
     private final WorkflowRepository workflowRepository;
     private final ProjectRepository projectRepository;
     private final IdGenerator idGenerator;
+    private final GraphSyncService graphSyncService;
+    private final ProjectAccessService projectAccessService;
 
     @Override
     public List<WorkflowResponse> listWorkflows(String projectId) {
-        findActiveProject(projectId);
+        projectAccessService.requireProjectReadAccess(projectId);
         return workflowRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(projectId, NOT_DELETED).stream()
             .map(WorkflowServiceImpl::toResponse)
             .toList();
@@ -38,7 +43,7 @@ public class WorkflowServiceImpl implements WorkflowService {
     @Override
     @Transactional
     public WorkflowResponse createWorkflow(WorkflowCreateRequest request) {
-        Project project = findActiveProject(request.projectId());
+        Project project = projectAccessService.requireProjectWriteAccess(request.projectId());
 
         Workflow workflow = new Workflow();
         workflow.setWorkflowId(idGenerator.generate());
@@ -62,13 +67,13 @@ public class WorkflowServiceImpl implements WorkflowService {
 
     @Override
     public WorkflowResponse getWorkflow(String workflowId) {
-        return toResponse(findActiveWorkflow(workflowId));
+        return toResponse(projectAccessService.requireWorkflowReadAccess(workflowId));
     }
 
     @Override
     @Transactional
     public WorkflowResponse updateWorkflow(String workflowId, WorkflowUpdateRequest request) {
-        Workflow workflow = findActiveWorkflow(workflowId);
+        Workflow workflow = projectAccessService.requireWorkflowWriteAccess(workflowId);
         if (hasText(request.workflowName())) {
             workflow.setWorkflowName(request.workflowName().trim());
         }
@@ -81,32 +86,24 @@ public class WorkflowServiceImpl implements WorkflowService {
         if (hasText(request.workflowStatus())) {
             workflow.setWorkflowStatus(request.workflowStatus().trim().toLowerCase());
         }
-        return toResponse(workflowRepository.save(workflow));
+        Workflow saved = workflowRepository.save(workflow);
+        graphSyncService.broadcast(Type.WORKFLOW_UPDATED, saved.getWorkflowId(), saved.getWorkflowId());
+        return toResponse(saved);
     }
 
     @Override
     @Transactional
     public void deleteWorkflow(String workflowId) {
-        Workflow workflow = findActiveWorkflow(workflowId);
+        Workflow workflow = projectAccessService.requireWorkflowWriteAccess(workflowId);
         workflow.setDeletedYn(DELETED);
         workflow.setWorkflowStatus("deleted");
         workflowRepository.save(workflow);
 
-        Project project = findActiveProject(workflow.getProjectId());
+        Project project = projectAccessService.requireProjectWriteAccess(workflow.getProjectId());
         if (workflow.getWorkflowId().equals(project.getCurrentWorkflowId())) {
             project.setCurrentWorkflowId(null);
             projectRepository.save(project);
         }
-    }
-
-    private Project findActiveProject(String projectId) {
-        return projectRepository.findByProjectIdAndDeletedYn(projectId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-    }
-
-    private Workflow findActiveWorkflow(String workflowId) {
-        return workflowRepository.findByWorkflowIdAndDeletedYn(workflowId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
     private static WorkflowResponse toResponse(Workflow workflow) {

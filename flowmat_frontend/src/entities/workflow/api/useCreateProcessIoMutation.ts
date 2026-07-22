@@ -3,6 +3,7 @@ import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
 import type { ApiEnvelope, ProcessIoDto } from '../../../shared/types/api'
 import type { CreateProcessIoInput } from '../model/types'
+import { patchWorkflowCanvasPort } from '../model/workflowCanvasCache'
 
 async function createProcessIo(input: CreateProcessIoInput): Promise<ProcessIoDto> {
   const envelope = await httpClient.post<ApiEnvelope<ProcessIoDto>>('/process-ios', input)
@@ -14,8 +15,8 @@ export function useCreateProcessIoMutation(workflowId: string) {
 
   return useMutation({
     mutationFn: createProcessIo,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['workflow-canvas', workflowId] })
+    onSuccess: (processIo) => {
+      patchWorkflowCanvasPort(queryClient, workflowId, processIo)
     },
   })
 }

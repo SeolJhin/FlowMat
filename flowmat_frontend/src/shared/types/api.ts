@@ -123,8 +123,32 @@ export interface ProcessConnectionDto {
   versionNonce: number
 }
 
+export interface GraphEntityPayloadDto {
+  workflow: WorkflowDto | null
+  process: ProcessDto | null
+  processIos: ProcessIoDto[]
+  connection: ProcessConnectionDto | null
+}
+
+export interface WorkflowGraphChangeDto {
+  seq: number
+  changeType: string
+  workflowId: string
+  entityId: string
+  userId: string | null
+  timestamp: number
+  payload: GraphEntityPayloadDto | null
+}
+
+export interface WorkflowGraphChangesDto {
+  currentSeq: number
+  resetRequired: boolean
+  changes: WorkflowGraphChangeDto[]
+}
+
 export interface WorkflowCanvasDto {
   workflow: WorkflowDto
+  graphSeq: number
   processes: ProcessDto[]
   processIos: ProcessIoDto[]
   connections: ProcessConnectionDto[]

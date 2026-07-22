@@ -1,11 +1,12 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
-import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
+import { unwrapApiVoidResponse } from '../../../shared/api/unwrapApiResponse'
 import type { ApiEnvelope } from '../../../shared/types/api'
+import { removeWorkflowCanvasPort } from '../model/workflowCanvasCache'
 
 async function deleteProcessIo(processIoId: string): Promise<void> {
   const envelope = await httpClient.delete<ApiEnvelope<null>>(`/process-ios/${processIoId}`)
-  unwrapApiResponse(envelope)
+  unwrapApiVoidResponse(envelope)
 }
 
 export function useDeleteProcessIoMutation(workflowId: string) {
@@ -13,8 +14,8 @@ export function useDeleteProcessIoMutation(workflowId: string) {
 
   return useMutation({
     mutationFn: deleteProcessIo,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['workflow-canvas', workflowId] })
+    onSuccess: (_data, processIoId) => {
+      removeWorkflowCanvasPort(queryClient, workflowId, processIoId)
     },
   })
 }

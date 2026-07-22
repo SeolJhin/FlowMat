@@ -294,6 +294,7 @@ interface Props {
   onSyncReady?(api: {
     sendPresence: (msg: Omit<PresenceMessage, 'userId' | 'clientId' | 'workflowId' | 'timestamp'>) => void
     clientId: string
+    ownUserId: string | null
   }): void
 }
 
@@ -396,7 +397,7 @@ export function CanvasViewport({
     )
   }, [])
 
-  const { sendNodeMove, sendPresence, clientId } = useWorkflowSync(
+  const { sendNodeMove, sendPresence, clientId, ownUserId } = useWorkflowSync(
     workflowId,
     applyRemoteNodeMove,
     onPresence,
@@ -407,8 +408,8 @@ export function CanvasViewport({
   const onSyncReadyRef = useRef(onSyncReady)
   onSyncReadyRef.current = onSyncReady
   useEffect(() => {
-    onSyncReadyRef.current?.({ sendPresence, clientId })
-  }, [sendPresence, clientId])
+    onSyncReadyRef.current?.({ sendPresence, clientId, ownUserId })
+  }, [sendPresence, clientId, ownUserId])
   const setHoveredEdgeId = useCanvasInteractionStore((s) => s.setHoveredEdgeId)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
 

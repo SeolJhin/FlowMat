@@ -3,6 +3,7 @@ package org.myweb.flowmat.domain.workflow.application;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessCreateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessPositionRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessUpdateRequest;
@@ -33,10 +34,11 @@ public class ProcessServiceImpl implements ProcessService {
     private final WorkflowRepository workflowRepository;
     private final IdGenerator idGenerator;
     private final GraphSyncService graphSyncService;
+    private final ProjectAccessService projectAccessService;
 
     @Override
     public List<ProcessResponse> listProcesses(String workflowId) {
-        findActiveWorkflow(workflowId);
+        projectAccessService.requireWorkflowReadAccess(workflowId);
         return processRepository.findAllByWorkflowIdAndDeletedYnOrderByCreatedAtAsc(workflowId, NOT_DELETED).stream()
             .map(ProcessServiceImpl::toResponse)
             .toList();
@@ -45,7 +47,7 @@ public class ProcessServiceImpl implements ProcessService {
     @Override
     @Transactional
     public ProcessResponse createProcess(ProcessCreateRequest request) {
-        Workflow workflow = findActiveWorkflow(request.workflowId());
+        Workflow workflow = projectAccessService.requireWorkflowWriteAccess(request.workflowId());
 
         Process process = new Process();
         process.setProcessId(idGenerator.generate());
@@ -71,13 +73,13 @@ public class ProcessServiceImpl implements ProcessService {
 
     @Override
     public ProcessResponse getProcess(String processId) {
-        return toResponse(findActiveProcess(processId));
+        return toResponse(projectAccessService.requireProcessReadAccess(processId));
     }
 
     @Override
     @Transactional
     public ProcessResponse updateProcess(String processId, ProcessUpdateRequest request) {
-        Process process = findActiveProcess(processId);
+        Process process = projectAccessService.requireProcessWriteAccess(processId);
         if (hasText(request.processName())) {
             process.setProcessName(request.processName().trim());
         }
@@ -118,7 +120,7 @@ public class ProcessServiceImpl implements ProcessService {
     @Override
     @Transactional
     public ProcessResponse updatePosition(String processId, ProcessPositionRequest request) {
-        Process process = findActiveProcess(processId);
+        Process process = projectAccessService.requireProcessWriteAccess(processId);
         process.setPosX(request.posX());
         process.setPosY(request.posY());
         process.setVersion(process.getVersion() + 1);
@@ -131,22 +133,12 @@ public class ProcessServiceImpl implements ProcessService {
     @Override
     @Transactional
     public void deleteProcess(String processId) {
-        Process process = findActiveProcess(processId);
+        Process process = projectAccessService.requireProcessWriteAccess(processId);
         String workflowId = process.getWorkflowId();
         process.setDeletedYn(DELETED);
         process.setProcessStatus("deleted");
         processRepository.save(process);
         graphSyncService.broadcast(Type.NODE_DELETED, workflowId, processId);
-    }
-
-    private Workflow findActiveWorkflow(String workflowId) {
-        return workflowRepository.findByWorkflowIdAndDeletedYn(workflowId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-    }
-
-    private Process findActiveProcess(String processId) {
-        return processRepository.findByProcessIdAndDeletedYn(processId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
     private static ProcessResponse toResponse(Process process) {

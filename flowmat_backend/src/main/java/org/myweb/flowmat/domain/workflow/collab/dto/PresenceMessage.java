@@ -21,6 +21,7 @@ public record PresenceMessage(
     public enum Type {
         JOIN,
         LEAVE,
+        HEARTBEAT,
         CURSOR_MOVED,
         NODE_EDITING
     }

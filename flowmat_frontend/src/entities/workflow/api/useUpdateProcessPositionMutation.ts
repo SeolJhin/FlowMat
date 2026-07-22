@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
 import type { ApiEnvelope, ProcessDto } from '../../../shared/types/api'
+import { patchWorkflowCanvasProcess } from '../model/workflowCanvasCache'
 
 interface UpdatePositionInput {
   processId: string
@@ -23,8 +24,8 @@ export function useUpdateProcessPositionMutation() {
 
   return useMutation({
     mutationFn: updatePosition,
-    onSuccess: async (process) => {
-      await queryClient.invalidateQueries({ queryKey: ['workflow-canvas', process.workflowId] })
+    onSuccess: (process) => {
+      patchWorkflowCanvasProcess(queryClient, process)
     },
   })
 }

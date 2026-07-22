@@ -1,5 +1,10 @@
 package org.myweb.flowmat.global.websocket;
 
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.global.exception.BusinessException;
+import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.security.AuthUser;
 import org.myweb.flowmat.global.security.JwtProvider;
 import org.springframework.messaging.Message;
@@ -18,25 +23,74 @@ import org.springframework.stereotype.Component;
 @Component
 public class StompAuthChannelInterceptor implements ChannelInterceptor {
 
-    private final JwtProvider jwtProvider;
+    private static final Pattern WORKFLOW_DESTINATION =
+        Pattern.compile("^/(?:topic|app)/workflow/([^/]+)/(?:presence|node-move|graph)$");
 
-    public StompAuthChannelInterceptor(JwtProvider jwtProvider) {
+    private final JwtProvider jwtProvider;
+    private final ProjectAccessService projectAccessService;
+
+    public StompAuthChannelInterceptor(JwtProvider jwtProvider, ProjectAccessService projectAccessService) {
         this.jwtProvider = jwtProvider;
+        this.projectAccessService = projectAccessService;
     }
 
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
         StompHeaderAccessor accessor =
             MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
+        if (accessor == null) {
+            return message;
+        }
 
-        if (accessor != null && StompCommand.CONNECT.equals(accessor.getCommand())) {
+        if (StompCommand.CONNECT.equals(accessor.getCommand())) {
             String authorization = accessor.getFirstNativeHeader("Authorization");
-            if (authorization != null && authorization.startsWith("Bearer ")) {
-                String userId = jwtProvider.resolveUserId(authorization.substring(7));
-                AuthUser authUser = new AuthUser(userId);
-                UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(authUser, null, authUser.getAuthorities());
-                accessor.setUser(authentication);
+            if (authorization == null || !authorization.startsWith("Bearer ")) {
+                throw new BusinessException(ErrorCode.UNAUTHORIZED, "Missing STOMP Authorization header.");
+            }
+
+            String token = authorization.substring(7).trim();
+            jwtProvider.validate(token);
+            if (!jwtProvider.isAccessToken(token)) {
+                throw new BusinessException(ErrorCode.TOKEN_TYPE_INVALID);
+            }
+
+            String userId = jwtProvider.resolveUserId(token);
+            if (userId == null || userId.isBlank()) {
+                throw new BusinessException(ErrorCode.UNAUTHORIZED, "Unable to resolve authenticated STOMP user.");
+            }
+
+            AuthUser authUser = new AuthUser(userId);
+            UsernamePasswordAuthenticationToken authentication =
+                new UsernamePasswordAuthenticationToken(authUser, null, authUser.getAuthorities());
+            accessor.setUser(authentication);
+        }
+
+        boolean workflowFrame =
+            accessor.getDestination() != null
+                && (
+                    accessor.getDestination().startsWith("/topic/workflow/")
+                        || accessor.getDestination().startsWith("/app/workflow/")
+                );
+        if ((StompCommand.SEND.equals(accessor.getCommand()) || StompCommand.SUBSCRIBE.equals(accessor.getCommand()))
+            && workflowFrame) {
+            if (accessor.getUser() == null) {
+                throw new BusinessException(ErrorCode.UNAUTHORIZED, "Unauthenticated STOMP frame.");
+            }
+            Matcher matcher = WORKFLOW_DESTINATION.matcher(accessor.getDestination());
+            if (matcher.matches()) {
+                String workflowId = matcher.group(1);
+                String userId;
+                if (accessor.getUser() instanceof UsernamePasswordAuthenticationToken auth
+                    && auth.getPrincipal() instanceof AuthUser authUser) {
+                    userId = authUser.getUserId();
+                } else {
+                    userId = accessor.getUser().getName();
+                }
+                if (StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
+                    projectAccessService.requireWorkflowReadAccess(workflowId, userId);
+                } else {
+                    projectAccessService.requireWorkflowWriteAccess(workflowId, userId);
+                }
             }
         }
 

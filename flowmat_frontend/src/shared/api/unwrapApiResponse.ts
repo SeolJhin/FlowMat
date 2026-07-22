@@ -9,3 +9,12 @@ export function unwrapApiResponse<T>(envelope: ApiEnvelope<T>, httpStatus = 200)
   const err: UiError = normalizeUiError(httpStatus, envelope.message ?? 'Unknown error')
   throw err
 }
+
+export function unwrapApiVoidResponse(envelope: ApiEnvelope<null>, httpStatus = 200): void {
+  if (envelope.success) {
+    return
+  }
+
+  const err: UiError = normalizeUiError(httpStatus, envelope.message ?? 'Unknown error')
+  throw err
+}

@@ -1,11 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
-import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
+import { unwrapApiVoidResponse } from '../../../shared/api/unwrapApiResponse'
 import type { ApiEnvelope } from '../../../shared/types/api'
 
 async function deleteFlowRule(ruleId: string): Promise<void> {
   const envelope = await httpClient.delete<ApiEnvelope<null>>(`/flow-rules/${ruleId}`)
-  unwrapApiResponse(envelope)
+  unwrapApiVoidResponse(envelope)
 }
 
 export function useDeleteFlowRuleMutation(projectId: string) {

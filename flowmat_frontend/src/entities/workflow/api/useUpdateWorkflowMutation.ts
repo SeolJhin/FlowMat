@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
 import type { ApiEnvelope, WorkflowDto } from '../../../shared/types/api'
+import { patchWorkflowCanvasWorkflow } from '../model/workflowCanvasCache'
 
 interface UpdateWorkflowInput {
   workflowId: string
@@ -21,7 +22,7 @@ export function useUpdateWorkflowMutation() {
   return useMutation({
     mutationFn: updateWorkflow,
     onSuccess: async (workflow) => {
-      await queryClient.invalidateQueries({ queryKey: ['workflow-canvas', workflow.workflowId] })
+      patchWorkflowCanvasWorkflow(queryClient, workflow)
       await queryClient.invalidateQueries({ queryKey: ['workflows', workflow.projectId] })
     },
   })

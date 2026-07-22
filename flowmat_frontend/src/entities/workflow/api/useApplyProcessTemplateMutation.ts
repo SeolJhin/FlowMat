@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
 import type { ApiEnvelope, ProcessDto } from '../../../shared/types/api'
+import { patchWorkflowCanvasProcess } from '../model/workflowCanvasCache'
 
 export interface ApplyTemplateInput {
   templateId: string
@@ -23,8 +24,8 @@ export function useApplyProcessTemplateMutation(workflowId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: applyTemplate,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['workflow-canvas', workflowId] })
+    onSuccess: (process) => {
+      patchWorkflowCanvasProcess(queryClient, process)
     },
   })
 }

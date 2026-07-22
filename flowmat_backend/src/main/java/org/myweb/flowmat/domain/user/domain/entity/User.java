@@ -34,6 +34,9 @@ public class User extends BaseTimeEntity {
 
     @Column(name = "user_status")
     private String userStatus;
+
+    @Column(name = "user_role")
+    private String userRole;
     
     @Column(name = "user_birth")
     private LocalDate userBirth;

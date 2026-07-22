@@ -3,6 +3,7 @@ import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
 import type { ApiEnvelope, ProcessConnectionDto } from '../../../shared/types/api'
 import type { UpdateProcessConnectionInput } from '../model/types'
+import { patchWorkflowCanvasConnection } from '../model/workflowCanvasCache'
 
 async function updateProcessConnection(
   input: UpdateProcessConnectionInput
@@ -20,8 +21,8 @@ export function useUpdateProcessConnectionMutation() {
 
   return useMutation({
     mutationFn: updateProcessConnection,
-    onSuccess: async (connection) => {
-      await queryClient.invalidateQueries({ queryKey: ['workflow-canvas', connection.workflowId] })
+    onSuccess: (connection) => {
+      patchWorkflowCanvasConnection(queryClient, connection)
     },
   })
 }

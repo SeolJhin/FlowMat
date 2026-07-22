@@ -74,6 +74,7 @@ export interface CanvasEdgeViewModel {
 
 export interface WorkflowCanvasViewModel {
   workflow: WorkflowHeaderViewModel
+  graphSeq: number
   nodes: CanvasNodeViewModel[]
   edges: CanvasEdgeViewModel[]
   nodeMap: Record<string, CanvasNodeViewModel>

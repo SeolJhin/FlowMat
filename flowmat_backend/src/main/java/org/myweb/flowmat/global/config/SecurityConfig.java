@@ -40,7 +40,8 @@ public class SecurityConfig {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/auth/signup", "/auth/login", "/auth/refresh", "/auth/logout").permitAll()
-                .anyRequest().permitAll()
+                .requestMatchers("/ws/**").permitAll()
+                .anyRequest().authenticated()
             )
             .exceptionHandling(eh -> eh
                 .authenticationEntryPoint(authenticationEntryPoint)

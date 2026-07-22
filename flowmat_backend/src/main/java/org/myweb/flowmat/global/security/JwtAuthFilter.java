@@ -5,6 +5,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Set;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -16,10 +17,23 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 public class JwtAuthFilter extends OncePerRequestFilter {
 
+    private static final Set<String> PUBLIC_PATHS = Set.of(
+        "/auth/signup",
+        "/auth/login",
+        "/auth/refresh",
+        "/auth/logout"
+    );
+
     private final JwtProvider jwtProvider;
 
     public JwtAuthFilter(JwtProvider jwtProvider) {
         this.jwtProvider = jwtProvider;
+    }
+
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getServletPath();
+        return PUBLIC_PATHS.contains(path) || path.startsWith("/ws");
     }
 
     @Override

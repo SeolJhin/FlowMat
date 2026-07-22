@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
-import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
+import { unwrapApiResponse, unwrapApiVoidResponse } from '../../../shared/api/unwrapApiResponse'
 import type { ApiEnvelope } from '../../../shared/types/api'
 
 export interface LoginRequest {
@@ -52,7 +52,7 @@ async function login(req: LoginRequest): Promise<TokenResponse> {
 
 async function signup(req: SignupRequest): Promise<void> {
   const envelope = await httpClient.post<ApiEnvelope<null>>('/auth/signup', req)
-  unwrapApiResponse(envelope)
+  unwrapApiVoidResponse(envelope)
 }
 
 export function useLoginMutation() {

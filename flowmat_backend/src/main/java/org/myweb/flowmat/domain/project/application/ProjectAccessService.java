@@ -1,0 +1,244 @@
+package org.myweb.flowmat.domain.project.application;
+
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.project.domain.entity.Project;
+import org.myweb.flowmat.domain.project.domain.entity.ProjectMember;
+import org.myweb.flowmat.domain.project.repository.ProjectMemberRepository;
+import org.myweb.flowmat.domain.project.repository.ProjectRepository;
+import org.myweb.flowmat.domain.workflow.domain.entity.Process;
+import org.myweb.flowmat.domain.workflow.domain.entity.ProcessConnection;
+import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
+import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
+import org.myweb.flowmat.domain.workflow.repository.ProcessConnectionRepository;
+import org.myweb.flowmat.domain.workflow.repository.ProcessIoRepository;
+import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
+import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
+import org.myweb.flowmat.global.exception.BusinessException;
+import org.myweb.flowmat.global.exception.ErrorCode;
+import org.myweb.flowmat.global.security.AuthUser;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+public class ProjectAccessService {
+
+    private static final String NOT_DELETED = "N";
+    private static final String ACTIVE_MEMBER = "active";
+    private static final String ROLE_VIEWER = "viewer";
+    private static final String ROLE_EDITOR = "editor";
+    private static final String ROLE_OWNER = "owner";
+
+    private final ProjectRepository projectRepository;
+    private final ProjectMemberRepository projectMemberRepository;
+    private final WorkflowRepository workflowRepository;
+    private final ProcessRepository processRepository;
+    private final ProcessIoRepository processIoRepository;
+    private final ProcessConnectionRepository processConnectionRepository;
+
+    public String requireCurrentUserId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getPrincipal() == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        Object principal = authentication.getPrincipal();
+        if (principal instanceof AuthUser authUser && authUser.getUserId() != null && !authUser.getUserId().isBlank()) {
+            return authUser.getUserId();
+        }
+        String name = authentication.getName();
+        if (name == null || name.isBlank()) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        return name;
+    }
+
+    public void requireProjectOwnerMatch(String ownerId) {
+        String currentUserId = requireCurrentUserId();
+        String normalizedOwnerId = ownerId == null ? null : ownerId.trim();
+        if (!currentUserId.equals(normalizedOwnerId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "Project owner must match the authenticated user.");
+        }
+    }
+
+    public List<Project> listAccessibleProjects() {
+        String userId = requireCurrentUserId();
+        LinkedHashMap<String, Project> accessible = new LinkedHashMap<>();
+        for (Project project : projectRepository.findAllByOwnerIdAndDeletedYnOrderByCreatedAtDesc(userId, NOT_DELETED)) {
+            accessible.put(project.getProjectId(), project);
+        }
+
+        List<String> memberProjectIds = projectMemberRepository.findAllByUserIdAndMemberStatus(userId, ACTIVE_MEMBER).stream()
+            .map(ProjectMember::getProjectId)
+            .distinct()
+            .toList();
+        if (!memberProjectIds.isEmpty()) {
+            for (Project project : projectRepository.findAllByProjectIdInAndDeletedYnOrderByCreatedAtDesc(memberProjectIds, NOT_DELETED)) {
+                accessible.putIfAbsent(project.getProjectId(), project);
+            }
+        }
+
+        return accessible.values().stream()
+            .sorted(Comparator.comparing(Project::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())).reversed())
+            .toList();
+    }
+
+    public Project requireProjectReadAccess(String projectId) {
+        return requireProjectReadAccess(projectId, requireCurrentUserId());
+    }
+
+    public Project requireProjectReadAccess(String projectId, String userId) {
+        Project project = projectRepository.findByProjectIdAndDeletedYn(projectId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        ensureProjectReadAccess(project, userId);
+        return project;
+    }
+
+    public Project requireProjectWriteAccess(String projectId) {
+        return requireProjectWriteAccess(projectId, requireCurrentUserId());
+    }
+
+    public Project requireProjectWriteAccess(String projectId, String userId) {
+        Project project = projectRepository.findByProjectIdAndDeletedYn(projectId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        ensureProjectWriteAccess(project, userId);
+        return project;
+    }
+
+    public Project requireProjectOwnerAccess(String projectId) {
+        Project project = projectRepository.findByProjectIdAndDeletedYn(projectId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        ensureProjectOwnerAccess(project, requireCurrentUserId());
+        return project;
+    }
+
+    public Workflow requireWorkflowReadAccess(String workflowId) {
+        return requireWorkflowReadAccess(workflowId, requireCurrentUserId());
+    }
+
+    public Workflow requireWorkflowReadAccess(String workflowId, String userId) {
+        Workflow workflow = workflowRepository.findByWorkflowIdAndDeletedYn(workflowId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        ensureProjectReadAccess(workflow.getProjectId(), userId);
+        return workflow;
+    }
+
+    public Workflow requireWorkflowWriteAccess(String workflowId) {
+        return requireWorkflowWriteAccess(workflowId, requireCurrentUserId());
+    }
+
+    public Workflow requireWorkflowWriteAccess(String workflowId, String userId) {
+        Workflow workflow = workflowRepository.findByWorkflowIdAndDeletedYn(workflowId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        ensureProjectWriteAccess(workflow.getProjectId(), userId);
+        return workflow;
+    }
+
+    public Process requireProcessReadAccess(String processId) {
+        Process process = processRepository.findByProcessIdAndDeletedYn(processId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        ensureProjectReadAccess(process.getProjectId(), requireCurrentUserId());
+        return process;
+    }
+
+    public Process requireProcessWriteAccess(String processId) {
+        Process process = processRepository.findByProcessIdAndDeletedYn(processId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        ensureProjectWriteAccess(process.getProjectId(), requireCurrentUserId());
+        return process;
+    }
+
+    public ProcessIo requireProcessIoReadAccess(String processIoId) {
+        ProcessIo processIo = processIoRepository.findByProcessIoIdAndDeletedYn(processIoId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        requireProcessReadAccess(processIo.getProcessId());
+        return processIo;
+    }
+
+    public ProcessIo requireProcessIoWriteAccess(String processIoId) {
+        ProcessIo processIo = processIoRepository.findByProcessIoIdAndDeletedYn(processIoId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        requireProcessWriteAccess(processIo.getProcessId());
+        return processIo;
+    }
+
+    public ProcessConnection requireConnectionReadAccess(String connectionId) {
+        ProcessConnection connection = processConnectionRepository.findByConnectionIdAndDeletedYn(connectionId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        ensureProjectReadAccess(connection.getProjectId(), requireCurrentUserId());
+        return connection;
+    }
+
+    public ProcessConnection requireConnectionWriteAccess(String connectionId) {
+        ProcessConnection connection = processConnectionRepository.findByConnectionIdAndDeletedYn(connectionId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        ensureProjectWriteAccess(connection.getProjectId(), requireCurrentUserId());
+        return connection;
+    }
+
+    private void ensureProjectReadAccess(String projectId, String userId) {
+        Project project = projectRepository.findByProjectIdAndDeletedYn(projectId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        ensureProjectReadAccess(project, userId);
+    }
+
+    private void ensureProjectReadAccess(Project project, String userId) {
+        if (userId == null || userId.isBlank()) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        if (userId.equals(project.getOwnerId())) {
+            return;
+        }
+        boolean isActiveMember = projectMemberRepository.existsByProjectIdAndUserIdAndMemberStatus(
+            project.getProjectId(),
+            userId,
+            ACTIVE_MEMBER
+        );
+        if (!isActiveMember) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "Project membership is required.");
+        }
+    }
+
+    private void ensureProjectWriteAccess(String projectId, String userId) {
+        Project project = projectRepository.findByProjectIdAndDeletedYn(projectId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        ensureProjectWriteAccess(project, userId);
+    }
+
+    private void ensureProjectWriteAccess(Project project, String userId) {
+        String role = resolveProjectRole(project, userId);
+        if (!ROLE_OWNER.equals(role) && !ROLE_EDITOR.equals(role)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "Project write access is required.");
+        }
+    }
+
+    private void ensureProjectOwnerAccess(Project project, String userId) {
+        String role = resolveProjectRole(project, userId);
+        if (!ROLE_OWNER.equals(role)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "Project owner access is required.");
+        }
+    }
+
+    private String resolveProjectRole(Project project, String userId) {
+        if (userId == null || userId.isBlank()) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        if (userId.equals(project.getOwnerId())) {
+            return ROLE_OWNER;
+        }
+        return projectMemberRepository.findByProjectIdAndUserIdAndMemberStatus(
+                project.getProjectId(),
+                userId,
+                ACTIVE_MEMBER
+            )
+            .map(ProjectMember::getProjectRole)
+            .map(String::trim)
+            .map(String::toLowerCase)
+            .orElseThrow(() -> new BusinessException(ErrorCode.FORBIDDEN, "Project membership is required."));
+    }
+}
