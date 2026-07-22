@@ -13,7 +13,7 @@ import { useAutoLayout } from '../model/useAutoLayout'
 import { CANVAS_ACTIONS } from '../model/canvasActions'
 import { useWorkflowsQuery } from '../../../entities/workflow/api/useWorkflowsQuery'
 import { useUpdateWorkflowMutation } from '../../../entities/workflow/api/useUpdateWorkflowMutation'
-import { useWorkflowSync, type PresenceMessage } from '../../../entities/workflow/api/useWorkflowSync'
+import type { PresenceMessage, GraphChangeMessage } from '../../../entities/workflow/api/useWorkflowSync'
 import { Link, useNavigate } from 'react-router-dom'
 import { CanvasViewport, PALETTE_DRAG_MIME } from './CanvasViewport'
 import { ConnectionInspector } from './ConnectionInspector'
@@ -97,6 +97,10 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   const [remoteCursors, setRemoteCursors] = useState<
     Map<string, { x: number; y: number; type: string }>
   >(new Map())
+  const [syncClientId, setSyncClientId] = useState('')
+  const sendPresenceRef = useRef<
+    (msg: Omit<PresenceMessage, 'userId' | 'workflowId' | 'timestamp'>) => void
+  >(() => {})
 
   const handlePresence = useCallback((msg: PresenceMessage) => {
     if (!msg.userId) return
@@ -115,21 +119,23 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
 
   const queryClient = useQueryClient()
 
-  const handleGraphChange = useCallback(() => {
+  const handleGraphChange = useCallback((_msg: GraphChangeMessage) => {
     void queryClient.invalidateQueries({
       queryKey: ['workflow-canvas', canvas.workflow.workflowId],
     })
   }, [queryClient, canvas.workflow.workflowId])
 
-  const { sendPresence, clientId } = useWorkflowSync(
-    canvas.workflow.workflowId,
-    () => {},
-    handlePresence,
-    handleGraphChange
-  )
+  const handleSyncReady = useCallback((api: {
+    sendPresence: (msg: Omit<PresenceMessage, 'userId' | 'workflowId' | 'timestamp'>) => void
+    clientId: string
+  }) => {
+    sendPresenceRef.current = api.sendPresence
+    setSyncClientId(api.clientId)
+  }, [])
+
   useEffect(() => {
-    sendPresence({ type: 'NODE_EDITING', editingProcessId: selectedProcessId ?? undefined })
-  }, [selectedProcessId, sendPresence])
+    sendPresenceRef.current({ type: 'NODE_EDITING', editingProcessId: selectedProcessId ?? undefined })
+  }, [selectedProcessId])
 
   const workflows = workflowsQuery.data ?? []
   const [editingWorkflowName, setEditingWorkflowName] = useState(false)
@@ -187,6 +193,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   // Declare refs and stable callbacks BEFORE any useEffect that references them
   const canvasRef = useRef(canvas)
   canvasRef.current = canvas
+  const canvasContainerRef = useRef<HTMLElement>(null)
   const fitViewRef = useRef<() => void>(() => {})
   const selectAllRef = useRef<() => void>(() => {})
   const exportPngRef = useRef<(filename: string) => void>(() => {})
@@ -409,11 +416,14 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
         )}
         {remoteCursors.size > 0 && (
           <div className="presence-avatars" title={`${remoteCursors.size}명 접속 중`}>
-            {[...remoteCursors.keys()].slice(0, 5).map((uid) => (
-              <span key={uid} className="presence-avatar" title={uid}>
-                {uid.slice(0, 2).toUpperCase()}
-              </span>
-            ))}
+            {[...remoteCursors.keys()]
+              .filter((uid) => uid !== syncClientId)
+              .slice(0, 5)
+              .map((uid) => (
+                <span key={uid} className="presence-avatar" title={uid}>
+                  {uid.slice(0, 2).toUpperCase()}
+                </span>
+              ))}
             {remoteCursors.size > 5 && (
               <span className="presence-avatar presence-avatar--overflow">+{remoteCursors.size - 5}</span>
             )}
@@ -580,7 +590,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
         </aside>
 
         <div className="panel-resize-handle" onMouseDown={makeResizeHandler('left')} />
-        <main className="workspace-canvas">
+        <main ref={canvasContainerRef as React.RefObject<HTMLElement>} className="workspace-canvas">
           <CanvasViewport
             workflowId={canvas.workflow.workflowId}
             nodes={canvas.nodes}
@@ -599,7 +609,9 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
             onFitViewReady={(fn) => { fitViewRef.current = fn }}
             onSelectAllReady={(fn) => { selectAllRef.current = fn }}
             onExportReady={(fn) => { exportPngRef.current = fn }}
-            onSendPresence={(type, x, y) => sendPresence({ type, cursorX: x, cursorY: y })}
+            onPresence={handlePresence}
+            onGraphChange={handleGraphChange}
+            onSyncReady={handleSyncReady}
             onEdgeReconnect={async (oldEdgeId, newConnection) => {
               await deleteConnection(oldEdgeId)
               await createConnection(newConnection)
@@ -625,20 +637,23 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
               onClose={closeNodePicker}
             />
           )}
-          {/* Remote cursor overlay */}
-          {[...remoteCursors.entries()]
-            .filter(([uid]) => uid !== clientId)
-            .map(([uid, cursor]) => (
-              <div
-                key={uid}
-                className="remote-cursor"
-                style={{ left: cursor.x, top: cursor.y }}
-              >
-                <div className="remote-cursor__dot" />
-                <span className="remote-cursor__label">{uid.slice(0, 8)}</span>
-              </div>
-            ))
-          }
+          {/* Remote cursor overlay — cursor coords are window-relative, subtract canvas rect */}
+          {(() => {
+            const rect = canvasContainerRef.current?.getBoundingClientRect()
+            if (!rect) return null
+            return [...remoteCursors.entries()]
+              .filter(([uid]) => uid !== syncClientId)
+              .map(([uid, cursor]) => (
+                <div
+                  key={uid}
+                  className="remote-cursor"
+                  style={{ left: cursor.x - rect.left, top: cursor.y - rect.top }}
+                >
+                  <div className="remote-cursor__dot" />
+                  <span className="remote-cursor__label">{uid.slice(0, 8)}</span>
+                </div>
+              ))
+          })()}
         </main>
 
         <div className="panel-resize-handle" onMouseDown={makeResizeHandler('right')} />

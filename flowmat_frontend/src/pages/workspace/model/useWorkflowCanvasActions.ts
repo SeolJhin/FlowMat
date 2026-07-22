@@ -43,10 +43,11 @@ export function useWorkflowCanvasActions({
   canvas,
   clearSelection,
 }: UseWorkflowCanvasActionsOptions) {
+  const workflowId = canvas.workflow.workflowId
   const createProcessMutation = useCreateProcessMutation()
-  const createProcessIoMutation = useCreateProcessIoMutation()
-  const updateProcessIoMutation = useUpdateProcessIoMutation()
-  const deleteProcessIoMutation = useDeleteProcessIoMutation()
+  const createProcessIoMutation = useCreateProcessIoMutation(workflowId)
+  const updateProcessIoMutation = useUpdateProcessIoMutation(workflowId)
+  const deleteProcessIoMutation = useDeleteProcessIoMutation(workflowId)
   const createConnectionMutation = useCreateProcessConnectionMutation()
   const updateConnectionMutation = useUpdateProcessConnectionMutation()
   const deleteConnectionMutation = useDeleteProcessConnectionMutation()

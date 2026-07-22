@@ -42,7 +42,12 @@ import { CanvasNode } from './CanvasNode'
 import { CanvasEdge } from './CanvasEdge'
 import { useWorkspaceStore } from '../model/workspaceStore'
 import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
-import { useWorkflowSync, type NodeMoveMessage } from '../../../entities/workflow/api/useWorkflowSync'
+import {
+  useWorkflowSync,
+  type NodeMoveMessage,
+  type PresenceMessage,
+  type GraphChangeMessage,
+} from '../../../entities/workflow/api/useWorkflowSync'
 
 /** dataTransfer MIME type used by palette drag-to-create. */
 export const PALETTE_DRAG_MIME = 'application/flowmat-node-tool'
@@ -277,7 +282,12 @@ interface Props {
   onSelectAllReady?(fn: () => void): void
   onExportReady?(fn: (filename: string) => void): void
   onEdgeReconnect?(oldEdgeId: string, newConnection: ConnectCompletePayload): void
-  onSendPresence?(type: 'CURSOR_MOVED', x: number, y: number): void
+  onPresence?(msg: PresenceMessage): void
+  onGraphChange?(msg: GraphChangeMessage): void
+  onSyncReady?(api: {
+    sendPresence: (msg: Omit<PresenceMessage, 'userId' | 'workflowId' | 'timestamp'>) => void
+    clientId: string
+  }): void
 }
 
 type RfNode = {
@@ -356,7 +366,9 @@ export function CanvasViewport({
   onSelectAllReady,
   onExportReady,
   onEdgeReconnect,
-  onSendPresence,
+  onPresence,
+  onGraphChange,
+  onSyncReady,
 }: Props) {
   const storageKey = `flowmat-viewport-${workflowId}`
   const savedViewport = useMemo(() => loadSavedViewport(storageKey), [storageKey])
@@ -372,7 +384,18 @@ export function CanvasViewport({
     )
   }, [])
 
-  const { sendNodeMove } = useWorkflowSync(workflowId, applyRemoteNodeMove)
+  const { sendNodeMove, sendPresence, clientId } = useWorkflowSync(
+    workflowId,
+    applyRemoteNodeMove,
+    onPresence,
+    onGraphChange,
+  )
+
+  const onSyncReadyRef = useRef(onSyncReady)
+  onSyncReadyRef.current = onSyncReady
+  useEffect(() => {
+    onSyncReadyRef.current?.({ sendPresence, clientId })
+  }, [sendPresence, clientId])
   const setHoveredEdgeId = useCanvasInteractionStore((s) => s.setHoveredEdgeId)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
 
@@ -636,14 +659,9 @@ export function CanvasViewport({
         onReconnect={handleReconnect}
         onConnectEnd={handleConnectEnd}
         onPaneClick={handlePaneClick}
-        onMouseMove={onSendPresence
-          ? (e: React.MouseEvent) => {
-              if (!reactFlowInstance) return
-              const pos = reactFlowInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY })
-              onSendPresence('CURSOR_MOVED', pos.x, pos.y)
-            }
-          : undefined
-        }
+        onMouseMove={(e: React.MouseEvent) => {
+          sendPresence({ type: 'CURSOR_MOVED', cursorX: e.clientX, cursorY: e.clientY })
+        }}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         onEdgeMouseEnter={handleEdgeMouseEnter}

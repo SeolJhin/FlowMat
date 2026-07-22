@@ -9,13 +9,13 @@ async function createProcessIo(input: CreateProcessIoInput): Promise<ProcessIoDt
   return unwrapApiResponse(envelope)
 }
 
-export function useCreateProcessIoMutation() {
+export function useCreateProcessIoMutation(workflowId: string) {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: createProcessIo,
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['workflow-canvas'] })
+      await queryClient.invalidateQueries({ queryKey: ['workflow-canvas', workflowId] })
     },
   })
 }
