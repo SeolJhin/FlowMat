@@ -17,7 +17,7 @@ public class WorkflowPresenceCleanupService {
     private final SimpMessagingTemplate messagingTemplate;
     private final WorkflowCollabProperties collabProperties;
 
-    @Scheduled(fixedDelayString = "#{@workflowCollabProperties.presence.cleanupInterval.toMillis()}")
+    @Scheduled(fixedDelayString = "${app.workflow-collab.presence.cleanup-interval:PT15S}")
     public void cleanupStaleSessions() {
         long cutoffMillis = System.currentTimeMillis() - collabProperties.getPresence().getHeartbeatTimeout().toMillis();
         List<WorkflowSessionRecord> staleSessions = sessionRegistry.findStaleSessions(cutoffMillis);

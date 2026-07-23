@@ -18,6 +18,8 @@ import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
 import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
+import org.myweb.flowmat.global.rbac.PermissionService;
+import org.myweb.flowmat.global.rbac.SystemPermission;
 import org.myweb.flowmat.global.security.AuthUser;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -41,6 +43,7 @@ public class ProjectAccessService {
     private final ProcessRepository processRepository;
     private final ProcessIoRepository processIoRepository;
     private final ProcessConnectionRepository processConnectionRepository;
+    private final PermissionService permissionService;
 
     public String requireCurrentUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -67,6 +70,10 @@ public class ProjectAccessService {
     }
 
     public List<Project> listAccessibleProjects() {
+        if (permissionService.hasPermission(SystemPermission.PROJECT_VIEW_ALL)) {
+            return projectRepository.findAllByDeletedYnOrderByCreatedAtDesc(NOT_DELETED);
+        }
+
         String userId = requireCurrentUserId();
         LinkedHashMap<String, Project> accessible = new LinkedHashMap<>();
         for (Project project : projectRepository.findAllByOwnerIdAndDeletedYnOrderByCreatedAtDesc(userId, NOT_DELETED)) {

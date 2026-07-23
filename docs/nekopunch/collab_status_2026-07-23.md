@@ -242,10 +242,89 @@ Resolves the current user's system roles from `user_roles` (scope_type='global')
 
 All tests pass under `.\gradlew.bat test`.
 
+## Role Management API
+
+### Endpoints (`/admin/users/**`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/admin/users/roles` | List all available system roles |
+| `GET` | `/admin/users/{userId}/roles` | List roles assigned to a user |
+| `POST` | `/admin/users/{userId}/roles` | Grant a role (`{ roleName }`) |
+| `DELETE` | `/admin/users/{userId}/roles/{userRolesId}` | Revoke a role assignment |
+
+All endpoints require `USER_MANAGE` permission (checked inside `UserRoleServiceImpl`).
+
+### Endpoints (`/admin/projects`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/admin/projects` | List all projects (admin view) |
+
+This reuses `ProjectService.listProjects()`, which now returns all non-deleted projects when the caller holds `PROJECT_VIEW_ALL`.
+
+### `project:view_all` wired
+
+`ProjectAccessService.listAccessibleProjects()` checks `permissionService.hasPermission(PROJECT_VIEW_ALL)` before applying the membership filter. Admins get the full project list via the same `GET /projects` endpoint — no separate admin path needed.
+
+### New entities / repositories
+
+- `Role` entity → `roles` table
+- `RoleRepository` with `findByRoleName()`
+- `UserRoleServiceImpl` — implements `listRoles`, `listUserRoles`, `grantRole`, `revokeRole`
+
+## Frontend — Admin Role Management (`/admin`)
+
+### Route
+
+`/admin` → `AdminRoute` — accessible from the Home header via **Admin** button.
+
+### Panels
+
+**System Roles** (read-only)
+- Lists all available system roles with description
+- Fetched from `GET /admin/users/roles` via `useRolesQuery`
+
+**User Role Management**
+- Free-text userId input + "Look up" button
+- On lookup: shows current roles for that user with **Revoke** per row
+- Shows grantable roles (those not yet assigned) with **+ roleName** grant buttons
+- All mutations use `useGrantRoleMutation` / `useRevokeRoleMutation` which invalidate `['admin-user-roles', userId]`
+- 403 from server surfaces as an inline error message — non-admin users who navigate to `/admin` see the error rather than a blank screen
+
+### API hooks
+
+| Hook | Endpoint |
+|------|----------|
+| `useRolesQuery` | `GET /admin/users/roles` |
+| `useUserRolesQuery(userId)` | `GET /admin/users/{userId}/roles` |
+| `useGrantRoleMutation(userId)` | `POST /admin/users/{userId}/roles` |
+| `useRevokeRoleMutation(userId)` | `DELETE /admin/users/{userId}/roles/{userRolesId}` |
+
+## Admin User Search + Entity Consolidation
+
+### Duplicate entity fix
+
+`global/rbac/entity/{Role,UserRole,RolePermission}` and `global/rbac/repository/*` were deleted.
+The canonical entities live in `domain/user/domain/entity/` and `domain/user/repository/`.
+`PermissionService` and `UserRoleServiceImpl` were updated to import from those paths.
+The `global/rbac/` package now contains only `SystemPermission.java` and `PermissionService.java`.
+
+### User search
+
+`GET /admin/users?q=` searches `users` by userId / userName / userEmail (case-insensitive LIKE).
+Requires `USER_MANAGE` permission. Implemented in `UserServiceImpl.searchUsers()`.
+
+### Frontend admin UX
+
+`AdminRoute` now has two sections:
+- **System Roles** — read-only table of available roles
+- **User Role Management** — search box → results table → click a row to expand inline role editor (grant/revoke badges per user, no page navigation needed)
+
+New hook: `useAdminUsersQuery(query)` → `GET /admin/users?q=`
+
 ## Remaining Gaps
 
-| Area                       | Status                                                                      |
-|----------------------------|-----------------------------------------------------------------------------|
-| Invite email in CI         | SMTP credentials must be provided via env vars for email to actually send.  |
-| Role management API        | No REST endpoint yet for granting/revoking system roles to users.           |
-| `project:view_all` usage   | Permission exists in DB but no service code checks it yet.                  |
+| Area               | Status                                                                     |
+|--------------------|----------------------------------------------------------------------------|
+| Invite email in CI | SMTP credentials must be provided via env vars for email to actually send. |

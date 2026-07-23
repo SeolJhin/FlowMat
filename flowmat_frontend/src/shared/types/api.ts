@@ -190,6 +190,21 @@ export interface ProjectInviteDto {
   expiredAt: string | null
 }
 
+export interface RoleDto {
+  roleId: string
+  roleName: string
+  roleDescription: string | null
+}
+
+export interface UserRoleDto {
+  userRolesId: string
+  userId: string
+  roleId: string
+  roleName: string
+  scopeType: string
+  grantedAt: string | null
+}
+
 export interface ProcessTemplateDto {
   templateId: string
   templateName: string

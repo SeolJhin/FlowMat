@@ -246,9 +246,17 @@ export function HomeRoute() {
               : 'Select a project, then open one of its workflows.'}
           </p>
         </div>
-        <button type="button" onClick={handleLogout} style={{ fontSize: 12, padding: '4px 10px', height: 30 }}>
-          Logout
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Link
+            to="/admin"
+            style={{ fontSize: 12, padding: '4px 10px', height: 30, display: 'flex', alignItems: 'center', border: '1px solid var(--border)', borderRadius: 6, textDecoration: 'none', color: 'var(--text-h)' }}
+          >
+            Admin
+          </Link>
+          <button type="button" onClick={handleLogout} style={{ fontSize: 12, padding: '4px 10px', height: 30 }}>
+            Logout
+          </button>
+        </div>
       </header>
 
       {projectLinks.length > 0 && (

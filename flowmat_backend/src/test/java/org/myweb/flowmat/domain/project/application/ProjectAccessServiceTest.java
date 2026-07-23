@@ -22,6 +22,7 @@ import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
 import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
+import org.myweb.flowmat.global.rbac.PermissionService;
 import org.myweb.flowmat.global.security.AuthUser;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -46,6 +47,9 @@ class ProjectAccessServiceTest {
 
     @Mock
     private ProcessConnectionRepository processConnectionRepository;
+
+    @Mock
+    private PermissionService permissionService;
 
     @InjectMocks
     private ProjectAccessService projectAccessService;

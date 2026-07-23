@@ -36,6 +36,9 @@ const InviteAcceptRoute = lazy(() =>
 const ProjectSettingsRoute = lazy(() =>
   import('../../pages/project-settings/ui/ProjectSettingsRoute').then((module) => ({ default: module.ProjectSettingsRoute }))
 )
+const AdminRoute = lazy(() =>
+  import('../../pages/admin/ui/AdminRoute').then((module) => ({ default: module.AdminRoute }))
+)
 
 function RouteFallback() {
   return <div className="workspace-loading">Loading...</div>
@@ -48,6 +51,7 @@ function withSuspense(element: React.ReactNode) {
 export const router = createBrowserRouter([
   { path: '/', element: withSuspense(<HomeRoute />) },
   { path: '/invite/accept', element: withSuspense(<InviteAcceptRoute />) },
+  { path: '/admin', element: withSuspense(<AdminRoute />) },
   { path: '/projects/:projectId/settings', element: withSuspense(<ProjectSettingsRoute />) },
   { path: '/projects/:projectId/workflows/:workflowId', element: withSuspense(<WorkspaceRoute />) },
   { path: '/projects/:projectId/inventory', element: withSuspense(<InventoryRoute />) },

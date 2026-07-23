@@ -1,5 +1,6 @@
 package org.myweb.flowmat.domain.user.repository;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.myweb.flowmat.domain.user.domain.entity.User;
@@ -16,4 +17,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     boolean existsByUserId(String userId);
 
     boolean existsByUserEmail(String userEmail);
+
+    List<User> findByUserIdContainingIgnoreCaseOrUserNameContainingIgnoreCaseOrUserEmailContainingIgnoreCase(
+        String userId, String userName, String userEmail);
 }
