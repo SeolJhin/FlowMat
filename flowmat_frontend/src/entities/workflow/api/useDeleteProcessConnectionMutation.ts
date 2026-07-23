@@ -1,13 +1,15 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
-import type { ApiEnvelope, ProcessConnectionDto } from '../../../shared/types/api'
-import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
+import type { ApiEnvelope } from '../../../shared/types/api'
+import { unwrapApiVoidResponse } from '../../../shared/api/unwrapApiResponse'
+import { removeWorkflowCanvasConnection } from '../model/workflowCanvasCache'
+import type { WorkflowCanvasViewModel } from '../model/types'
 
-async function deleteProcessConnection(connectionId: string): Promise<ProcessConnectionDto> {
-  const envelope = await httpClient.delete<ApiEnvelope<ProcessConnectionDto>>(
+async function deleteProcessConnection(connectionId: string): Promise<void> {
+  const envelope = await httpClient.delete<ApiEnvelope<null>>(
     `/process-connections/${connectionId}`
   )
-  return unwrapApiResponse(envelope)
+  return unwrapApiVoidResponse(envelope)
 }
 
 export function useDeleteProcessConnectionMutation() {
@@ -15,8 +17,18 @@ export function useDeleteProcessConnectionMutation() {
 
   return useMutation({
     mutationFn: deleteProcessConnection,
-    onSuccess: async (connection) => {
-      await queryClient.invalidateQueries({ queryKey: ['workflow-canvas', connection.workflowId] })
+    onMutate: (connectionId) => {
+      const canvases = queryClient.getQueriesData<WorkflowCanvasViewModel>({ queryKey: ['workflow-canvas'] })
+      for (const [, canvas] of canvases) {
+        if (canvas?.edges.some((edge) => edge.id === connectionId)) {
+          return { workflowId: canvas.workflow.workflowId, connectionId }
+        }
+      }
+      return { workflowId: null as string | null, connectionId }
+    },
+    onSuccess: (_data, _connectionId, context) => {
+      if (!context?.workflowId) return
+      removeWorkflowCanvasConnection(queryClient, context.workflowId, context.connectionId)
     },
   })
 }

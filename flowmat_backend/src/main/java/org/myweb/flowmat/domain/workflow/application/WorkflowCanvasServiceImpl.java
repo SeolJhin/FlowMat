@@ -2,11 +2,13 @@ package org.myweb.flowmat.domain.workflow.application;
 
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessConnectionResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessIoResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowCanvasResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowResponse;
+import org.myweb.flowmat.domain.workflow.collab.GraphSyncService;
 import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessConnection;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
@@ -31,11 +33,12 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
     private final ProcessRepository processRepository;
     private final ProcessIoRepository processIoRepository;
     private final ProcessConnectionRepository processConnectionRepository;
+    private final GraphSyncService graphSyncService;
+    private final ProjectAccessService projectAccessService;
 
     @Override
     public WorkflowCanvasResponse getCanvas(String workflowId) {
-        Workflow workflow = workflowRepository.findByWorkflowIdAndDeletedYn(workflowId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        Workflow workflow = projectAccessService.requireWorkflowReadAccess(workflowId);
 
         List<Process> processes = processRepository.findAllByWorkflowIdAndDeletedYnOrderByCreatedAtAsc(
             workflow.getWorkflowId(),
@@ -50,13 +53,14 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
 
         return new WorkflowCanvasResponse(
             toWorkflowResponse(workflow),
+            graphSyncService.getCurrentSeq(workflow.getWorkflowId()),
             processes.stream().map(WorkflowCanvasServiceImpl::toProcessResponse).toList(),
             processIos.stream().map(WorkflowCanvasServiceImpl::toProcessIoResponse).toList(),
             connections.stream().map(WorkflowCanvasServiceImpl::toConnectionResponse).toList()
         );
     }
 
-    private static WorkflowResponse toWorkflowResponse(Workflow workflow) {
+    public static WorkflowResponse toWorkflowResponse(Workflow workflow) {
         return new WorkflowResponse(
             workflow.getWorkflowId(),
             workflow.getProjectId(),
@@ -67,7 +71,7 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
         );
     }
 
-    private static ProcessResponse toProcessResponse(Process process) {
+    public static ProcessResponse toProcessResponse(Process process) {
         return new ProcessResponse(
             process.getProcessId(),
             process.getProjectId(),
@@ -81,11 +85,13 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
             process.getPosY(),
             process.getWidth(),
             process.getHeight(),
-            process.getProcessDesc()
+            process.getProcessDesc(),
+            process.getVersion(),
+            process.getVersionNonce()
         );
     }
 
-    private static ProcessIoResponse toProcessIoResponse(ProcessIo processIo) {
+    public static ProcessIoResponse toProcessIoResponse(ProcessIo processIo) {
         return new ProcessIoResponse(
             processIo.getProcessIoId(),
             processIo.getProcessId(),
@@ -102,7 +108,7 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
         );
     }
 
-    private static ProcessConnectionResponse toConnectionResponse(ProcessConnection connection) {
+    public static ProcessConnectionResponse toConnectionResponse(ProcessConnection connection) {
         return new ProcessConnectionResponse(
             connection.getConnectionId(),
             connection.getProjectId(),
@@ -120,7 +126,9 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
             connection.getUnit(),
             connection.getDelayTimeSec(),
             connection.getLossRate(),
-            connection.getPriority()
+            connection.getPriority(),
+            connection.getVersion(),
+            connection.getVersionNonce()
         );
     }
 }

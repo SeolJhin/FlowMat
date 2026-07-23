@@ -43,6 +43,10 @@ export interface CanvasNodeViewModel {
   outputs: CanvasPortViewModel[]
   inputCount: number
   outputCount: number
+  version: number
+  versionNonce: number
+  /** Set to the remote user's userId when they are actively editing this node. */
+  editingByUserId?: string | null
 }
 
 export interface CanvasEdgeViewModel {
@@ -64,10 +68,13 @@ export interface CanvasEdgeViewModel {
   delayTimeSec: number | null
   lossRate: number | null
   priority: number | null
+  version: number
+  versionNonce: number
 }
 
 export interface WorkflowCanvasViewModel {
   workflow: WorkflowHeaderViewModel
+  graphSeq: number
   nodes: CanvasNodeViewModel[]
   edges: CanvasEdgeViewModel[]
   nodeMap: Record<string, CanvasNodeViewModel>
@@ -110,7 +117,7 @@ export interface UpdateProcessIoInput extends Partial<Omit<CreateProcessIoInput,
 
 export interface UpdateProcessConnectionInput {
   connectionId: string
-  connectionLabel?: string
+  connectionLabel?: string | null
   connectionType?: string
   flowRate?: number | null
   unit?: string | null
@@ -153,7 +160,12 @@ export interface FlowRuleViewModel {
   projectId: string
   targetType: string
   targetId: string
-  ruleType: string
-  ruleValue: string | null
+  ruleName: string
   ruleDesc: string | null
+  conditionType: string
+  conditionExpression: string
+  actionType: string
+  actionConfig: string
+  priority: number
+  enabledYn: string
 }

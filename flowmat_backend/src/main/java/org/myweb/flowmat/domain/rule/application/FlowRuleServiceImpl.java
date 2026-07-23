@@ -3,7 +3,7 @@ package org.myweb.flowmat.domain.rule.application;
 import java.util.List;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
-import org.myweb.flowmat.domain.project.repository.ProjectRepository;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.rule.api.dto.request.FlowRuleCreateRequest;
 import org.myweb.flowmat.domain.rule.api.dto.request.FlowRuleUpdateRequest;
 import org.myweb.flowmat.domain.rule.api.dto.response.FlowRuleResponse;
@@ -34,11 +34,15 @@ public class FlowRuleServiceImpl implements FlowRuleService {
     );
 
     private final FlowRuleRepository flowRuleRepository;
-    private final ProjectRepository projectRepository;
     private final IdGenerator idGenerator;
+    private final ProjectAccessService projectAccessService;
 
     @Override
     public List<FlowRuleResponse> listRules(String projectId, String targetType, String targetId) {
+        if (!hasText(projectId)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "projectId is required.");
+        }
+        projectAccessService.requireProjectReadAccess(projectId.trim());
         if (hasText(targetType) && !hasText(targetId)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST);
         }
@@ -47,23 +51,15 @@ public class FlowRuleServiceImpl implements FlowRuleService {
         }
 
         List<FlowRule> rules;
-        if (hasText(projectId) && hasText(targetType) && hasText(targetId)) {
+        if (hasText(targetType) && hasText(targetId)) {
             rules = flowRuleRepository.findAllByProjectIdAndTargetTypeAndTargetIdAndDeletedYnOrderByPriorityDescCreatedAtAsc(
                 projectId.trim(),
                 normalizeTargetType(targetType),
                 targetId.trim(),
                 NOT_DELETED
             );
-        } else if (hasText(targetType) && hasText(targetId)) {
-            rules = flowRuleRepository.findAllByTargetTypeAndTargetIdAndDeletedYnOrderByPriorityDescCreatedAtAsc(
-                normalizeTargetType(targetType),
-                targetId.trim(),
-                NOT_DELETED
-            );
-        } else if (hasText(projectId)) {
-            rules = flowRuleRepository.findAllByProjectIdAndDeletedYnOrderByPriorityDescCreatedAtAsc(projectId.trim(), NOT_DELETED);
         } else {
-            rules = flowRuleRepository.findAllByDeletedYnOrderByPriorityDescCreatedAtAsc(NOT_DELETED);
+            rules = flowRuleRepository.findAllByProjectIdAndDeletedYnOrderByPriorityDescCreatedAtAsc(projectId.trim(), NOT_DELETED);
         }
 
         return rules.stream()
@@ -74,7 +70,7 @@ public class FlowRuleServiceImpl implements FlowRuleService {
     @Override
     @Transactional
     public FlowRuleResponse createRule(FlowRuleCreateRequest request) {
-        validateProject(request.projectId());
+        projectAccessService.requireProjectWriteAccess(request.projectId().trim());
 
         FlowRule rule = new FlowRule();
         rule.setRuleId(idGenerator.generate());
@@ -95,13 +91,16 @@ public class FlowRuleServiceImpl implements FlowRuleService {
 
     @Override
     public FlowRuleResponse getRule(String ruleId) {
-        return toResponse(findRule(ruleId));
+        FlowRule rule = findRule(ruleId);
+        projectAccessService.requireProjectReadAccess(rule.getProjectId());
+        return toResponse(rule);
     }
 
     @Override
     @Transactional
     public FlowRuleResponse updateRule(String ruleId, FlowRuleUpdateRequest request) {
         FlowRule rule = findRule(ruleId);
+        projectAccessService.requireProjectWriteAccess(rule.getProjectId());
 
         if (hasText(request.targetType())) {
             rule.setTargetType(normalizeTargetType(request.targetType()));
@@ -140,17 +139,13 @@ public class FlowRuleServiceImpl implements FlowRuleService {
     @Transactional
     public void deleteRule(String ruleId) {
         FlowRule rule = findRule(ruleId);
+        projectAccessService.requireProjectOwnerAccess(rule.getProjectId());
         rule.setDeletedYn(DELETED);
         flowRuleRepository.save(rule);
     }
 
     private FlowRule findRule(String ruleId) {
         return flowRuleRepository.findByRuleIdAndDeletedYn(ruleId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-    }
-
-    private void validateProject(String projectId) {
-        projectRepository.findByProjectIdAndDeletedYn(projectId.trim(), NOT_DELETED)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 

@@ -1,12 +1,14 @@
-import { useState } from 'react'
+﻿import { useRef, useState } from 'react'
 import { useCreateProcessConnectionMutation } from '../../../entities/workflow/api/useCreateProcessConnectionMutation'
 import { useCreateProcessIoMutation } from '../../../entities/workflow/api/useCreateProcessIoMutation'
 import { useCreateProcessMutation } from '../../../entities/workflow/api/useCreateProcessMutation'
 import { useDeleteProcessConnectionMutation } from '../../../entities/workflow/api/useDeleteProcessConnectionMutation'
+import { useUpdateProcessConnectionMutation } from '../../../entities/workflow/api/useUpdateProcessConnectionMutation'
 import { useDeleteProcessIoMutation } from '../../../entities/workflow/api/useDeleteProcessIoMutation'
 import { useDeleteProcessMutation } from '../../../entities/workflow/api/useDeleteProcessMutation'
 import { useUpdateProcessIoMutation } from '../../../entities/workflow/api/useUpdateProcessIoMutation'
 import { useUpdateProcessMutation } from '../../../entities/workflow/api/useUpdateProcessMutation'
+import { useUpdateProcessPositionMutation } from '../../../entities/workflow/api/useUpdateProcessPositionMutation'
 import { useCommandHistory } from './commandHistory'
 import {
   buildDefaultConnectionPayload,
@@ -19,9 +21,14 @@ import {
   type WorkflowPaletteTool,
 } from '../../../entities/workflow/model/nodeCatalog'
 import type { NodePickerState } from './canvasInteractionStore'
+
+// Module-level constants computed once and reused for the lifetime of the module
+const PALETTE_DEFINITIONS = getWorkflowPaletteDefinitions()
+const DEFAULT_NODE_DEFINITION = getWorkflowDefaultNodeDefinition()
 import type {
   ConnectCompletePayload,
   CreateProcessIoInput,
+  UpdateProcessConnectionInput,
   UpdateProcessInput,
   UpdateProcessIoInput,
   WorkflowCanvasViewModel,
@@ -36,22 +43,35 @@ export function useWorkflowCanvasActions({
   canvas,
   clearSelection,
 }: UseWorkflowCanvasActionsOptions) {
+  const workflowId = canvas.workflow.workflowId
   const createProcessMutation = useCreateProcessMutation()
-  const createProcessIoMutation = useCreateProcessIoMutation()
-  const updateProcessIoMutation = useUpdateProcessIoMutation()
-  const deleteProcessIoMutation = useDeleteProcessIoMutation()
+  const createProcessIoMutation = useCreateProcessIoMutation(workflowId)
+  const updateProcessIoMutation = useUpdateProcessIoMutation(workflowId)
+  const deleteProcessIoMutation = useDeleteProcessIoMutation(workflowId)
   const createConnectionMutation = useCreateProcessConnectionMutation()
+  const updateConnectionMutation = useUpdateProcessConnectionMutation()
   const deleteConnectionMutation = useDeleteProcessConnectionMutation()
   const deleteProcessMutation = useDeleteProcessMutation()
   const updateProcessMutation = useUpdateProcessMutation()
+  const updateProcessPositionMutation = useUpdateProcessPositionMutation()
 
   const commandHistory = useCommandHistory()
 
-  const [workspaceMessage, setWorkspaceMessage] = useState<string | null>(null)
+  const [workspaceMessage, setWorkspaceMessageRaw] = useState<string | null>(null)
   const [activeTool, setActiveTool] = useState<WorkflowPaletteTool>('process')
+  const positionTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const messageTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const paletteDefinitions = getWorkflowPaletteDefinitions()
-  const defaultDefinition = getWorkflowDefaultNodeDefinition()
+  function setWorkspaceMessage(msg: string | null) {
+    if (messageTimer.current) clearTimeout(messageTimer.current)
+    setWorkspaceMessageRaw(msg)
+    if (msg !== null) {
+      messageTimer.current = setTimeout(() => setWorkspaceMessageRaw(null), 5000)
+    }
+  }
+
+  const paletteDefinitions = PALETTE_DEFINITIONS
+  const defaultDefinition = DEFAULT_NODE_DEFINITION
 
   async function addNode() {
     setWorkspaceMessage(null)
@@ -179,7 +199,7 @@ export function useWorkflowCanvasActions({
     )
     if (!created) return
 
-    // Drag started at an output handle → new node is the target, and vice versa.
+    // Drag started at an output handle, so the new node becomes the target, and vice versa.
     const payload: ConnectCompletePayload =
       draft.fromHandleType === 'source'
         ? {
@@ -217,7 +237,7 @@ export function useWorkflowCanvasActions({
   /**
    * On-canvas picker, insert-on-edge mode (ported from tldraw's
    * insertNodeWithinConnection): split an existing connection with a new
-   * node — original edge is replaced by source→new and new→target.
+   * node: the original edge is replaced by source->new and new->target.
    */
   async function insertNodeOnEdge(
     edgeId: string,
@@ -359,12 +379,108 @@ export function useWorkflowCanvasActions({
     }
   }
 
-  async function saveNodePosition(processId: string, x: number, y: number) {
-    await updateNode({
-      processId,
-      posX: Math.round(x),
-      posY: Math.round(y),
+  async function duplicateNode(processId: string) {
+    const node = canvas.nodeMap[processId]
+    if (!node) return
+    setWorkspaceMessage(null)
+
+    try {
+      const created = await createProcessMutation.mutateAsync({
+        workflowId: canvas.workflow.workflowId,
+        processName: `${node.name} (Copy)`, 
+        processType: node.processType,
+        nodeType: node.nodeType,
+        colorScheme: node.colorScheme,
+        posX: Math.round(node.position.x + 40),
+        posY: Math.round(node.position.y + 40),
+        width: node.size.width,
+        height: node.size.height,
+        processDesc: node.description ?? undefined,
+      })
+      commandHistory.push({
+        label: `Duplicate "${node.name}"`,
+        undo: async () => { await deleteProcessMutation.mutateAsync(created.processId) },
+      })
+    } catch (error) {
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to duplicate node.')
+    }
+  }
+
+  function saveNodePosition(processId: string, x: number, y: number) {
+    const existing = positionTimers.current.get(processId)
+    if (existing) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      positionTimers.current.delete(processId)
+      void updateProcessPositionMutation.mutateAsync({
+        processId,
+        posX: Math.round(x),
+        posY: Math.round(y),
+      })
+    }, 200)
+    positionTimers.current.set(processId, timer)
+  }
+
+  async function batchUpdateNodePositions(
+    positions: Array<{ processId: string; posX: number; posY: number }>
+  ) {
+    if (positions.length === 0) return
+    setWorkspaceMessage(null)
+
+    const oldPositions = positions.flatMap(({ processId }) => {
+      const node = canvas.nodeMap[processId]
+      return node
+        ? [{ processId, posX: Math.round(node.position.x), posY: Math.round(node.position.y) }]
+        : []
     })
+
+    try {
+      await Promise.all(
+        positions.map((p) => updateProcessMutation.mutateAsync(p))
+      )
+    } catch (error) {
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to apply layout.')
+      return
+    }
+
+    commandHistory.push({
+      label: 'Auto layout',
+      undo: async () => {
+        await Promise.all(oldPositions.map((p) => updateProcessMutation.mutateAsync(p)))
+      },
+      redo: async () => {
+        await Promise.all(positions.map((p) => updateProcessMutation.mutateAsync(p)))
+      },
+    })
+  }
+
+  async function updateConnection(input: UpdateProcessConnectionInput) {
+    setWorkspaceMessage(null)
+    const edge = canvas.edges.find((e) => e.id === input.connectionId)
+
+    try {
+      await updateConnectionMutation.mutateAsync(input)
+    } catch (error) {
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to update connection.')
+      throw error
+    }
+
+    if (edge) {
+      const oldInput: UpdateProcessConnectionInput = {
+        connectionId: input.connectionId,
+        ...(input.connectionLabel !== undefined && { connectionLabel: edge.label ?? undefined }),
+        ...(input.connectionType !== undefined && { connectionType: edge.connectionType }),
+        ...(input.flowRate !== undefined && { flowRate: edge.flowRate !== null ? Number(edge.flowRate) : null }),
+        ...(input.unit !== undefined && { unit: edge.unit }),
+        ...(input.delayTimeSec !== undefined && { delayTimeSec: edge.delayTimeSec }),
+        ...(input.lossRate !== undefined && { lossRate: edge.lossRate }),
+        ...(input.priority !== undefined && { priority: edge.priority }),
+      }
+      commandHistory.push({
+        label: 'Edit connection',
+        undo: async () => { await updateConnectionMutation.mutateAsync(oldInput) },
+        redo: async () => { await updateConnectionMutation.mutateAsync(input) },
+      })
+    }
   }
 
   async function deleteConnection(connectionId: string) {
@@ -404,9 +520,42 @@ export function useWorkflowCanvasActions({
     }
   }
 
+  async function deleteElements(input: { nodeIds: string[]; edgeIds: string[] }) {
+    const { nodeIds, edgeIds } = input
+    if (nodeIds.length === 0 && edgeIds.length === 0) return
+
+    setWorkspaceMessage(null)
+
+    const allEdgeIds = new Set(edgeIds)
+    for (const nodeId of nodeIds) {
+      for (const connectionId of getRelatedConnectionIds(canvas.edges, nodeId)) {
+        allEdgeIds.add(connectionId)
+      }
+    }
+
+    if (nodeIds.length > 0) {
+      // Multi-node delete invalidates history because connected edges disappear as well.
+      commandHistory.clear()
+    }
+
+    try {
+      for (const connectionId of allEdgeIds) {
+        await deleteConnectionMutation.mutateAsync(connectionId)
+      }
+
+      for (const processId of nodeIds) {
+        await deleteProcessMutation.mutateAsync(processId)
+      }
+
+      clearSelection()
+    } catch (error) {
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to delete selection.')
+    }
+  }
+
   async function deleteNode(processId: string) {
     setWorkspaceMessage(null)
-    // Node deletion cascades to connections — stale undo commands would reference
+    // Node deletion cascades to connections, so stale undo commands would reference
     // deleted entities, so clear history to prevent invalid operations.
     commandHistory.clear()
 
@@ -427,7 +576,7 @@ export function useWorkflowCanvasActions({
   async function createConnection(payload: ConnectCompletePayload) {
     setWorkspaceMessage(null)
 
-    const connectionInput = buildDefaultConnectionPayload(canvas.workflow.workflowId, payload)
+    const connectionInput = buildDefaultConnectionPayload(canvas.workflow.workflowId, payload, canvas)
     try {
       const created = await createConnectionMutation.mutateAsync(connectionInput)
       let currentConnectionId = created.connectionId
@@ -458,8 +607,14 @@ export function useWorkflowCanvasActions({
     updatePort,
     deletePort,
     saveNodePosition,
+    duplicateNode,
+    batchUpdateNodePositions,
+    updateConnection,
     deleteConnection,
+    deleteElements,
     deleteNode,
     createConnection,
   }
 }
+
+

@@ -3,6 +3,7 @@ import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
 import type { ApiEnvelope, ProcessIoDto } from '../../../shared/types/api'
 import type { UpdateProcessIoInput } from '../model/types'
+import { patchWorkflowCanvasPort } from '../model/workflowCanvasCache'
 
 async function updateProcessIo(input: UpdateProcessIoInput): Promise<ProcessIoDto> {
   const { processIoId, ...payload } = input
@@ -10,13 +11,13 @@ async function updateProcessIo(input: UpdateProcessIoInput): Promise<ProcessIoDt
   return unwrapApiResponse(envelope)
 }
 
-export function useUpdateProcessIoMutation() {
+export function useUpdateProcessIoMutation(workflowId: string) {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: updateProcessIo,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['workflow-canvas'] })
+    onSuccess: (processIo) => {
+      patchWorkflowCanvasPort(queryClient, workflowId, processIo)
     },
   })
 }

@@ -35,4 +35,10 @@ public class Process extends CreatedUpdatedAuditEntity {
     private Double width;
     private Double height;
     private String processDesc;
+
+    @Column(name = "version")
+    private int version = 1;
+
+    @Column(name = "version_nonce")
+    private int versionNonce;
 }

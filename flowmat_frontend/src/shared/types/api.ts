@@ -12,6 +12,26 @@ export type UiError = {
 
 // Raw DTOs from the backend.
 
+export interface UserDto {
+  id: string
+  userId: string
+  userName: string
+  userEmail: string
+  userStatus: string
+}
+
+export interface ProductionRunDto {
+  productionRunId: string
+  projectId: string
+  workflowId: string
+  runNumber: string
+  runType: string | null
+  runStatus: string
+  targetItemId: string | null
+  plannedOutputQty: number
+  actualOutputQty: number | null
+}
+
 export interface ProjectSummaryDto {
   projectId: string
   projectName: string
@@ -62,6 +82,8 @@ export interface ProcessDto {
   width: number
   height: number
   processDesc: string | null
+  version: number
+  versionNonce: number
 }
 
 export interface ProcessIoDto {
@@ -97,10 +119,36 @@ export interface ProcessConnectionDto {
   delayTimeSec: number | null
   lossRate: number | null
   priority: number | null
+  version: number
+  versionNonce: number
+}
+
+export interface GraphEntityPayloadDto {
+  workflow: WorkflowDto | null
+  process: ProcessDto | null
+  processIos: ProcessIoDto[]
+  connection: ProcessConnectionDto | null
+}
+
+export interface WorkflowGraphChangeDto {
+  seq: number
+  changeType: string
+  workflowId: string
+  entityId: string
+  userId: string | null
+  timestamp: number
+  payload: GraphEntityPayloadDto | null
+}
+
+export interface WorkflowGraphChangesDto {
+  currentSeq: number
+  resetRequired: boolean
+  changes: WorkflowGraphChangeDto[]
 }
 
 export interface WorkflowCanvasDto {
   workflow: WorkflowDto
+  graphSeq: number
   processes: ProcessDto[]
   processIos: ProcessIoDto[]
   connections: ProcessConnectionDto[]
@@ -111,17 +159,63 @@ export interface FlowRuleDto {
   projectId: string
   targetType: string
   targetId: string
-  ruleType: string
-  ruleValue: string | null
+  ruleName: string
   ruleDesc: string | null
+  conditionType: string
+  conditionExpression: string
+  actionType: string
+  actionConfig: string
+  priority: number
+  enabledYn: string
+}
+
+export interface ProjectMemberDto {
+  projectMemberId: string
+  projectId: string
+  userId: string
+  projectRole: string
+  memberStatus: string
+  joinedAt: string | null
+}
+
+export interface ProjectInviteDto {
+  inviteId: string
+  projectId: string
+  invitedEmail: string
+  invitedUserId: string | null
+  projectRole: string
+  inviteStatus: string
+  inviteToken: string
+  acceptedAt: string | null
+  expiredAt: string | null
+}
+
+export interface RoleDto {
+  roleId: string
+  roleName: string
+  roleDescription: string | null
+}
+
+export interface UserRoleDto {
+  userRolesId: string
+  userId: string
+  roleId: string
+  roleName: string
+  scopeType: string
+  grantedAt: string | null
 }
 
 export interface ProcessTemplateDto {
   templateId: string
   templateName: string
-  category: string
-  nodeType: string
-  colorScheme: string
-  description: string | null
-  icon: string | null
+  templateCategory: string
+  templateType: string
+  iconKey: string | null
+  defaultColorScheme: string
+  defaultWidth: number | null
+  defaultHeight: number | null
+  defaultDesc: string | null
+  defaultConfig: string | null
+  publicYn: string
+  sortOrder: number | null
 }

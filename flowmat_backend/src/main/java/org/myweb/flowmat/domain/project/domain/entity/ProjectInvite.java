@@ -4,6 +4,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.OffsetDateTime;
+import jakarta.persistence.Column;
 import lombok.Getter;
 import lombok.Setter;
 import org.myweb.flowmat.global.common.BaseTimeEntity;
@@ -24,5 +25,9 @@ public class ProjectInvite extends BaseTimeEntity {
     private String inviteStatus;
     private String inviteToken;
     private String invitedBy;
+
+    @Column(name = "accepted_at")
+    private OffsetDateTime acceptedAt;
+
     private OffsetDateTime expiredAt;
 }

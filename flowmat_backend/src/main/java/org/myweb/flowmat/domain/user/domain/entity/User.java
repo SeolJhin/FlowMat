@@ -29,11 +29,17 @@ public class User extends BaseTimeEntity {
     @Column(name = "user_email", nullable = false, unique = true)
     private String userEmail;
 
+    @Column(name = "user_nickname", unique = true)
+    private String userNickname;
+
     @Column(name = "user_pwd", nullable = false)
     private String userPwd;
 
     @Column(name = "user_status")
     private String userStatus;
+
+    @Column(name = "user_role")
+    private String userRole;
     
     @Column(name = "user_birth")
     private LocalDate userBirth;

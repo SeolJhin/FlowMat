@@ -1,4 +1,10 @@
 package org.myweb.flowmat.domain.user.api.dto.request;
 
-public record UserLoginRequest(String userIdOrEmail, String password) {
+import jakarta.validation.constraints.NotBlank;
+
+public record UserLoginRequest(
+    @NotBlank String userIdOrEmail,
+    @NotBlank String password,
+    String deviceId
+) {
 }

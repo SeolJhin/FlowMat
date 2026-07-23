@@ -2,9 +2,11 @@ package org.myweb.flowmat.domain.workflow.application;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessConnectionCreateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessConnectionUpdateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessConnectionResponse;
@@ -12,6 +14,8 @@ import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessConnection;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
+import org.myweb.flowmat.domain.workflow.collab.GraphSyncService;
+import org.myweb.flowmat.domain.workflow.collab.dto.GraphChangeMessage.Type;
 import org.myweb.flowmat.domain.workflow.repository.ProcessConnectionRepository;
 import org.myweb.flowmat.domain.workflow.repository.ProcessIoRepository;
 import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
@@ -36,10 +40,12 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     private final ProcessIoRepository processIoRepository;
     private final ItemRepository itemRepository;
     private final IdGenerator idGenerator;
+    private final GraphSyncService graphSyncService;
+    private final ProjectAccessService projectAccessService;
 
     @Override
     public List<ProcessConnectionResponse> listConnections(String workflowId) {
-        findActiveWorkflow(workflowId);
+        projectAccessService.requireWorkflowReadAccess(workflowId);
         return processConnectionRepository.findAllByWorkflowIdAndDeletedYnOrderByCreatedAtAsc(workflowId, NOT_DELETED)
             .stream()
             .map(ProcessConnectionServiceImpl::toResponse)
@@ -49,9 +55,9 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     @Override
     @Transactional
     public ProcessConnectionResponse createConnection(ProcessConnectionCreateRequest request) {
-        Workflow workflow = findActiveWorkflow(request.workflowId());
-        Process fromProcess = findActiveProcess(request.fromProcessId());
-        Process toProcess = findActiveProcess(request.toProcessId());
+        Workflow workflow = projectAccessService.requireWorkflowWriteAccess(request.workflowId());
+        Process fromProcess = projectAccessService.requireProcessWriteAccess(request.fromProcessId());
+        Process toProcess = projectAccessService.requireProcessWriteAccess(request.toProcessId());
         validateProcessMembership(workflow, fromProcess, toProcess);
 
         ProcessConnection connection = new ProcessConnection();
@@ -73,20 +79,24 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         connection.setLossRate(defaultIfNull(request.lossRate(), BigDecimal.ZERO));
         connection.setPriority(request.priority() != null ? request.priority() : 0);
         connection.setDeletedYn(NOT_DELETED);
-        return toResponse(processConnectionRepository.save(connection));
+        connection.setVersion(1);
+        connection.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
+        ProcessConnectionResponse response = toResponse(processConnectionRepository.save(connection));
+        graphSyncService.broadcast(Type.CONNECTION_CREATED, response.workflowId(), response.connectionId());
+        return response;
     }
 
     @Override
     public ProcessConnectionResponse getConnection(String connectionId) {
-        return toResponse(findActiveConnection(connectionId));
+        return toResponse(projectAccessService.requireConnectionReadAccess(connectionId));
     }
 
     @Override
     @Transactional
     public ProcessConnectionResponse updateConnection(String connectionId, ProcessConnectionUpdateRequest request) {
-        ProcessConnection connection = findActiveConnection(connectionId);
-        Process fromProcess = findActiveProcess(connection.getFromProcessId());
-        Process toProcess = findActiveProcess(connection.getToProcessId());
+        ProcessConnection connection = projectAccessService.requireConnectionWriteAccess(connectionId);
+        Process fromProcess = projectAccessService.requireProcessWriteAccess(connection.getFromProcessId());
+        Process toProcess = projectAccessService.requireProcessWriteAccess(connection.getToProcessId());
 
         if (request.fromIoId() != null) {
             connection.setFromIoId(validateProcessIo(request.fromIoId(), fromProcess.getProcessId()));
@@ -110,9 +120,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         if (hasText(request.connectionType())) {
             connection.setConnectionType(request.connectionType().trim().toLowerCase());
         }
-        if (request.connectionLabel() != null) {
-            connection.setConnectionLabel(trimToNull(request.connectionLabel()));
-        }
+        connection.setConnectionLabel(trimToNull(request.connectionLabel()));
         if (request.flowRate() != null) {
             connection.setFlowRate(request.flowRate());
         }
@@ -128,30 +136,21 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         if (request.priority() != null) {
             connection.setPriority(request.priority());
         }
-        return toResponse(processConnectionRepository.save(connection));
+        connection.setVersion(connection.getVersion() + 1);
+        connection.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
+        ProcessConnectionResponse response = toResponse(processConnectionRepository.save(connection));
+        graphSyncService.broadcast(Type.CONNECTION_UPDATED, response.workflowId(), response.connectionId());
+        return response;
     }
 
     @Override
     @Transactional
     public void deleteConnection(String connectionId) {
-        ProcessConnection connection = findActiveConnection(connectionId);
+        ProcessConnection connection = projectAccessService.requireConnectionWriteAccess(connectionId);
+        String workflowId = connection.getWorkflowId();
         connection.setDeletedYn(DELETED);
         processConnectionRepository.save(connection);
-    }
-
-    private Workflow findActiveWorkflow(String workflowId) {
-        return workflowRepository.findByWorkflowIdAndDeletedYn(workflowId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-    }
-
-    private Process findActiveProcess(String processId) {
-        return processRepository.findByProcessIdAndDeletedYn(processId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-    }
-
-    private ProcessConnection findActiveConnection(String connectionId) {
-        return processConnectionRepository.findByConnectionIdAndDeletedYn(connectionId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        graphSyncService.broadcast(Type.CONNECTION_DELETED, workflowId, connectionId);
     }
 
     private String validateProcessIo(String processIoId, String processId) {
@@ -203,7 +202,9 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
             connection.getUnit(),
             connection.getDelayTimeSec(),
             connection.getLossRate(),
-            connection.getPriority()
+            connection.getPriority(),
+            connection.getVersion(),
+            connection.getVersionNonce()
         );
     }
 

@@ -1,4 +1,14 @@
 package org.myweb.flowmat.domain.user.api.dto.response;
 
-public record UserRoleResponse(String roleId, String roleName, String scopeType, String scopeId) {
+import java.time.OffsetDateTime;
+import java.util.UUID;
+
+public record UserRoleResponse(
+    UUID userRolesId,
+    String userId,
+    UUID roleId,
+    String roleName,
+    String scopeType,
+    OffsetDateTime grantedAt
+) {
 }

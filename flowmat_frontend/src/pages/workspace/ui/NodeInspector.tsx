@@ -56,10 +56,6 @@ export function NodeInspector({
   const itemsQuery = useItemsQuery(projectId)
   const itemOptions = itemsQuery.data ?? []
   const allPorts = useMemo(() => (node ? [...node.inputs, ...node.outputs] : []), [node])
-  const activePort = useMemo(
-    () => allPorts.find((port) => port.processIoId === editingPortId) ?? null,
-    [allPorts, editingPortId]
-  )
 
   useEffect(() => {
     if (!node) return
@@ -97,7 +93,7 @@ export function NodeInspector({
     event.preventDefault()
 
     await onNodeSubmit({
-      processId: node.id,
+      processId: node!.id,
       processName: processName.trim(),
       nodeType: selectedDefinition.nodeType,
       processType: selectedDefinition.processType,
@@ -115,7 +111,7 @@ export function NodeInspector({
       return
     }
 
-    await onPortCreate(toCreateProcessIoInput(node.id, portForm))
+    await onPortCreate(toCreateProcessIoInput(node!.id, portForm))
   }
 
   async function handlePortDelete() {

@@ -1,4 +1,7 @@
 package org.myweb.flowmat.domain.user.api.dto.request;
 
-public record PasswordResetRequest(String userEmail) {
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+
+public record PasswordResetRequest(@NotBlank @Email String userEmail) {
 }

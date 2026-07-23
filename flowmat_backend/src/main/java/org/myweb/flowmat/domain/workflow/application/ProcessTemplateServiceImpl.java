@@ -1,8 +1,12 @@
 package org.myweb.flowmat.domain.workflow.application;
 
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessTemplateApplyRequest;
+import org.myweb.flowmat.global.rbac.PermissionService;
+import org.myweb.flowmat.global.rbac.SystemPermission;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessTemplateCreateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessTemplateUpdateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessResponse;
@@ -26,16 +30,22 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProcessTemplateServiceImpl implements ProcessTemplateService {
 
     private static final String NOT_DELETED = "N";
+    private static final String PUBLIC_YES = "Y";
     private static final String DEFAULT_COLOR_SCHEME = "slate";
 
     private final ProcessTemplateRepository processTemplateRepository;
     private final WorkflowRepository workflowRepository;
     private final ProcessRepository processRepository;
     private final IdGenerator idGenerator;
+    private final ProjectAccessService projectAccessService;
+    private final PermissionService permissionService;
 
     @Override
     public List<ProcessTemplateResponse> listTemplates() {
-        return processTemplateRepository.findAllByOrderBySortOrderAscCreatedAtAsc().stream()
+        List<ProcessTemplate> templates = canReadPrivate()
+            ? processTemplateRepository.findAllByOrderBySortOrderAscCreatedAtAsc()
+            : processTemplateRepository.findAllByPublicYnOrderBySortOrderAscCreatedAtAsc(PUBLIC_YES);
+        return templates.stream()
             .map(ProcessTemplateServiceImpl::toResponse)
             .toList();
     }
@@ -43,6 +53,7 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
     @Override
     @Transactional
     public ProcessTemplateResponse createTemplate(ProcessTemplateCreateRequest request) {
+        permissionService.require(SystemPermission.TEMPLATE_MANAGE);
         ProcessTemplate template = new ProcessTemplate();
         template.setTemplateId(idGenerator.generate());
         applyTemplateFields(
@@ -64,12 +75,13 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
 
     @Override
     public ProcessTemplateResponse getTemplate(String templateId) {
-        return toResponse(findTemplate(templateId));
+        return toResponse(findReadableTemplate(templateId));
     }
 
     @Override
     @Transactional
     public ProcessTemplateResponse updateTemplate(String templateId, ProcessTemplateUpdateRequest request) {
+        permissionService.require(SystemPermission.TEMPLATE_MANAGE);
         ProcessTemplate template = findTemplate(templateId);
         if (hasText(request.templateName())) {
             template.setTemplateName(request.templateName().trim());
@@ -110,15 +122,15 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
     @Override
     @Transactional
     public void deleteTemplate(String templateId) {
+        permissionService.require(SystemPermission.TEMPLATE_MANAGE);
         processTemplateRepository.delete(findTemplate(templateId));
     }
 
     @Override
     @Transactional
     public ProcessResponse applyTemplate(String templateId, ProcessTemplateApplyRequest request) {
-        ProcessTemplate template = findTemplate(templateId);
-        Workflow workflow = workflowRepository.findByWorkflowIdAndDeletedYn(request.workflowId(), NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        ProcessTemplate template = findReadableTemplate(templateId);
+        Workflow workflow = projectAccessService.requireWorkflowWriteAccess(request.workflowId());
 
         Process process = new Process();
         process.setProcessId(idGenerator.generate());
@@ -136,12 +148,26 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
         process.setHeight(defaultIfNull(template.getDefaultHeight(), 60.0));
         process.setProcessDesc(template.getDefaultDesc());
         process.setDeletedYn(NOT_DELETED);
+        process.setVersion(1);
+        process.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
         return toProcessResponse(processRepository.save(process));
     }
 
     private ProcessTemplate findTemplate(String templateId) {
         return processTemplateRepository.findById(templateId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+    }
+
+    private ProcessTemplate findReadableTemplate(String templateId) {
+        ProcessTemplate template = findTemplate(templateId);
+        if (!canReadPrivate() && !PUBLIC_YES.equalsIgnoreCase(template.getPublicYn())) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "Private process templates require admin access.");
+        }
+        return template;
+    }
+
+    private boolean canReadPrivate() {
+        return permissionService.hasPermission(SystemPermission.TEMPLATE_READ_PRIVATE);
     }
 
     private static void applyTemplateFields(
@@ -202,7 +228,9 @@ public class ProcessTemplateServiceImpl implements ProcessTemplateService {
             process.getPosY(),
             process.getWidth(),
             process.getHeight(),
-            process.getProcessDesc()
+            process.getProcessDesc(),
+            process.getVersion(),
+            process.getVersionNonce()
         );
     }
 

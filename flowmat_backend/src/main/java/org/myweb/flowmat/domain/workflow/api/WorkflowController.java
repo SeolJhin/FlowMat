@@ -3,10 +3,15 @@ package org.myweb.flowmat.domain.workflow.api;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.api.dto.request.WorkflowCreateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.WorkflowUpdateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowCanvasResponse;
+import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowGraphChangesResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowResponse;
+import org.myweb.flowmat.domain.workflow.collab.GraphSyncService;
+import org.myweb.flowmat.domain.workflow.collab.WorkflowSessionRegistry;
+import org.myweb.flowmat.domain.workflow.collab.dto.PresenceMessage;
 import org.myweb.flowmat.domain.workflow.application.WorkflowCanvasService;
 import org.myweb.flowmat.domain.workflow.application.WorkflowService;
 import org.myweb.flowmat.global.response.ApiResponse;
@@ -27,6 +32,9 @@ public class WorkflowController {
 
     private final WorkflowService workflowService;
     private final WorkflowCanvasService workflowCanvasService;
+    private final GraphSyncService graphSyncService;
+    private final WorkflowSessionRegistry sessionRegistry;
+    private final ProjectAccessService projectAccessService;
 
     @GetMapping
     public ApiResponse<List<WorkflowResponse>> listWorkflows(@RequestParam("projectId") String projectId) {
@@ -60,5 +68,32 @@ public class WorkflowController {
     @GetMapping("/{workflowId}/canvas")
     public ApiResponse<WorkflowCanvasResponse> getCanvas(@PathVariable("workflowId") String workflowId) {
         return ApiResponse.ok(workflowCanvasService.getCanvas(workflowId));
+    }
+
+    @GetMapping("/{workflowId}/graph-changes")
+    public ApiResponse<WorkflowGraphChangesResponse> getGraphChanges(
+        @PathVariable("workflowId") String workflowId,
+        @RequestParam(value = "sinceSeq", defaultValue = "0") long sinceSeq
+    ) {
+        return ApiResponse.ok(graphSyncService.getChangesSince(workflowId, sinceSeq));
+    }
+
+    @GetMapping("/{workflowId}/presence")
+    public ApiResponse<List<PresenceMessage>> getPresence(@PathVariable("workflowId") String workflowId) {
+        projectAccessService.requireWorkflowReadAccess(workflowId);
+        List<PresenceMessage> snapshot = sessionRegistry.listWorkflowSessions(workflowId).stream()
+            .filter(session -> session.userId() != null)
+            .map(session -> new PresenceMessage(
+                session.editingProcessId() != null ? PresenceMessage.Type.NODE_EDITING : PresenceMessage.Type.JOIN,
+                session.userId(),
+                session.clientId(),
+                workflowId,
+                session.cursorX(),
+                session.cursorY(),
+                session.editingProcessId(),
+                session.lastSeenAt()
+            ))
+            .toList();
+        return ApiResponse.ok(snapshot);
     }
 }

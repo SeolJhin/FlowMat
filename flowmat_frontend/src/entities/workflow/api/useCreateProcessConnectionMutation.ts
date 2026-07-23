@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
 import type { ApiEnvelope, ProcessConnectionDto } from '../../../shared/types/api'
+import { patchWorkflowCanvasConnection } from '../model/workflowCanvasCache'
 
 export interface CreateProcessConnectionInput {
   workflowId: string
@@ -33,8 +34,8 @@ export function useCreateProcessConnectionMutation() {
 
   return useMutation({
     mutationFn: createProcessConnection,
-    onSuccess: async (connection) => {
-      await queryClient.invalidateQueries({ queryKey: ['workflow-canvas', connection.workflowId] })
+    onSuccess: (connection) => {
+      patchWorkflowCanvasConnection(queryClient, connection)
     },
   })
 }
