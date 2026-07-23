@@ -11,6 +11,7 @@ import org.myweb.flowmat.domain.user.api.dto.response.UserRoleResponse;
 import org.myweb.flowmat.domain.user.domain.entity.Role;
 import org.myweb.flowmat.domain.user.domain.entity.User;
 import org.myweb.flowmat.domain.user.domain.entity.UserRole;
+import org.myweb.flowmat.domain.user.domain.enums.AdminUserActionType;
 import org.myweb.flowmat.domain.user.repository.RoleRepository;
 import org.myweb.flowmat.domain.user.repository.UserRepository;
 import org.myweb.flowmat.domain.user.repository.UserRoleRepository;
@@ -30,6 +31,7 @@ public class UserRoleServiceImpl implements UserRoleService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final UserRoleRepository userRoleRepository;
+    private final AdminUserActionLogService adminUserActionLogService;
 
     @Override
     public List<RoleResponse> listRoles() {
@@ -73,6 +75,7 @@ public class UserRoleServiceImpl implements UserRoleService {
         userRole.setScopeType("global");
         userRole.setGrantedAt(OffsetDateTime.now());
         UserRole saved = userRoleRepository.save(userRole);
+        adminUserActionLogService.record(userId, AdminUserActionType.ROLE_GRANT, null, role.getRoleName(), null);
         return toResponse(saved, userId, Map.of(role.getRoleId(), role));
     }
 
@@ -82,7 +85,12 @@ public class UserRoleServiceImpl implements UserRoleService {
         permissionService.require(SystemPermission.USER_MANAGE);
         UserRole userRole = userRoleRepository.findById(userRolesId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        User user = userRepository.findById(userRole.getUserId())
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "User not found."));
+        Role role = roleRepository.findById(userRole.getRoleId())
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Role not found."));
         userRoleRepository.delete(userRole);
+        adminUserActionLogService.record(user.getUserId(), AdminUserActionType.ROLE_REVOKE, role.getRoleName(), null, null);
     }
 
     private User findUser(String userId) {

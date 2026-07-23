@@ -4,7 +4,9 @@ import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.user.api.dto.request.AdminUserStatusUpdateRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.GrantRoleRequest;
+import org.myweb.flowmat.domain.user.api.dto.response.AdminUserActionLogResponse;
 import org.myweb.flowmat.domain.user.api.dto.response.RoleResponse;
 import org.myweb.flowmat.domain.user.api.dto.response.UserResponse;
 import org.myweb.flowmat.domain.user.api.dto.response.UserRoleResponse;
@@ -13,6 +15,7 @@ import org.myweb.flowmat.domain.user.application.UserService;
 import org.myweb.flowmat.global.response.ApiResponse;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -33,6 +36,21 @@ public class AdminUserController {
         @RequestParam(value = "q", defaultValue = "") String query
     ) {
         return ApiResponse.ok(userService.searchUsers(query));
+    }
+
+    @PatchMapping("/{userId}/status")
+    public ApiResponse<UserResponse> updateStatus(
+        @PathVariable("userId") String userId,
+        @Valid @RequestBody AdminUserStatusUpdateRequest request
+    ) {
+        return ApiResponse.ok(userService.updateStatus(userId, request));
+    }
+
+    @GetMapping("/{userId}/activity")
+    public ApiResponse<List<AdminUserActionLogResponse>> listAdminActivity(
+        @PathVariable("userId") String userId
+    ) {
+        return ApiResponse.ok(userService.listAdminActivity(userId));
     }
 
     @GetMapping("/roles")

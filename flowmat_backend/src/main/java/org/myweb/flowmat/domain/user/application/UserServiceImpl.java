@@ -3,12 +3,16 @@ package org.myweb.flowmat.domain.user.application;
 import java.time.OffsetDateTime;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.user.api.dto.request.AdminUserStatusUpdateRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.SocialLinkUnlinkRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.UserUpdateRequest;
+import org.myweb.flowmat.domain.user.api.dto.response.AdminUserActionLogResponse;
 import org.myweb.flowmat.domain.user.api.dto.response.SocialAccountResponse;
 import org.myweb.flowmat.domain.user.api.dto.response.UserResponse;
 import org.myweb.flowmat.domain.user.domain.entity.SocialAccount;
 import org.myweb.flowmat.domain.user.domain.entity.User;
+import org.myweb.flowmat.domain.user.domain.enums.AdminUserActionType;
+import org.myweb.flowmat.domain.user.domain.enums.UserStatus;
 import org.myweb.flowmat.domain.user.repository.SocialAccountRepository;
 import org.myweb.flowmat.domain.user.repository.UserRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
@@ -29,6 +33,7 @@ public class UserServiceImpl implements UserService {
     private final PasswordEncoder passwordEncoder;
     private final PermissionService permissionService;
     private final AuthRedisStore authRedisStore;
+    private final AdminUserActionLogService adminUserActionLogService;
 
     @Override
     @Transactional(readOnly = true)
@@ -47,6 +52,45 @@ public class UserServiceImpl implements UserService {
             .stream()
             .map(this::toResponse)
             .toList();
+    }
+
+    @Override
+    public UserResponse updateStatus(String userId, AdminUserStatusUpdateRequest request) {
+        permissionService.require(SystemPermission.USER_MANAGE);
+        if (request == null || request.userStatus() == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "User status is required.");
+        }
+
+        User user = userRepository.findByUserId(userId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "User not found."));
+        UserStatus currentStatus = parseStatus(user.getUserStatus());
+        UserStatus targetStatus = request.userStatus();
+
+        if (currentStatus == UserStatus.WITHDRAWN && targetStatus != UserStatus.WITHDRAWN) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Withdrawn users cannot be restored.");
+        }
+        if (currentStatus == targetStatus) {
+            return toResponse(user);
+        }
+
+        applyStatusTransition(user, targetStatus);
+        adminUserActionLogService.record(
+            userId,
+            AdminUserActionType.STATUS_CHANGE,
+            currentStatus == null ? null : currentStatus.name(),
+            targetStatus.name(),
+            request.reason()
+        );
+        return toResponse(user);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<AdminUserActionLogResponse> listAdminActivity(String userId) {
+        permissionService.require(SystemPermission.USER_MANAGE);
+        userRepository.findByUserId(userId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "User not found."));
+        return adminUserActionLogService.listByTargetUserId(userId);
     }
 
     @Override
@@ -139,6 +183,41 @@ public class UserServiceImpl implements UserService {
         authRedisStore.revokeAllRefreshTokens(userId);
     }
 
+    private void applyStatusTransition(User user, UserStatus targetStatus) {
+        OffsetDateTime now = OffsetDateTime.now();
+        switch (targetStatus) {
+            case ACTIVE -> {
+                user.setUserStatus("active");
+                user.setLockedAt(null);
+                user.setDormantAt(null);
+                authRedisStore.clearLoginFailures(user.getUserId());
+            }
+            case LOCKED -> {
+                user.setUserStatus("locked");
+                user.setLockedAt(now);
+                user.setDormantAt(null);
+                authRedisStore.revokeAllRefreshTokens(user.getUserId());
+                authRedisStore.clearLoginFailures(user.getUserId());
+            }
+            case DORMANT -> {
+                user.setUserStatus("dormant");
+                user.setDormantAt(now);
+                user.setLockedAt(null);
+                authRedisStore.revokeAllRefreshTokens(user.getUserId());
+                authRedisStore.clearLoginFailures(user.getUserId());
+            }
+            case WITHDRAWN -> {
+                user.setUserStatus("withdrawn");
+                user.setDeleteYn("Y");
+                user.setWithdrawnAt(now);
+                user.setDormantAt(null);
+                user.setLockedAt(null);
+                authRedisStore.revokeAllRefreshTokens(user.getUserId());
+                authRedisStore.clearLoginFailures(user.getUserId());
+            }
+        }
+    }
+
     private UserResponse toResponse(User user) {
         return new UserResponse(
             user.getId(),
@@ -182,5 +261,12 @@ public class UserServiceImpl implements UserService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private UserStatus parseStatus(String status) {
+        if (!hasText(status)) {
+            return null;
+        }
+        return UserStatus.valueOf(status.trim().toUpperCase());
     }
 }
