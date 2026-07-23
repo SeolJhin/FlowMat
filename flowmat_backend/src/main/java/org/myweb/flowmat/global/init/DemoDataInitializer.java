@@ -4,6 +4,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.myweb.flowmat.domain.user.domain.entity.User;
@@ -22,6 +23,8 @@ public class DemoDataInitializer implements ApplicationRunner {
     private static final String DEMO_USER_ID  = "demo-owner";
     private static final String DEMO_PASSWORD = "demo1234";
     private static final String PLACEHOLDER   = "PLACEHOLDER_REPLACED_BY_INITIALIZER";
+    private static final Pattern BCRYPT_PATTERN =
+        Pattern.compile("^\\$2[aby]\\$\\d{2}\\$[./A-Za-z0-9]{53}$");
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -50,10 +53,20 @@ public class DemoDataInitializer implements ApplicationRunner {
             return;
         }
         User user = existing.get();
-        if (PLACEHOLDER.equals(user.getUserPwd()) || !user.getUserPwd().startsWith("$2a$")) {
+        if (needsDemoPasswordReset(user.getUserPwd())) {
             user.setUserPwd(passwordEncoder.encode(DEMO_PASSWORD));
             userRepository.save(user);
             log.info("[DemoDataInitializer] demo-owner password initialized (pw: {})", DEMO_PASSWORD);
         }
+    }
+
+    private boolean needsDemoPasswordReset(String encodedPassword) {
+        if (encodedPassword == null || encodedPassword.isBlank()) {
+            return true;
+        }
+        if (PLACEHOLDER.equals(encodedPassword)) {
+            return true;
+        }
+        return !BCRYPT_PATTERN.matcher(encodedPassword).matches();
     }
 }

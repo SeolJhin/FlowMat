@@ -31,6 +31,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         "/auth/face/login",
         "/auth/face/match",
         "/auth/face/select",
+        "/auth/oauth2/exchange",
         "/auth/oauth2/kakao/complete",
         "/auth/oauth2/google/complete"
     );

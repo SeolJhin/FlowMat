@@ -5,12 +5,14 @@ import { useProjectsQuery } from '../../../entities/project/api/useProjectsQuery
 import { useCreateWorkflowMutation } from '../../../entities/workflow/api/useCreateWorkflowMutation'
 import { useWorkflowsQuery } from '../../../entities/workflow/api/useWorkflowsQuery'
 import {
-  tokenStorage,
   useLoginMutation,
   useLogoutMutation,
+  useSendEmailCodeMutation,
   useSignupMutation,
+  useVerifyEmailCodeMutation,
 } from '../../../entities/auth/api/useLoginMutation'
 import { useCurrentUserQuery } from '../../../entities/auth/api/useCurrentUserQuery'
+import { subscribeAuthChange, tokenStorage } from '../../../entities/auth/lib/authSession'
 import {
   preloadInventoryRoute,
   preloadRulesRoute,
@@ -19,11 +21,8 @@ import {
 } from '../../../app/router/routePreload'
 import { preloadWorkspaceExperience } from '../../workspace/ui/workspacePreload'
 
-// ─── Dashboard (logged-in) ────────────────────────────────────────────────────
-
 function Dashboard({ onLogout }: { onLogout: () => void }) {
   const navigate = useNavigate()
-
   const currentUserQuery = useCurrentUserQuery()
   const currentUser = currentUserQuery.data
 
@@ -192,11 +191,14 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                 type="button"
                 onClick={() => setSelectedProjectId(project.projectId)}
                 style={{
-                  padding: '16px 18px', borderRadius: '14px',
+                  padding: '16px 18px',
+                  borderRadius: '14px',
                   border: isSelected ? '1px solid var(--accent)' : '1px solid var(--border)',
                   background: isSelected ? 'var(--accent-bg)' : 'transparent',
-                  color: 'var(--text-h)', boxShadow: isSelected ? 'var(--shadow)' : 'none',
-                  cursor: 'pointer', textAlign: 'left',
+                  color: 'var(--text-h)',
+                  boxShadow: isSelected ? 'var(--shadow)' : 'none',
+                  cursor: 'pointer',
+                  textAlign: 'left',
                 }}
               >
                 <div style={{ fontSize: '18px', fontWeight: 600 }}>{project.projectName}</div>
@@ -232,20 +234,33 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   )
 }
 
-// ─── HomeRoute ────────────────────────────────────────────────────────────────
-
 export function HomeRoute() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!tokenStorage.getAccess())
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
   const [authUserId, setAuthUserId] = useState('')
   const [authUserName, setAuthUserName] = useState('')
+  const [authNickname, setAuthNickname] = useState('')
   const [authEmail, setAuthEmail] = useState('')
+  const [authEmailCode, setAuthEmailCode] = useState('')
+  const [authTel, setAuthTel] = useState('')
+  const [authBirth, setAuthBirth] = useState('')
   const [authPassword, setAuthPassword] = useState('')
+  const [isEmailVerified, setIsEmailVerified] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
 
   const loginMutation = useLoginMutation()
   const signupMutation = useSignupMutation()
   const logoutMutation = useLogoutMutation()
+  const sendEmailCodeMutation = useSendEmailCodeMutation()
+  const verifyEmailCodeMutation = useVerifyEmailCodeMutation()
+
+  useEffect(() => subscribeAuthChange(() => setIsLoggedIn(!!tokenStorage.getAccess())), [])
+
+  useEffect(() => {
+    if (authMode !== 'signup') return
+    setIsEmailVerified(false)
+    setAuthEmailCode('')
+  }, [authEmail, authMode])
 
   async function handleAuthSubmit(e: FormEvent) {
     e.preventDefault()
@@ -254,14 +269,31 @@ export function HomeRoute() {
       if (authMode === 'login') {
         await loginMutation.mutateAsync({ userIdOrEmail: authUserId, password: authPassword })
       } else {
-        await signupMutation.mutateAsync({ userId: authUserId, userName: authUserName, userEmail: authEmail, password: authPassword })
+        if (!isEmailVerified) {
+          throw new Error('Verify your email before creating an account.')
+        }
+
+        await signupMutation.mutateAsync({
+          userId: authUserId,
+          userName: authUserName,
+          userNickname: authNickname,
+          userEmail: authEmail,
+          userTel: authTel,
+          userBirth: authBirth,
+          password: authPassword,
+        })
         await loginMutation.mutateAsync({ userIdOrEmail: authUserId, password: authPassword })
       }
-      setIsLoggedIn(true)
+
       setAuthUserId('')
-      setAuthPassword('')
       setAuthUserName('')
+      setAuthNickname('')
       setAuthEmail('')
+      setAuthEmailCode('')
+      setAuthTel('')
+      setAuthBirth('')
+      setAuthPassword('')
+      setIsEmailVerified(false)
     } catch (err) {
       const message =
         err instanceof Error
@@ -275,7 +307,29 @@ export function HomeRoute() {
 
   function handleLogout() {
     void logoutMutation.mutateAsync()
-    setIsLoggedIn(false)
+  }
+
+  async function handleSendEmailCode() {
+    setAuthError(null)
+    try {
+      await sendEmailCodeMutation.mutateAsync(authEmail.trim())
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Failed to send email code.')
+    }
+  }
+
+  async function handleVerifyEmailCode() {
+    setAuthError(null)
+    try {
+      await verifyEmailCodeMutation.mutateAsync({
+        userEmail: authEmail.trim(),
+        code: authEmailCode.trim(),
+      })
+      setIsEmailVerified(true)
+    } catch (err) {
+      setIsEmailVerified(false)
+      setAuthError(err instanceof Error ? err.message : 'Failed to verify email code.')
+    }
   }
 
   if (!isLoggedIn) {
@@ -283,13 +337,43 @@ export function HomeRoute() {
       <div style={{ minHeight: '100svh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <form
           onSubmit={(e) => void handleAuthSubmit(e)}
-          style={{ width: 320, padding: 24, border: '1px solid var(--border)', borderRadius: 16, display: 'grid', gap: 12, background: 'var(--bg)' }}
+          style={{ width: 360, padding: 24, border: '1px solid var(--border)', borderRadius: 16, display: 'grid', gap: 12, background: 'var(--bg)' }}
         >
           <h2 style={{ margin: 0 }}>FlowMat {authMode === 'login' ? 'Login' : 'Sign Up'}</h2>
           {authMode === 'signup' && (
             <>
               <input value={authUserName} onChange={(e) => setAuthUserName(e.target.value)} placeholder="Name" required />
+              <input value={authNickname} onChange={(e) => setAuthNickname(e.target.value)} placeholder="Nickname" required />
               <input type="email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="Email" required />
+              <div style={{ display: 'grid', gap: 8, gridTemplateColumns: '1fr auto', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>
+                  {isEmailVerified ? 'Email verified' : 'Email verification required'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleSendEmailCode()}
+                  disabled={!authEmail.trim() || sendEmailCodeMutation.isPending}
+                >
+                  {sendEmailCodeMutation.isPending ? 'Sending...' : 'Send Code'}
+                </button>
+              </div>
+              <div style={{ display: 'grid', gap: 8, gridTemplateColumns: '1fr auto' }}>
+                <input
+                  value={authEmailCode}
+                  onChange={(e) => setAuthEmailCode(e.target.value)}
+                  placeholder="Email verification code"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleVerifyEmailCode()}
+                  disabled={!authEmail.trim() || !authEmailCode.trim() || verifyEmailCodeMutation.isPending}
+                >
+                  {verifyEmailCodeMutation.isPending ? 'Verifying...' : 'Verify'}
+                </button>
+              </div>
+              <input value={authTel} onChange={(e) => setAuthTel(e.target.value)} placeholder="Phone number" required />
+              <input type="date" value={authBirth} onChange={(e) => setAuthBirth(e.target.value)} required />
             </>
           )}
           <input
@@ -300,13 +384,26 @@ export function HomeRoute() {
           />
           <input type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Password" required />
           {authError && <p style={{ color: '#dc2626', fontSize: 13, margin: 0 }}>{authError}</p>}
-          <button type="submit" disabled={loginMutation.isPending || signupMutation.isPending}>
+          <button
+            type="submit"
+            disabled={
+              loginMutation.isPending
+              || signupMutation.isPending
+              || sendEmailCodeMutation.isPending
+              || verifyEmailCodeMutation.isPending
+            }
+          >
             {loginMutation.isPending || signupMutation.isPending ? 'Working...' : authMode === 'login' ? 'Login' : 'Create Account'}
           </button>
           <button
             type="button"
             style={{ background: 'transparent', border: 'none', fontSize: 13, color: 'var(--accent)', cursor: 'pointer' }}
-            onClick={() => { setAuthMode((m) => (m === 'login' ? 'signup' : 'login')); setAuthError(null) }}
+            onClick={() => {
+              setAuthMode((mode) => (mode === 'login' ? 'signup' : 'login'))
+              setAuthError(null)
+              setIsEmailVerified(false)
+              setAuthEmailCode('')
+            }}
           >
             {authMode === 'login' ? 'Need an account? Sign up' : 'Already have an account? Login'}
           </button>

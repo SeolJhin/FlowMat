@@ -11,6 +11,7 @@ import org.myweb.flowmat.domain.user.api.dto.request.EmailCodeRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.EmailCodeVerifyRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.FindEmailRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.LogoutRequest;
+import org.myweb.flowmat.domain.user.api.dto.request.OAuthExchangeRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.OAuthSignupCompleteRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.PasswordResetConfirmRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.PasswordResetRequest;
@@ -18,6 +19,7 @@ import org.myweb.flowmat.domain.user.api.dto.request.RefreshTokenRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.SocialLinkStartRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.UserLoginRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.UserSignupRequest;
+import org.myweb.flowmat.domain.user.api.dto.response.OAuthExchangeResponse;
 import org.myweb.flowmat.domain.user.api.dto.response.SocialLinkStartResponse;
 import org.myweb.flowmat.domain.user.api.dto.response.UserTokenResponse;
 import org.myweb.flowmat.domain.user.application.AuthService;
@@ -25,6 +27,8 @@ import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.response.ApiResponse;
 import org.myweb.flowmat.global.security.AuthUser;
+import org.myweb.flowmat.global.security.RefreshTokenCookieService;
+import org.myweb.flowmat.global.security.oauth.OAuthExchangeStore;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -46,6 +50,8 @@ public class AuthController {
     private static final Pattern GUEST_SID_PATTERN = Pattern.compile("^[A-Za-z0-9_-]{16,128}$");
 
     private final AuthService authService;
+    private final RefreshTokenCookieService refreshTokenCookieService;
+    private final OAuthExchangeStore oauthExchangeStore;
 
     @PostMapping("/email/send-code")
     public ApiResponse<Void> sendEmailCode(@Valid @RequestBody EmailCodeRequest request) {
@@ -71,8 +77,14 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ApiResponse<UserTokenResponse> login(HttpServletRequest httpRequest, @Valid @RequestBody UserLoginRequest request) {
-        return ApiResponse.ok(authService.login(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest)));
+    public ApiResponse<UserTokenResponse> login(
+        HttpServletRequest httpRequest,
+        HttpServletResponse httpResponse,
+        @Valid @RequestBody UserLoginRequest request
+    ) {
+        UserTokenResponse response = authService.login(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest));
+        writeRefreshCookie(httpRequest, httpResponse, response);
+        return ApiResponse.ok(response);
     }
 
     @PostMapping("/guest-token")
@@ -85,19 +97,50 @@ public class AuthController {
     @PostMapping("/refresh")
     public ApiResponse<UserTokenResponse> refresh(
         HttpServletRequest httpRequest,
+        HttpServletResponse httpResponse,
         @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
         @RequestBody(required = false) RefreshTokenRequest request
     ) {
-        return ApiResponse.ok(authService.refresh(request, extractBearer(authorization), httpRequest.getHeader("User-Agent"), extractIp(httpRequest)));
+        String explicitRefreshToken = request != null && request.refreshToken() != null
+            ? request.refreshToken()
+            : extractBearer(authorization);
+        String cookieRefreshToken = refreshTokenCookieService.resolveRefreshToken(httpRequest);
+        boolean cookieBacked = (explicitRefreshToken == null || explicitRefreshToken.isBlank())
+            && cookieRefreshToken != null
+            && !cookieRefreshToken.isBlank();
+        UserTokenResponse response = authService.refresh(
+            request,
+            explicitRefreshToken != null && !explicitRefreshToken.isBlank() ? explicitRefreshToken : cookieRefreshToken,
+            httpRequest.getHeader("User-Agent"),
+            extractIp(httpRequest)
+        );
+        writeRefreshCookie(httpRequest, httpResponse, response);
+        if (cookieBacked) {
+            return ApiResponse.ok(new UserTokenResponse(
+                response.accessToken(),
+                null,
+                response.deviceId(),
+                response.additionalInfoRequired()
+            ));
+        }
+        return ApiResponse.ok(response);
     }
 
     @PostMapping("/logout")
     public ApiResponse<Void> logout(
+        HttpServletRequest httpRequest,
+        HttpServletResponse httpResponse,
         @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
         @RequestBody(required = false) LogoutRequest request
     ) {
-        String refreshToken = request != null && request.refreshToken() != null ? request.refreshToken() : extractBearer(authorization);
+        String refreshToken = request != null && request.refreshToken() != null
+            ? request.refreshToken()
+            : extractBearer(authorization);
+        if (refreshToken == null || refreshToken.isBlank()) {
+            refreshToken = refreshTokenCookieService.resolveRefreshToken(httpRequest);
+        }
         authService.logout(refreshToken);
+        refreshTokenCookieService.clearRefreshToken(httpRequest, httpResponse);
         return ApiResponse.ok(null);
     }
 
@@ -111,17 +154,39 @@ public class AuthController {
     @PostMapping("/oauth2/kakao/complete")
     public ApiResponse<UserTokenResponse> completeKakaoSignup(
         HttpServletRequest httpRequest,
+        HttpServletResponse httpResponse,
         @Valid @RequestBody OAuthSignupCompleteRequest request
     ) {
-        return ApiResponse.ok(authService.completeKakaoSignup(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest)));
+        UserTokenResponse response = authService.completeKakaoSignup(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest));
+        writeRefreshCookie(httpRequest, httpResponse, response);
+        return ApiResponse.ok(response);
     }
 
     @PostMapping("/oauth2/google/complete")
     public ApiResponse<UserTokenResponse> completeGoogleSignup(
         HttpServletRequest httpRequest,
+        HttpServletResponse httpResponse,
         @Valid @RequestBody OAuthSignupCompleteRequest request
     ) {
-        return ApiResponse.ok(authService.completeGoogleSignup(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest)));
+        UserTokenResponse response = authService.completeGoogleSignup(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest));
+        writeRefreshCookie(httpRequest, httpResponse, response);
+        return ApiResponse.ok(response);
+    }
+
+    @PostMapping("/oauth2/exchange")
+    public ApiResponse<OAuthExchangeResponse> exchangeOAuthResult(@Valid @RequestBody OAuthExchangeRequest request) {
+        OAuthExchangeStore.OAuthExchangeEntry result = oauthExchangeStore.consume(request.code().trim());
+        if (result == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "OAuth exchange code is invalid or expired.");
+        }
+        return ApiResponse.ok(new OAuthExchangeResponse(
+            result.resultType(),
+            result.accessToken(),
+            result.signupToken(),
+            result.provider(),
+            result.deviceId(),
+            result.additionalInfoRequired()
+        ));
     }
 
     @PostMapping("/oauth2/link/start")
@@ -208,5 +273,11 @@ public class AuthController {
         }
         String forwardedProto = request.getHeader("X-Forwarded-Proto");
         return forwardedProto != null && "https".equalsIgnoreCase(forwardedProto.trim());
+    }
+
+    private void writeRefreshCookie(HttpServletRequest request, HttpServletResponse response, UserTokenResponse tokenResponse) {
+        if (tokenResponse != null && tokenResponse.refreshToken() != null && !tokenResponse.refreshToken().isBlank()) {
+            refreshTokenCookieService.writeRefreshToken(request, response, tokenResponse.refreshToken());
+        }
     }
 }
