@@ -53,6 +53,7 @@ public class AuthServiceImpl implements AuthService {
         user.setUserPwd(passwordEncoder.encode(request.password()));
         user.setUserBirth(LocalDate.of(1990, 1, 1));
         user.setUserTel("000-0000-0000");
+        user.setUserRole("user");
         user.setUserStatus(UserStatus.ACTIVE.name());
         user.setDeleteYn("N");
         user.setEmailVerifiedYn("N");

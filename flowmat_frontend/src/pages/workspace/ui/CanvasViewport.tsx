@@ -246,6 +246,13 @@ function ViewportPersister({ storageKey }: { storageKey: string }) {
 }
 
 /** Calls updateNodeInternals for nodes whose handle count changed. Must be inside ReactFlow. */
+function NodesChangeMiddleware() {
+  experimental_useOnNodesChangeMiddleware((changes) =>
+    changes.filter((c) => !(c.type === 'position' && c.dragging))
+  )
+  return null
+}
+
 function InternalsUpdater({ nodeIds }: { nodeIds: string[] }) {
   const updateNodeInternals = useUpdateNodeInternals()
   useEffect(() => {
@@ -531,10 +538,8 @@ export function CanvasViewport({
     [onConnectStart]
   )
 
-  // Prevent moving nodes while a connection drag is in progress
-  experimental_useOnNodesChangeMiddleware((changes) =>
-    changes.filter((c) => !(c.type === 'position' && c.dragging && localNodes.length > 200))
-  )
+  // experimental_useOnNodesChangeMiddleware moved into NodesChangeMiddleware below
+  // (must be called inside the ReactFlow context, not in the parent component)
 
   const handleReconnect: OnReconnect = useCallback(
     (oldEdge, newConnection) => {
@@ -738,6 +743,7 @@ export function CanvasViewport({
         snapGrid={[8, 8]}
         deleteKeyCode={null}
       >
+        <NodesChangeMiddleware />
         <SnapGuideLayer guides={snapGuides} />
         <InternalsUpdater nodeIds={nodesToUpdateInternals} />
         <ViewportPersister storageKey={storageKey} />

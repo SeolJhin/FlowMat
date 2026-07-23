@@ -39,6 +39,7 @@ public class DemoDataInitializer implements ApplicationRunner {
             user.setUserPwd(passwordEncoder.encode(DEMO_PASSWORD));
             user.setUserBirth(LocalDate.of(1990, 1, 1));
             user.setUserTel("000-0000-0000");
+            user.setUserRole("admin");
             user.setUserStatus("active");
             user.setDeleteYn("N");
             user.setEmailVerifiedYn("N");

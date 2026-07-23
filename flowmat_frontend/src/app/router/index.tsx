@@ -1,5 +1,5 @@
-﻿import { Suspense, lazy } from 'react'
-import { Navigate, createBrowserRouter } from 'react-router-dom'
+import { Suspense, lazy } from 'react'
+import { Navigate, Outlet, createBrowserRouter } from 'react-router-dom'
 import {
   preloadInventoryRoute,
   preloadRulesRoute,
@@ -8,36 +8,37 @@ import {
   preloadTemplatesRoute,
 } from './routePreload'
 import { preloadWorkspaceRoute } from '../../pages/workspace/ui/workspacePreload'
+import { AuthGuard } from './AuthGuard'
 
 const HomeRoute = lazy(() =>
-  import('../../pages/home/ui/HomeRoute').then((module) => ({ default: module.HomeRoute }))
-)
-const WorkspaceRoute = lazy(() =>
-  preloadWorkspaceRoute().then((module) => ({ default: module.WorkspaceRoute }))
-)
-const InventoryRoute = lazy(() =>
-  preloadInventoryRoute().then((module) => ({ default: module.InventoryRoute }))
-)
-const RunsRoute = lazy(() =>
-  preloadRunsRoute().then((module) => ({ default: module.RunsRoute }))
-)
-const RunDetailRoute = lazy(() =>
-  preloadRunDetailRoute().then((module) => ({ default: module.RunDetailRoute }))
-)
-const TemplatesRoute = lazy(() =>
-  preloadTemplatesRoute().then((module) => ({ default: module.TemplatesRoute }))
-)
-const RulesRoute = lazy(() =>
-  preloadRulesRoute().then((module) => ({ default: module.RulesRoute }))
+  import('../../pages/home/ui/HomeRoute').then((m) => ({ default: m.HomeRoute }))
 )
 const InviteAcceptRoute = lazy(() =>
-  import('../../pages/invite/ui/InviteAcceptRoute').then((module) => ({ default: module.InviteAcceptRoute }))
-)
-const ProjectSettingsRoute = lazy(() =>
-  import('../../pages/project-settings/ui/ProjectSettingsRoute').then((module) => ({ default: module.ProjectSettingsRoute }))
+  import('../../pages/invite/ui/InviteAcceptRoute').then((m) => ({ default: m.InviteAcceptRoute }))
 )
 const AdminRoute = lazy(() =>
-  import('../../pages/admin/ui/AdminRoute').then((module) => ({ default: module.AdminRoute }))
+  import('../../pages/admin/ui/AdminRoute').then((m) => ({ default: m.AdminRoute }))
+)
+const ProjectSettingsRoute = lazy(() =>
+  import('../../pages/project-settings/ui/ProjectSettingsRoute').then((m) => ({ default: m.ProjectSettingsRoute }))
+)
+const WorkspaceRoute = lazy(() =>
+  preloadWorkspaceRoute().then((m) => ({ default: m.WorkspaceRoute }))
+)
+const InventoryRoute = lazy(() =>
+  preloadInventoryRoute().then((m) => ({ default: m.InventoryRoute }))
+)
+const RunsRoute = lazy(() =>
+  preloadRunsRoute().then((m) => ({ default: m.RunsRoute }))
+)
+const RunDetailRoute = lazy(() =>
+  preloadRunDetailRoute().then((m) => ({ default: m.RunDetailRoute }))
+)
+const TemplatesRoute = lazy(() =>
+  preloadTemplatesRoute().then((m) => ({ default: m.TemplatesRoute }))
+)
+const RulesRoute = lazy(() =>
+  preloadRulesRoute().then((m) => ({ default: m.RulesRoute }))
 )
 
 function RouteFallback() {
@@ -49,15 +50,24 @@ function withSuspense(element: React.ReactNode) {
 }
 
 export const router = createBrowserRouter([
+  // Public routes
   { path: '/', element: withSuspense(<HomeRoute />) },
   { path: '/invite/accept', element: withSuspense(<InviteAcceptRoute />) },
-  { path: '/admin', element: withSuspense(<AdminRoute />) },
-  { path: '/projects/:projectId/settings', element: withSuspense(<ProjectSettingsRoute />) },
-  { path: '/projects/:projectId/workflows/:workflowId', element: withSuspense(<WorkspaceRoute />) },
-  { path: '/projects/:projectId/inventory', element: withSuspense(<InventoryRoute />) },
-  { path: '/projects/:projectId/runs', element: withSuspense(<RunsRoute />) },
-  { path: '/projects/:projectId/runs/:runId', element: withSuspense(<RunDetailRoute />) },
-  { path: '/projects/:projectId/templates', element: withSuspense(<TemplatesRoute />) },
-  { path: '/projects/:projectId/rules', element: withSuspense(<RulesRoute />) },
+
+  // Protected routes — AuthGuard redirects to / if no token
+  {
+    element: <AuthGuard />,
+    children: [
+      { path: '/admin', element: withSuspense(<AdminRoute />) },
+      { path: '/projects/:projectId/settings', element: withSuspense(<ProjectSettingsRoute />) },
+      { path: '/projects/:projectId/workflows/:workflowId', element: withSuspense(<WorkspaceRoute />) },
+      { path: '/projects/:projectId/inventory', element: withSuspense(<InventoryRoute />) },
+      { path: '/projects/:projectId/runs', element: withSuspense(<RunsRoute />) },
+      { path: '/projects/:projectId/runs/:runId', element: withSuspense(<RunDetailRoute />) },
+      { path: '/projects/:projectId/templates', element: withSuspense(<TemplatesRoute />) },
+      { path: '/projects/:projectId/rules', element: withSuspense(<RulesRoute />) },
+    ],
+  },
+
   { path: '*', element: <Navigate to="/" replace /> },
 ])
