@@ -6,9 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.Set;
-import org.myweb.flowmat.global.exception.BusinessException;
-import org.myweb.flowmat.global.exception.ErrorCode;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
@@ -21,7 +19,16 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         "/auth/signup",
         "/auth/login",
         "/auth/refresh",
-        "/auth/logout"
+        "/auth/logout",
+        "/auth/check-nickname",
+        "/auth/find-email",
+        "/auth/reset-password/request",
+        "/auth/reset-password/verify",
+        "/auth/reset-password/confirm",
+        "/auth/email/send-code",
+        "/auth/email/verify-code",
+        "/auth/oauth2/kakao/complete",
+        "/auth/oauth2/google/complete"
     );
 
     private final JwtProvider jwtProvider;
@@ -33,7 +40,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getServletPath();
-        return PUBLIC_PATHS.contains(path) || path.startsWith("/ws");
+        return PUBLIC_PATHS.contains(path) || path.startsWith("/ws") || path.startsWith("/oauth2");
     }
 
     @Override
@@ -44,19 +51,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     ) throws ServletException, IOException {
         String header = request.getHeader("Authorization");
         if (header != null && header.startsWith("Bearer ")) {
-            String token = header.substring(7);
-
-            jwtProvider.validate(token);
-
-            if (!jwtProvider.isAccessToken(token)) {
-                throw new BusinessException(ErrorCode.TOKEN_TYPE_INVALID);
-            }
-
-            String userId = jwtProvider.resolveUserId(token);
-            if (userId != null && !userId.isBlank()) {
-                AuthUser authUser = new AuthUser(userId);
-                UsernamePasswordAuthenticationToken auth =
-                    new UsernamePasswordAuthenticationToken(authUser, null, authUser.getAuthorities());
+            String token = header.substring(7).trim();
+            Authentication authentication = jwtProvider.getAuthentication(token);
+            if (authentication instanceof org.springframework.security.authentication.AbstractAuthenticationToken auth) {
                 auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(auth);
             }

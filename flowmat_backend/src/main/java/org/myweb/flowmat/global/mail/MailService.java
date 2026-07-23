@@ -26,7 +26,7 @@ public class MailService {
     public void sendProjectInvite(String toEmail, String projectName, String inviterName,
                                   String inviteToken, String role) {
         if (fromAddress == null || fromAddress.isBlank()) {
-            log.debug("Mail not configured — skipping invite email to {}", toEmail);
+            log.debug("Mail not configured; skipping invite email to {}", toEmail);
             return;
         }
         try {
@@ -40,6 +40,33 @@ public class MailService {
         }
     }
 
+    @Async
+    public void sendEmailVerificationCode(String toEmail, String code) {
+        if (fromAddress == null || fromAddress.isBlank()) {
+            log.info("Mail not configured; verification code for {} is {}", toEmail, code);
+            return;
+        }
+        try {
+            send(toEmail, "[FlowMat] Email verification code", buildVerificationHtml(code));
+        } catch (Exception e) {
+            log.warn("Failed to send verification email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    @Async
+    public void sendPasswordResetMail(String toEmail, String token) {
+        String resetUrl = frontendUrl + "/reset-password?token=" + token;
+        if (fromAddress == null || fromAddress.isBlank()) {
+            log.info("Mail not configured; password reset URL for {} is {}", toEmail, resetUrl);
+            return;
+        }
+        try {
+            send(toEmail, "[FlowMat] Password reset", buildPasswordResetHtml(resetUrl));
+        } catch (Exception e) {
+            log.warn("Failed to send password reset email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     private void send(String to, String subject, String htmlBody) throws Exception {
         MimeMessage message = mailSender.createMimeMessage();
         MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
@@ -50,8 +77,7 @@ public class MailService {
         mailSender.send(message);
     }
 
-    private String buildInviteHtml(String projectName, String inviterName,
-                                   String acceptUrl, String role) {
+    private String buildInviteHtml(String projectName, String inviterName, String acceptUrl, String role) {
         return """
             <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
               <h2 style="margin-bottom:8px">You have been invited to FlowMat</h2>
@@ -66,5 +92,34 @@ public class MailService {
               </p>
             </div>
             """.formatted(inviterName, projectName, role, acceptUrl);
+    }
+
+    private String buildVerificationHtml(String code) {
+        return """
+            <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
+              <h2 style="margin-bottom:8px">Verify your email</h2>
+              <p>Use the code below to continue signing up.</p>
+              <div style="margin-top:16px;padding:12px 16px;background:#f4f4f5;border-radius:10px;
+                          font-size:28px;font-weight:700;letter-spacing:4px;text-align:center">%s</div>
+              <p style="margin-top:24px;font-size:12px;color:#888">This code expires in 5 minutes.</p>
+            </div>
+            """.formatted(code);
+    }
+
+    private String buildPasswordResetHtml(String resetUrl) {
+        return """
+            <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
+              <h2 style="margin-bottom:8px">Reset your password</h2>
+              <p>Click the button below to reset your password.</p>
+              <a href="%s"
+                 style="display:inline-block;margin-top:16px;padding:10px 20px;
+                        background:#18181b;color:#fff;border-radius:8px;text-decoration:none">
+                Reset Password
+              </a>
+              <p style="margin-top:24px;font-size:12px;color:#888">
+                This link expires in 30 minutes. If you did not request this, you can ignore this email.
+              </p>
+            </div>
+            """.formatted(resetUrl);
     }
 }

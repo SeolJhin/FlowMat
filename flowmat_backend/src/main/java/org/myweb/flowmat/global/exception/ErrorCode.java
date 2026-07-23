@@ -5,16 +5,29 @@ import org.springframework.http.HttpStatus;
 
 @Getter
 public enum ErrorCode {
-    BAD_REQUEST(HttpStatus.BAD_REQUEST, "잘못된 요청입니다."),
-    NOT_FOUND(HttpStatus.NOT_FOUND, "리소스를 찾을 수 없습니다."),
-    UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "인증이 필요합니다."),
-    FORBIDDEN(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
-    INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다."),
-    SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "서비스에 일시적 문제가 발생했습니다."),
+    BAD_REQUEST(HttpStatus.BAD_REQUEST, "Invalid request."),
+    NOT_FOUND(HttpStatus.NOT_FOUND, "Resource not found."),
+    UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "Authentication is required."),
+    FORBIDDEN(HttpStatus.FORBIDDEN, "You do not have permission."),
+    INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error."),
+    SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Authentication service is temporarily unavailable."),
 
-    TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "토큰이 유효하지 않습니다."),
-    TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "토큰이 만료되었습니다."),
-    TOKEN_TYPE_INVALID(HttpStatus.UNAUTHORIZED, "토큰 타입이 올바르지 않습니다.");
+    TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "Token is invalid."),
+    TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "Token has expired."),
+    TOKEN_TYPE_INVALID(HttpStatus.UNAUTHORIZED, "Token type is invalid."),
+
+    DUPLICATE_USER_ID(HttpStatus.BAD_REQUEST, "User ID is already in use."),
+    DUPLICATE_EMAIL(HttpStatus.BAD_REQUEST, "Email is already in use."),
+    DUPLICATE_TEL(HttpStatus.BAD_REQUEST, "Phone number is already in use."),
+    DUPLICATE_NICKNAME(HttpStatus.BAD_REQUEST, "Nickname is already in use."),
+    EMAIL_NOT_VERIFIED(HttpStatus.BAD_REQUEST, "Email verification is required."),
+    EMAIL_CODE_INVALID(HttpStatus.BAD_REQUEST, "Email verification code is invalid."),
+    EMAIL_CODE_COOLDOWN(HttpStatus.TOO_MANY_REQUESTS, "Please wait before requesting another email code."),
+    PASSWORD_RESET_TOKEN_INVALID(HttpStatus.BAD_REQUEST, "Password reset token is invalid."),
+    PASSWORD_RESET_TOKEN_EXPIRED(HttpStatus.BAD_REQUEST, "Password reset token has expired."),
+    INVALID_PASSWORD(HttpStatus.BAD_REQUEST, "Password is incorrect."),
+    REFRESH_TOKEN_NOT_FOUND(HttpStatus.UNAUTHORIZED, "Refresh token was not found."),
+    TOKEN_REUSE_DETECTED(HttpStatus.UNAUTHORIZED, "Refresh token reuse was detected.");
 
     private final HttpStatus status;
     private final String message;

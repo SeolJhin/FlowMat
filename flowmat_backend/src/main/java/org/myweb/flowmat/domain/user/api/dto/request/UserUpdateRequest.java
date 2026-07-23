@@ -1,4 +1,16 @@
 package org.myweb.flowmat.domain.user.api.dto.request;
 
-public record UserUpdateRequest(String userName, String userTel, String avatarUrl) {
+import jakarta.validation.constraints.Email;
+import java.time.LocalDate;
+
+public record UserUpdateRequest(
+    String userName,
+    String userNickname,
+    @Email String userEmail,
+    String userTel,
+    LocalDate userBirth,
+    String avatarUrl,
+    String currentPassword,
+    String newPassword
+) {
 }

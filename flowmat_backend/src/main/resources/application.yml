@@ -52,6 +52,8 @@ slack:
 
 app:
   frontend-url: ${FRONTEND_URL:http://localhost:5173}
+  oauth2:
+    redirect-uri: ${APP_OAUTH2_REDIRECT_URI:http://localhost:5173/oauth2/success}
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
   workflow-collab:
@@ -65,3 +67,9 @@ app:
 logging:
   level:
     org.hibernate.SQL: debug
+
+# OAuth2 provider templates.
+# Enable a provider by setting its env vars.
+# GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
+# KAKAO_CLIENT_ID / KAKAO_CLIENT_SECRET
+# GOOGLE_REDIRECT_URI / KAKAO_REDIRECT_URI
