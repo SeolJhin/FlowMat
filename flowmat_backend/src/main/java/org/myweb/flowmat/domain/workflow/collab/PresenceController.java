@@ -25,7 +25,7 @@ public class PresenceController {
 
     @MessageMapping("/workflow/{workflowId}/presence")
     public void relay(
-        @DestinationVariable String workflowId,
+        @DestinationVariable("workflowId") String workflowId,
         @Payload PresenceMessage message,
         Principal principal,
         SimpMessageHeaderAccessor headerAccessor

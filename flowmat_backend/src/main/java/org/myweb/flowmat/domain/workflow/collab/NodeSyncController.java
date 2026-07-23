@@ -20,7 +20,7 @@ public class NodeSyncController {
     @MessageMapping("/workflow/{workflowId}/node-move")
     @SendTo("/topic/workflow/{workflowId}/node-move")
     public NodeMoveMessage relay(
-        @DestinationVariable String workflowId,
+        @DestinationVariable("workflowId") String workflowId,
         @Payload NodeMoveMessage message,
         Principal principal
     ) {
