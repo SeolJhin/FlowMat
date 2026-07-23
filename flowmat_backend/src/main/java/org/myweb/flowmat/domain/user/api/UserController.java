@@ -5,11 +5,14 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.user.api.dto.request.SocialLinkUnlinkRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.UserUpdateRequest;
+import org.myweb.flowmat.domain.user.api.dto.response.UserPermissionResponse;
 import org.myweb.flowmat.domain.user.api.dto.response.SocialAccountResponse;
 import org.myweb.flowmat.domain.user.api.dto.response.UserResponse;
 import org.myweb.flowmat.domain.user.application.UserService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
+import org.myweb.flowmat.global.rbac.PermissionService;
+import org.myweb.flowmat.global.rbac.SystemPermission;
 import org.myweb.flowmat.global.response.ApiResponse;
 import org.myweb.flowmat.global.security.AuthUser;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -27,11 +30,20 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserController {
 
     private final UserService userService;
+    private final PermissionService permissionService;
 
     @GetMapping("/me")
     public ApiResponse<UserResponse> me(@AuthenticationPrincipal AuthUser authUser) {
         requireAuth(authUser);
         return ApiResponse.ok(userService.me(authUser.getUserId()));
+    }
+
+    @GetMapping("/me/permissions")
+    public ApiResponse<UserPermissionResponse> myPermissions(@AuthenticationPrincipal AuthUser authUser) {
+        requireAuth(authUser);
+        return ApiResponse.ok(new UserPermissionResponse(
+            permissionService.hasPermission(SystemPermission.USER_MANAGE)
+        ));
     }
 
     @GetMapping("/me/social-accounts")

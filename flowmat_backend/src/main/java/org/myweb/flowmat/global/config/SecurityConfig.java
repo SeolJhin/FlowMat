@@ -1,7 +1,9 @@
 package org.myweb.flowmat.global.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Arrays;
 import java.util.List;
+import org.myweb.flowmat.global.logging.RequestCorrelationFilter;
 import org.myweb.flowmat.global.security.JwtAuthFilter;
 import org.myweb.flowmat.global.security.JwtExceptionFilter;
 import org.myweb.flowmat.global.security.RestAccessDeniedHandler;
@@ -33,6 +35,9 @@ public class SecurityConfig {
     @Value("${app.cors.allowed-origins:http://localhost:5173,http://localhost:5174,http://localhost:3000}")
     private String corsAllowedOrigins;
 
+    @Value("${app.oauth2.state-signing-secret:${jwt.secret}}")
+    private String oauth2StateSigningSecret;
+
     @Bean
     public SecurityFilterChain securityFilterChain(
         HttpSecurity http,
@@ -41,9 +46,11 @@ public class SecurityConfig {
         RestAuthenticationEntryPoint authenticationEntryPoint,
         RestAccessDeniedHandler accessDeniedHandler,
         ObjectProvider<ClientRegistrationRepository> clientRegistrationRepositoryProvider,
+        ObjectMapper objectMapper,
         CustomOAuth2UserService customOAuth2UserService,
         OAuth2SuccessHandler oAuth2SuccessHandler,
-        OAuth2FailureHandler oAuth2FailureHandler
+        OAuth2FailureHandler oAuth2FailureHandler,
+        RequestCorrelationFilter requestCorrelationFilter
     ) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
@@ -69,6 +76,10 @@ public class SecurityConfig {
                     "/auth/oauth2/exchange",
                     "/auth/oauth2/kakao/complete",
                     "/auth/oauth2/google/complete",
+                    "/actuator/health",
+                    "/actuator/health/**",
+                    "/actuator/info",
+                    "/actuator/prometheus",
                     "/oauth2/**",
                     "/login/**"
                 ).permitAll()
@@ -85,7 +96,9 @@ public class SecurityConfig {
             http.oauth2Login(oauth2 -> oauth2
                 .authorizationEndpoint(authorization -> authorization
                     .authorizationRequestResolver(new CustomAuthorizationRequestResolver(clientRegistrationRepository))
-                    .authorizationRequestRepository(new HttpCookieOAuth2AuthorizationRequestRepository())
+                    .authorizationRequestRepository(
+                        new HttpCookieOAuth2AuthorizationRequestRepository(objectMapper, oauth2StateSigningSecret)
+                    )
                 )
                 .userInfoEndpoint(userInfo -> userInfo.userService(customOAuth2UserService))
                 .successHandler(oAuth2SuccessHandler)
@@ -95,6 +108,7 @@ public class SecurityConfig {
 
         http.addFilterBefore(jwtExceptionFilter, UsernamePasswordAuthenticationFilter.class);
         http.addFilterAfter(jwtAuthFilter, JwtExceptionFilter.class);
+        http.addFilterAfter(requestCorrelationFilter, JwtAuthFilter.class);
         return http.build();
     }
 
@@ -118,5 +132,10 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public RequestCorrelationFilter requestCorrelationFilter() {
+        return new RequestCorrelationFilter();
     }
 }

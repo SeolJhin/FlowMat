@@ -12,6 +12,7 @@ import {
   useVerifyEmailCodeMutation,
 } from '../../../entities/auth/api/useLoginMutation'
 import { useCurrentUserQuery } from '../../../entities/auth/api/useCurrentUserQuery'
+import { useMyPermissionsQuery } from '../../../entities/auth/api/useMyPermissionsQuery'
 import { subscribeAuthChange, tokenStorage } from '../../../entities/auth/lib/authSession'
 import {
   preloadInventoryRoute,
@@ -25,6 +26,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const navigate = useNavigate()
   const currentUserQuery = useCurrentUserQuery()
   const currentUser = currentUserQuery.data
+  const permissionsQuery = useMyPermissionsQuery(!!currentUser)
 
   const {
     data: projects = [],
@@ -110,12 +112,14 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Link
-            to="/admin"
-            style={{ fontSize: 12, padding: '4px 10px', height: 30, display: 'flex', alignItems: 'center', border: '1px solid var(--border)', borderRadius: 6, textDecoration: 'none', color: 'var(--text-h)' }}
-          >
-            Admin
-          </Link>
+          {permissionsQuery.data?.canManageUsers && (
+            <Link
+              to="/admin"
+              style={{ fontSize: 12, padding: '4px 10px', height: 30, display: 'flex', alignItems: 'center', border: '1px solid var(--border)', borderRadius: 6, textDecoration: 'none', color: 'var(--text-h)' }}
+            >
+              Admin
+            </Link>
+          )}
           <button type="button" onClick={onLogout} style={{ fontSize: 12, padding: '4px 10px', height: 30 }}>
             Logout
           </button>

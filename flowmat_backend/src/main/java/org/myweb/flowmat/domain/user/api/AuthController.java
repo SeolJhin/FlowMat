@@ -4,6 +4,8 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import java.time.Duration;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +25,7 @@ import org.myweb.flowmat.domain.user.api.dto.response.OAuthExchangeResponse;
 import org.myweb.flowmat.domain.user.api.dto.response.SocialLinkStartResponse;
 import org.myweb.flowmat.domain.user.api.dto.response.UserTokenResponse;
 import org.myweb.flowmat.domain.user.application.AuthService;
+import org.myweb.flowmat.domain.user.application.AuthRedisStore;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.response.ApiResponse;
@@ -48,13 +51,22 @@ public class AuthController {
     private static final String GUEST_SID_COOKIE_NAME = "guest_sid";
     private static final int GUEST_SID_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
     private static final Pattern GUEST_SID_PATTERN = Pattern.compile("^[A-Za-z0-9_-]{16,128}$");
+    private static final int LOGIN_IP_LIMIT = 12;
+    private static final int LOGIN_ACCOUNT_LIMIT = 8;
+    private static final int EMAIL_CODE_IP_LIMIT = 10;
+    private static final int EMAIL_CODE_EMAIL_LIMIT = 5;
+    private static final Duration LOGIN_RATE_WINDOW = Duration.ofMinutes(10);
+    private static final Duration EMAIL_CODE_RATE_WINDOW = Duration.ofHours(1);
 
     private final AuthService authService;
+    private final AuthRedisStore authRedisStore;
     private final RefreshTokenCookieService refreshTokenCookieService;
     private final OAuthExchangeStore oauthExchangeStore;
 
     @PostMapping("/email/send-code")
-    public ApiResponse<Void> sendEmailCode(@Valid @RequestBody EmailCodeRequest request) {
+    public ApiResponse<Void> sendEmailCode(HttpServletRequest httpRequest, @Valid @RequestBody EmailCodeRequest request) {
+        enforceRateLimit("email-code-ip", clientIpKey(httpRequest), EMAIL_CODE_IP_LIMIT, EMAIL_CODE_RATE_WINDOW);
+        enforceRateLimit("email-code-email", normalizeRateKey(request.userEmail()), EMAIL_CODE_EMAIL_LIMIT, EMAIL_CODE_RATE_WINDOW);
         authService.sendEmailCode(request.userEmail());
         return ApiResponse.ok(null);
     }
@@ -82,6 +94,8 @@ public class AuthController {
         HttpServletResponse httpResponse,
         @Valid @RequestBody UserLoginRequest request
     ) {
+        enforceRateLimit("login-ip", clientIpKey(httpRequest), LOGIN_IP_LIMIT, LOGIN_RATE_WINDOW);
+        enforceRateLimit("login-account", normalizeRateKey(request.userIdOrEmail()), LOGIN_ACCOUNT_LIMIT, LOGIN_RATE_WINDOW);
         UserTokenResponse response = authService.login(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest));
         writeRefreshCookie(httpRequest, httpResponse, response);
         return ApiResponse.ok(response);
@@ -279,5 +293,23 @@ public class AuthController {
         if (tokenResponse != null && tokenResponse.refreshToken() != null && !tokenResponse.refreshToken().isBlank()) {
             refreshTokenCookieService.writeRefreshToken(request, response, tokenResponse.refreshToken());
         }
+    }
+
+    private void enforceRateLimit(String category, String subject, int limit, Duration window) {
+        if (!authRedisStore.tryAcquireRateLimit(category, subject, limit, window)) {
+            throw new BusinessException(ErrorCode.RATE_LIMITED);
+        }
+    }
+
+    private String clientIpKey(HttpServletRequest request) {
+        return normalizeRateKey(extractIp(request));
+    }
+
+    private String normalizeRateKey(String raw) {
+        String value = raw == null ? "unknown" : raw.trim().toLowerCase(Locale.ROOT);
+        if (value.isBlank()) {
+            return "unknown";
+        }
+        return value.replace('|', '_').replace(' ', '_');
     }
 }

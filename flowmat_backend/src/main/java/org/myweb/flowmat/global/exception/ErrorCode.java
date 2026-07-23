@@ -11,6 +11,7 @@ public enum ErrorCode {
     FORBIDDEN(HttpStatus.FORBIDDEN, "You do not have permission."),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error."),
     SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Authentication service is temporarily unavailable."),
+    RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Too many requests. Please try again later."),
 
     TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "Token is invalid."),
     TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "Token has expired."),

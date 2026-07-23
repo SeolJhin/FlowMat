@@ -9,6 +9,7 @@ import {
 } from './routePreload'
 import { preloadWorkspaceRoute } from '../../pages/workspace/ui/workspacePreload'
 import { AuthGuard } from './AuthGuard'
+import { AdminGuard } from './AdminGuard'
 
 const HomeRoute = lazy(() =>
   import('../../pages/home/ui/HomeRoute').then((m) => ({ default: m.HomeRoute }))
@@ -62,7 +63,12 @@ export const router = createBrowserRouter([
   {
     element: <AuthGuard />,
     children: [
-      { path: '/admin', element: withSuspense(<AdminRoute />) },
+      {
+        element: <AdminGuard />,
+        children: [
+          { path: '/admin', element: withSuspense(<AdminRoute />) },
+        ],
+      },
       { path: '/projects/:projectId/settings', element: withSuspense(<ProjectSettingsRoute />) },
       { path: '/projects/:projectId/workflows/:workflowId', element: withSuspense(<WorkspaceRoute />) },
       { path: '/projects/:projectId/inventory', element: withSuspense(<InventoryRoute />) },
