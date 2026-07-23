@@ -1,6 +1,8 @@
 package org.myweb.flowmat.domain.user.application;
 
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +24,7 @@ public class AuthRedisStore {
     private static final String PWD_RESET_PREFIX = "auth:pwdreset:";
     private static final String LOGIN_FAIL_PREFIX = "auth:loginfail:";
     private static final String LOGIN_LOCK_PREFIX = "auth:loginlock:";
+    private static final String FACE_MATCH_PREFIX = "auth:face:match:";
 
     private final StringRedisTemplate redisTemplate;
 
@@ -149,6 +152,33 @@ public class AuthRedisStore {
         });
     }
 
+    public void saveFaceMatchToken(String token, List<String> userIds, Duration ttl) {
+        execute(() -> {
+            redisTemplate.opsForValue().set(faceMatchKey(token), String.join(",", userIds), ttl);
+            return null;
+        });
+    }
+
+    public List<String> getFaceMatchUserIds(String token) {
+        return execute(() -> {
+            String value = redisTemplate.opsForValue().get(faceMatchKey(token));
+            if (value == null || value.isBlank()) {
+                return List.of();
+            }
+            return Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(v -> !v.isBlank())
+                .toList();
+        });
+    }
+
+    public void consumeFaceMatchToken(String token) {
+        executeQuietly(() -> {
+            redisTemplate.delete(faceMatchKey(token));
+            return null;
+        });
+    }
+
     public String generateVerificationCode() {
         int value = java.util.concurrent.ThreadLocalRandom.current().nextInt(1_000_000);
         return "%06d".formatted(value);
@@ -179,6 +209,7 @@ public class AuthRedisStore {
     private String passwordResetKey(String token) { return PWD_RESET_PREFIX + token; }
     private String loginFailKey(String userId) { return LOGIN_FAIL_PREFIX + userId; }
     private String loginLockKey(String userId) { return LOGIN_LOCK_PREFIX + userId; }
+    private String faceMatchKey(String token) { return FACE_MATCH_PREFIX + token; }
 
     private String blankToEmpty(String value) {
         return value == null ? "" : value;

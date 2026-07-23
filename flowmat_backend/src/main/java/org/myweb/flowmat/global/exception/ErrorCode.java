@@ -27,7 +27,10 @@ public enum ErrorCode {
     PASSWORD_RESET_TOKEN_EXPIRED(HttpStatus.BAD_REQUEST, "Password reset token has expired."),
     INVALID_PASSWORD(HttpStatus.BAD_REQUEST, "Password is incorrect."),
     REFRESH_TOKEN_NOT_FOUND(HttpStatus.UNAUTHORIZED, "Refresh token was not found."),
-    TOKEN_REUSE_DETECTED(HttpStatus.UNAUTHORIZED, "Refresh token reuse was detected.");
+    TOKEN_REUSE_DETECTED(HttpStatus.UNAUTHORIZED, "Refresh token reuse was detected."),
+    FACE_NOT_REGISTERED(HttpStatus.BAD_REQUEST, "No face data is registered."),
+    FACE_NOT_RECOGNIZED(HttpStatus.BAD_REQUEST, "Face could not be recognized."),
+    FACE_ACCOUNT_LOCKED(HttpStatus.FORBIDDEN, "Face login is temporarily locked.");
 
     private final HttpStatus status;
     private final String message;
