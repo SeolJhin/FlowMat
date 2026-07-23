@@ -1,0 +1,17 @@
+/*
+ * Tailwind CSS v4 entry point — scoped to just the utility classes, with
+ * Preflight (Tailwind's global CSS reset) deliberately left out.
+ *
+ * Why: the rest of FlowMat's UI (canvas, inspector, etc.) is styled with
+ * plain hand-written CSS in `index.css`, which assumes normal browser
+ * defaults. Preflight resets things like button/heading/list styling
+ * globally, which would visibly change those existing screens. Omitting
+ * `tailwindcss/preflight.css` here keeps Tailwind's utility classes
+ * (`flex`, `text-sm`, `rounded-lg`, ...) available for new UI (e.g. the
+ * login/home page) without touching anything already built.
+ *
+ * See: https://tailwindcss.com/docs/preflight#disabling-preflight
+ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);

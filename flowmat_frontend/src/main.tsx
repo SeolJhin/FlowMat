@@ -4,6 +4,7 @@ import { RouterProvider } from 'react-router-dom'
 import { QueryProvider } from './app/providers/QueryProvider'
 import { router } from './app/router/index'
 import './index.css'
+import './tailwind.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
