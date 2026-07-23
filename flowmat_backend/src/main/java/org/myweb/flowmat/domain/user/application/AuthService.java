@@ -23,6 +23,8 @@ public interface AuthService {
 
     UserTokenResponse login(UserLoginRequest request, String userAgent, String ipAddress);
 
+    UserTokenResponse issueGuestToken(String guestSid, String currentAccessToken);
+
     UserTokenResponse refresh(RefreshTokenRequest request, String fallbackRefreshToken, String userAgent, String ipAddress);
 
     void logout(String refreshToken);

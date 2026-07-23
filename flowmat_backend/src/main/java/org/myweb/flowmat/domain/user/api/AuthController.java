@@ -1,7 +1,11 @@
 package org.myweb.flowmat.domain.user.api;
 
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import java.util.UUID;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.user.api.dto.request.EmailCodeRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.EmailCodeVerifyRequest;
@@ -21,6 +25,7 @@ import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.response.ApiResponse;
 import org.myweb.flowmat.global.security.AuthUser;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,6 +40,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 @RequestMapping("/auth")
 public class AuthController {
+
+    private static final String GUEST_SID_COOKIE_NAME = "guest_sid";
+    private static final int GUEST_SID_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+    private static final Pattern GUEST_SID_PATTERN = Pattern.compile("^[A-Za-z0-9_-]{16,128}$");
 
     private final AuthService authService;
 
@@ -64,6 +73,13 @@ public class AuthController {
     @PostMapping("/login")
     public ApiResponse<UserTokenResponse> login(HttpServletRequest httpRequest, @Valid @RequestBody UserLoginRequest request) {
         return ApiResponse.ok(authService.login(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest)));
+    }
+
+    @PostMapping("/guest-token")
+    public ApiResponse<UserTokenResponse> guestToken(HttpServletRequest request, HttpServletResponse response) {
+        String guestSid = resolveOrCreateGuestSid(request);
+        setGuestSidCookie(response, guestSid, isSecureRequest(request));
+        return ApiResponse.ok(authService.issueGuestToken(guestSid, extractBearer(request.getHeader(HttpHeaders.AUTHORIZATION))));
     }
 
     @PostMapping("/refresh")
@@ -159,5 +175,38 @@ public class AuthController {
             return xForwardedFor.split(",")[0].trim();
         }
         return request.getRemoteAddr();
+    }
+
+    private String resolveOrCreateGuestSid(HttpServletRequest request) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies != null) {
+            for (Cookie cookie : cookies) {
+                if (GUEST_SID_COOKIE_NAME.equals(cookie.getName())
+                    && cookie.getValue() != null
+                    && GUEST_SID_PATTERN.matcher(cookie.getValue().trim()).matches()) {
+                    return cookie.getValue().trim();
+                }
+            }
+        }
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private void setGuestSidCookie(HttpServletResponse response, String guestSid, boolean secure) {
+        ResponseCookie cookie = ResponseCookie.from(GUEST_SID_COOKIE_NAME, guestSid)
+            .httpOnly(true)
+            .secure(secure)
+            .path("/")
+            .sameSite("Lax")
+            .maxAge(GUEST_SID_MAX_AGE_SECONDS)
+            .build();
+        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+    }
+
+    private boolean isSecureRequest(HttpServletRequest request) {
+        if (request.isSecure()) {
+            return true;
+        }
+        String forwardedProto = request.getHeader("X-Forwarded-Proto");
+        return forwardedProto != null && "https".equalsIgnoreCase(forwardedProto.trim());
     }
 }

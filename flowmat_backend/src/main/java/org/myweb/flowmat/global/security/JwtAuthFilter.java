@@ -18,6 +18,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private static final Set<String> PUBLIC_PATHS = Set.of(
         "/auth/signup",
         "/auth/login",
+        "/auth/guest-token",
         "/auth/refresh",
         "/auth/logout",
         "/auth/check-nickname",

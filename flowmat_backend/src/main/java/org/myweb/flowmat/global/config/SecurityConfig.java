@@ -53,6 +53,7 @@ public class SecurityConfig {
                 .requestMatchers(
                     "/auth/signup",
                     "/auth/login",
+                    "/auth/guest-token",
                     "/auth/refresh",
                     "/auth/logout",
                     "/auth/check-nickname",

@@ -58,13 +58,17 @@ public class JwtProvider {
     }
 
     public String generateAccessToken(String userId, String role) {
+        return generateAccessToken(userId, role, accessExpiryMs);
+    }
+
+    public String generateAccessToken(String userId, String role, long expiryMs) {
         long now = System.currentTimeMillis();
         return Jwts.builder()
             .subject(userId)
             .claim(CLAIM_TYP, TYP_ACCESS)
             .claim(CLAIM_ROLE, normalizeRole(role))
             .issuedAt(new Date(now))
-            .expiration(new Date(now + accessExpiryMs))
+            .expiration(new Date(now + expiryMs))
             .signWith(key, Jwts.SIG.HS256)
             .compact();
     }
@@ -145,6 +149,11 @@ public class JwtProvider {
     public String resolveRole(String token) {
         Claims claims = parseClaimsQuietly(token);
         return claims == null ? null : claims.get(CLAIM_ROLE, String.class);
+    }
+
+    public Date resolveExpiration(String token) {
+        Claims claims = parseClaimsQuietly(token);
+        return claims == null ? null : claims.getExpiration();
     }
 
     public boolean isAccessToken(String token) {

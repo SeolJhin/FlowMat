@@ -165,7 +165,7 @@ class AuthServiceImplTest {
 
         assertThat(response.refreshToken()).isEqualTo("refresh-token-2");
         verify(authRedisStore).revokeRefreshToken("jti-old", "tester");
-        verify(authRedisStore).storeRefreshToken("jti-new", "tester", "device-1", any());
+        verify(authRedisStore).storeRefreshToken(org.mockito.Mockito.eq("jti-new"), org.mockito.Mockito.eq("tester"), org.mockito.Mockito.eq("device-1"), org.mockito.ArgumentMatchers.any());
     }
 
     @Test

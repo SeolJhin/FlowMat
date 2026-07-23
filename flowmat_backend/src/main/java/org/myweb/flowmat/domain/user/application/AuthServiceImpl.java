@@ -35,6 +35,10 @@ import org.springframework.transaction.annotation.Transactional;
 public class AuthServiceImpl implements AuthService {
 
     private static final int LOGIN_FAIL_THRESHOLD = 5;
+    private static final long GUEST_ACCESS_EXPIRY_MS = 20 * 60 * 1000L;
+    private static final long GUEST_REISSUE_THRESHOLD_MS = 3 * 60 * 1000L;
+    private static final String GUEST_ROLE = "guest";
+    private static final String GUEST_USER_ID_PREFIX = "GUEST_";
     private static final Duration LOGIN_FAIL_WINDOW = Duration.ofMinutes(5);
     private static final Duration LOGIN_LOCK_DURATION = Duration.ofMinutes(5);
     private static final Duration EMAIL_CODE_TTL = Duration.ofMinutes(5);
@@ -170,6 +174,34 @@ public class AuthServiceImpl implements AuthService {
         user.setLastLoginAt(OffsetDateTime.now());
 
         return issueTokens(user, resolveDeviceId(request.deviceId()));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public UserTokenResponse issueGuestToken(String guestSid, String currentAccessToken) {
+        String normalizedSid = normalizeRequired(guestSid, "Guest session ID is required.").replace("-", "");
+        String guestUserId = GUEST_USER_ID_PREFIX + normalizedSid;
+        String accessToken = normalizeNullable(currentAccessToken);
+
+        if (hasText(accessToken)) {
+            try {
+                jwtProvider.validate(accessToken);
+                boolean validGuestToken = jwtProvider.isAccessToken(accessToken)
+                    && GUEST_ROLE.equalsIgnoreCase(jwtProvider.resolveRole(accessToken))
+                    && guestUserId.equals(jwtProvider.resolveUserId(accessToken));
+                if (!validGuestToken) {
+                    accessToken = null;
+                }
+            } catch (Exception ignored) {
+                accessToken = null;
+            }
+        }
+
+        if (!hasText(accessToken) || shouldReissueGuestToken(accessToken)) {
+            accessToken = jwtProvider.generateAccessToken(guestUserId, GUEST_ROLE, GUEST_ACCESS_EXPIRY_MS);
+        }
+
+        return new UserTokenResponse(accessToken, null, normalizedSid, false);
     }
 
     @Override
@@ -430,6 +462,24 @@ public class AuthServiceImpl implements AuthService {
 
     private String resolveDeviceId(String deviceId) {
         return hasText(deviceId) ? deviceId.trim() : "web-" + UUID.randomUUID();
+    }
+
+    private boolean shouldReissueGuestToken(String token) {
+        try {
+            String typ = jwtProvider.resolveTokenType(token);
+            String role = jwtProvider.resolveRole(token);
+            if (!"access".equals(typ) || !GUEST_ROLE.equalsIgnoreCase(role)) {
+                return true;
+            }
+            java.util.Date expiration = jwtProvider.resolveExpiration(token);
+            if (expiration == null) {
+                return true;
+            }
+            long remaining = expiration.getTime() - System.currentTimeMillis();
+            return remaining <= GUEST_REISSUE_THRESHOLD_MS;
+        } catch (Exception e) {
+            return true;
+        }
     }
 
     private String normalizeProvider(String provider) {
