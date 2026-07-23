@@ -62,6 +62,9 @@ public class User extends BaseTimeEntity {
     @Column(name = "dormant_at")
     private OffsetDateTime dormantAt;
 
+    @Column(name = "dormant_token")
+    private String dormantToken;
+
     @Column(name = "withdrawn_at")
     private OffsetDateTime withdrawnAt;
 

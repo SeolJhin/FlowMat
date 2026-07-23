@@ -71,6 +71,13 @@ public class UserController {
         return ApiResponse.ok(userService.updateMe(authUser.getUserId(), request));
     }
 
+    @PostMapping("/me/dormant")
+    public ApiResponse<Void> requestDormant(@AuthenticationPrincipal AuthUser authUser) {
+        requireAuth(authUser);
+        userService.requestDormant(authUser.getUserId());
+        return ApiResponse.ok(null);
+    }
+
     @DeleteMapping("/me")
     public ApiResponse<Void> deleteMe(@AuthenticationPrincipal AuthUser authUser) {
         requireAuth(authUser);

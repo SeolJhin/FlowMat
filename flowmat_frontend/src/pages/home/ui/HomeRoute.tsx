@@ -7,6 +7,8 @@ import { useWorkflowsQuery } from '../../../entities/workflow/api/useWorkflowsQu
 import {
   useLoginMutation,
   useLogoutMutation,
+  useRequestDormantMutation,
+  useRequestDormantReactivationMutation,
   useSendEmailCodeMutation,
   useSignupMutation,
   useVerifyEmailCodeMutation,
@@ -22,7 +24,7 @@ import {
 } from '../../../app/router/routePreload'
 import { preloadWorkspaceExperience } from '../../workspace/ui/workspacePreload'
 
-function Dashboard({ onLogout }: { onLogout: () => void }) {
+function Dashboard({ onLogout, onRequestDormant }: { onLogout: () => void; onRequestDormant: () => void }) {
   const navigate = useNavigate()
   const currentUserQuery = useCurrentUserQuery()
   const currentUser = currentUserQuery.data
@@ -112,6 +114,9 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button type="button" onClick={onRequestDormant} style={{ fontSize: 12, padding: '4px 10px', height: 30 }}>
+            Dormant
+          </button>
           {permissionsQuery.data?.canManageUsers && (
             <Link
               to="/admin"
@@ -251,10 +256,14 @@ export function HomeRoute() {
   const [authPassword, setAuthPassword] = useState('')
   const [isEmailVerified, setIsEmailVerified] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
+  const [authInfo, setAuthInfo] = useState<string | null>(null)
+  const [showDormantHelp, setShowDormantHelp] = useState(false)
 
   const loginMutation = useLoginMutation()
   const signupMutation = useSignupMutation()
   const logoutMutation = useLogoutMutation()
+  const requestDormantMutation = useRequestDormantMutation()
+  const requestDormantReactivationMutation = useRequestDormantReactivationMutation()
   const sendEmailCodeMutation = useSendEmailCodeMutation()
   const verifyEmailCodeMutation = useVerifyEmailCodeMutation()
 
@@ -269,6 +278,8 @@ export function HomeRoute() {
   async function handleAuthSubmit(e: FormEvent) {
     e.preventDefault()
     setAuthError(null)
+    setAuthInfo(null)
+    setShowDormantHelp(false)
     try {
       if (authMode === 'login') {
         await loginMutation.mutateAsync({ userIdOrEmail: authUserId, password: authPassword })
@@ -306,6 +317,7 @@ export function HomeRoute() {
             ? String((err as { message: unknown }).message)
             : 'Authentication failed.'
       setAuthError(message)
+      setShowDormantHelp(message.toLowerCase().includes('dormant'))
     }
   }
 
@@ -315,6 +327,7 @@ export function HomeRoute() {
 
   async function handleSendEmailCode() {
     setAuthError(null)
+    setAuthInfo(null)
     try {
       await sendEmailCodeMutation.mutateAsync(authEmail.trim())
     } catch (err) {
@@ -324,6 +337,7 @@ export function HomeRoute() {
 
   async function handleVerifyEmailCode() {
     setAuthError(null)
+    setAuthInfo(null)
     try {
       await verifyEmailCodeMutation.mutateAsync({
         userEmail: authEmail.trim(),
@@ -333,6 +347,35 @@ export function HomeRoute() {
     } catch (err) {
       setIsEmailVerified(false)
       setAuthError(err instanceof Error ? err.message : 'Failed to verify email code.')
+    }
+  }
+
+  async function handleDormantReactivationRequest() {
+    setAuthError(null)
+    setAuthInfo(null)
+    try {
+      await requestDormantReactivationMutation.mutateAsync(authUserId.trim())
+      setAuthInfo('If the account is dormant, a reactivation email has been sent.')
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Failed to request dormant account reactivation.')
+    }
+  }
+
+  async function handleRequestDormant() {
+    setAuthError(null)
+    setAuthInfo(null)
+    const confirmed = window.confirm('Put this account into dormant status and sign out now?')
+    if (!confirmed) return
+
+    try {
+      await requestDormantMutation.mutateAsync()
+      tokenStorage.clear()
+      setIsLoggedIn(false)
+      setAuthMode('login')
+      setAuthPassword('')
+      setAuthInfo('Your account is now dormant. Use the reactivation email to sign in again.')
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Failed to request dormant status.')
     }
   }
 
@@ -388,11 +431,22 @@ export function HomeRoute() {
           />
           <input type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Password" required />
           {authError && <p style={{ color: '#dc2626', fontSize: 13, margin: 0 }}>{authError}</p>}
+          {authInfo && <p style={{ color: 'var(--accent)', fontSize: 13, margin: 0 }}>{authInfo}</p>}
+          {authMode === 'login' && showDormantHelp && (
+            <button
+              type="button"
+              onClick={() => void handleDormantReactivationRequest()}
+              disabled={!authUserId.trim() || requestDormantReactivationMutation.isPending}
+            >
+              {requestDormantReactivationMutation.isPending ? 'Sending Reactivation Email...' : 'Send Reactivation Email'}
+            </button>
+          )}
           <button
             type="submit"
             disabled={
               loginMutation.isPending
               || signupMutation.isPending
+              || requestDormantReactivationMutation.isPending
               || sendEmailCodeMutation.isPending
               || verifyEmailCodeMutation.isPending
             }
@@ -405,6 +459,8 @@ export function HomeRoute() {
             onClick={() => {
               setAuthMode((mode) => (mode === 'login' ? 'signup' : 'login'))
               setAuthError(null)
+              setAuthInfo(null)
+              setShowDormantHelp(false)
               setIsEmailVerified(false)
               setAuthEmailCode('')
             }}
@@ -419,5 +475,5 @@ export function HomeRoute() {
     )
   }
 
-  return <Dashboard onLogout={handleLogout} />
+  return <Dashboard onLogout={handleLogout} onRequestDormant={() => void handleRequestDormant()} />
 }

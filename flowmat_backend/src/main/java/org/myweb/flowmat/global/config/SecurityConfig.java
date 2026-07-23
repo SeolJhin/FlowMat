@@ -70,6 +70,8 @@ public class SecurityConfig {
                     "/auth/reset-password/confirm",
                     "/auth/email/send-code",
                     "/auth/email/verify-code",
+                    "/auth/dormant/reactivation/request",
+                    "/auth/dormant/reactivate",
                     "/auth/face/login",
                     "/auth/face/match",
                     "/auth/face/select",

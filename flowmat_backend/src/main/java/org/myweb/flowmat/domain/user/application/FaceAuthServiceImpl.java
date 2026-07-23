@@ -247,6 +247,7 @@ public class FaceAuthServiceImpl implements FaceAuthService {
     private boolean canLogin(User user) {
         return user != null
             && !"Y".equalsIgnoreCase(user.getDeleteYn())
+            && !"dormant".equalsIgnoreCase(user.getUserStatus())
             && !"withdrawn".equalsIgnoreCase(user.getUserStatus())
             && !"locked".equalsIgnoreCase(user.getUserStatus());
     }

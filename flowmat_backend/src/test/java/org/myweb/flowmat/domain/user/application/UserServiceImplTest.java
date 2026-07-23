@@ -101,4 +101,17 @@ class UserServiceImplTest {
         verify(authRedisStore, never()).revokeAllRefreshTokens("tester");
         verify(adminUserActionLogService, never()).record(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
+
+    @Test
+    void requestDormantRevokesRefreshTokensAndMarksDormant() {
+        when(userRepository.findByUserId("tester")).thenReturn(Optional.of(user));
+
+        userService.requestDormant("tester");
+
+        verify(authRedisStore).revokeAllRefreshTokens("tester");
+        verify(authRedisStore).clearLoginFailures("tester");
+        assertThat(user.getUserStatus()).isEqualTo("dormant");
+        assertThat(user.getDormantAt()).isNotNull();
+        assertThat(user.getDormantToken()).isNull();
+    }
 }

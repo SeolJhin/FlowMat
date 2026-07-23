@@ -11,6 +11,8 @@ import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.user.api.dto.request.EmailCodeRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.EmailCodeVerifyRequest;
+import org.myweb.flowmat.domain.user.api.dto.request.DormantReactivationRequest;
+import org.myweb.flowmat.domain.user.api.dto.request.DormantTokenRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.FindEmailRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.LogoutRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.OAuthExchangeRequest;
@@ -55,8 +57,11 @@ public class AuthController {
     private static final int LOGIN_ACCOUNT_LIMIT = 8;
     private static final int EMAIL_CODE_IP_LIMIT = 10;
     private static final int EMAIL_CODE_EMAIL_LIMIT = 5;
+    private static final int DORMANT_REQUEST_IP_LIMIT = 8;
+    private static final int DORMANT_REQUEST_ACCOUNT_LIMIT = 5;
     private static final Duration LOGIN_RATE_WINDOW = Duration.ofMinutes(10);
     private static final Duration EMAIL_CODE_RATE_WINDOW = Duration.ofHours(1);
+    private static final Duration DORMANT_REQUEST_RATE_WINDOW = Duration.ofHours(1);
 
     private final AuthService authService;
     private final AuthRedisStore authRedisStore;
@@ -74,6 +79,28 @@ public class AuthController {
     @PostMapping("/email/verify-code")
     public ApiResponse<Void> verifyEmailCode(@Valid @RequestBody EmailCodeVerifyRequest request) {
         authService.verifyEmailCode(request.userEmail(), request.code());
+        return ApiResponse.ok(null);
+    }
+
+    @PostMapping("/dormant/reactivation/request")
+    public ApiResponse<Void> requestDormantReactivation(
+        HttpServletRequest httpRequest,
+        @Valid @RequestBody DormantReactivationRequest request
+    ) {
+        enforceRateLimit("dormant-reactivation-ip", clientIpKey(httpRequest), DORMANT_REQUEST_IP_LIMIT, DORMANT_REQUEST_RATE_WINDOW);
+        enforceRateLimit(
+            "dormant-reactivation-account",
+            normalizeRateKey(request.userIdOrEmail()),
+            DORMANT_REQUEST_ACCOUNT_LIMIT,
+            DORMANT_REQUEST_RATE_WINDOW
+        );
+        authService.requestDormantReactivation(request);
+        return ApiResponse.ok(null);
+    }
+
+    @PostMapping("/dormant/reactivate")
+    public ApiResponse<Void> reactivateDormant(@Valid @RequestBody DormantTokenRequest request) {
+        authService.reactivateDormant(request);
         return ApiResponse.ok(null);
     }
 

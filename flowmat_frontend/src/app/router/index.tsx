@@ -20,6 +20,9 @@ const InviteAcceptRoute = lazy(() =>
 const OAuthCallbackRoute = lazy(() =>
   import('../../pages/oauth/ui/OAuthCallbackRoute').then((m) => ({ default: m.OAuthCallbackRoute }))
 )
+const DormantReactivationRoute = lazy(() =>
+  import('../../pages/dormant/ui/DormantReactivationRoute').then((m) => ({ default: m.DormantReactivationRoute }))
+)
 const AdminRoute = lazy(() =>
   import('../../pages/admin/ui/AdminRoute').then((m) => ({ default: m.AdminRoute }))
 )
@@ -58,6 +61,7 @@ export const router = createBrowserRouter([
   { path: '/', element: withSuspense(<HomeRoute />) },
   { path: '/invite/accept', element: withSuspense(<InviteAcceptRoute />) },
   { path: '/oauth2/success', element: withSuspense(<OAuthCallbackRoute />) },
+  { path: '/reactivate-account', element: withSuspense(<DormantReactivationRoute />) },
 
   // Protected routes — AuthGuard redirects to / if no token
   {

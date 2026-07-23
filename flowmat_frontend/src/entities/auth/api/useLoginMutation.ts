@@ -44,6 +44,21 @@ async function verifyEmailCode(input: { userEmail: string; code: string }): Prom
   unwrapApiVoidResponse(envelope)
 }
 
+async function requestDormantReactivation(userIdOrEmail: string): Promise<void> {
+  const envelope = await httpClient.post<ApiEnvelope<null>>('/auth/dormant/reactivation/request', { userIdOrEmail })
+  unwrapApiVoidResponse(envelope)
+}
+
+async function reactivateDormant(token: string): Promise<void> {
+  const envelope = await httpClient.post<ApiEnvelope<null>>('/auth/dormant/reactivate', { token })
+  unwrapApiVoidResponse(envelope)
+}
+
+async function requestDormant(): Promise<void> {
+  const envelope = await httpClient.post<ApiEnvelope<null>>('/users/me/dormant', {})
+  unwrapApiVoidResponse(envelope)
+}
+
 export function useLoginMutation() {
   return useMutation({
     mutationFn: login,
@@ -61,6 +76,18 @@ export function useSendEmailCodeMutation() {
 
 export function useVerifyEmailCodeMutation() {
   return useMutation({ mutationFn: verifyEmailCode })
+}
+
+export function useRequestDormantReactivationMutation() {
+  return useMutation({ mutationFn: requestDormantReactivation })
+}
+
+export function useReactivateDormantMutation() {
+  return useMutation({ mutationFn: reactivateDormant })
+}
+
+export function useRequestDormantMutation() {
+  return useMutation({ mutationFn: requestDormant })
 }
 
 export function useLogoutMutation() {

@@ -24,5 +24,7 @@ public interface UserService {
 
     UserResponse updateMe(String userId, UserUpdateRequest request);
 
+    void requestDormant(String userId);
+
     void deleteMe(String userId);
 }

@@ -24,6 +24,8 @@ public enum ErrorCode {
     EMAIL_NOT_VERIFIED(HttpStatus.BAD_REQUEST, "Email verification is required."),
     EMAIL_CODE_INVALID(HttpStatus.BAD_REQUEST, "Email verification code is invalid."),
     EMAIL_CODE_COOLDOWN(HttpStatus.TOO_MANY_REQUESTS, "Please wait before requesting another email code."),
+    DORMANT_ACCOUNT(HttpStatus.FORBIDDEN, "This account is dormant and must be reactivated."),
+    DORMANT_TOKEN_INVALID(HttpStatus.BAD_REQUEST, "Dormant account reactivation token is invalid."),
     PASSWORD_RESET_TOKEN_INVALID(HttpStatus.BAD_REQUEST, "Password reset token is invalid."),
     PASSWORD_RESET_TOKEN_EXPIRED(HttpStatus.BAD_REQUEST, "Password reset token has expired."),
     INVALID_PASSWORD(HttpStatus.BAD_REQUEST, "Password is incorrect."),
