@@ -1004,3 +1004,25 @@ code {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ============================================================
+   FlowMat login screen — ripple button + status-dot pulse
+   (used with Tailwind arbitrary [animation:...] classes in
+   HomeRoute.tsx / FlowCanvasBackground.tsx)
+   ============================================================ */
+@keyframes flowmat-ripple {
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@keyframes flowmat-pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
