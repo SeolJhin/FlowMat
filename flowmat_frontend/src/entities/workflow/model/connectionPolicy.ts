@@ -1,4 +1,5 @@
-import type { ConnectCompletePayload } from './types'
+import type { ConnectCompletePayload, WorkflowCanvasViewModel } from './types'
+import { getDefaultConnectionType } from './nodeCatalog'
 
 export function normalizeConnectionIoId(handleId: string | null): string | null {
   if (!handleId || handleId === 'in-default' || handleId === 'out-default') {
@@ -19,8 +20,14 @@ export function getRelatedConnectionIds(
 
 export function buildDefaultConnectionPayload(
   workflowId: string,
-  payload: ConnectCompletePayload
+  payload: ConnectCompletePayload,
+  canvas?: WorkflowCanvasViewModel
 ) {
+  const fromNode = canvas?.nodeMap[payload.fromProcessId]
+  const connectionType = fromNode
+    ? getDefaultConnectionType(fromNode.nodeType)
+    : 'material_flow'
+
   return {
     workflowId,
     fromProcessId: payload.fromProcessId,
@@ -29,7 +36,7 @@ export function buildDefaultConnectionPayload(
     toIoId: normalizeConnectionIoId(payload.toIoId),
     sourceHandle: payload.sourceHandle,
     targetHandle: payload.targetHandle,
-    connectionType: 'material',
+    connectionType,
     connectionLabel: null,
     flowRate: null,
     unit: null,

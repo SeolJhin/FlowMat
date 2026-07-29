@@ -5,11 +5,14 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessIoCreateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessIoUpdateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessIoResponse;
 import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
+import org.myweb.flowmat.domain.workflow.collab.GraphSyncService;
+import org.myweb.flowmat.domain.workflow.collab.dto.GraphChangeMessage.Type;
 import org.myweb.flowmat.domain.workflow.repository.ProcessIoRepository;
 import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
@@ -31,12 +34,14 @@ public class ProcessIoServiceImpl implements ProcessIoService {
 
     private final ProcessIoRepository processIoRepository;
     private final ProcessRepository processRepository;
+    private final GraphSyncService graphSyncService;
     private final ItemRepository itemRepository;
     private final IdGenerator idGenerator;
+    private final ProjectAccessService projectAccessService;
 
     @Override
     public List<ProcessIoResponse> listProcessIos(String processId) {
-        findActiveProcess(processId);
+        projectAccessService.requireProcessReadAccess(processId);
         return processIoRepository.findAllByProcessIdAndDeletedYnOrderByCreatedAtAsc(processId, NOT_DELETED).stream()
             .map(ProcessIoServiceImpl::toResponse)
             .toList();
@@ -45,7 +50,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     @Override
     @Transactional
     public ProcessIoResponse createProcessIo(ProcessIoCreateRequest request) {
-        Process process = findActiveProcess(request.processId());
+        Process process = projectAccessService.requireProcessWriteAccess(request.processId());
         Item item = findActiveItem(request.itemId());
         validateSameProject(process.getProjectId(), item.getProjectId());
 
@@ -63,22 +68,24 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         processIo.setRequiredYn(defaultYn(request.requiredYn(), "Y"));
         processIo.setAllowShortageYn(defaultYn(request.allowShortageYn(), "N"));
         processIo.setDeletedYn(NOT_DELETED);
-        return toResponse(processIoRepository.save(processIo));
+        ProcessIoResponse response = toResponse(processIoRepository.save(processIo));
+        graphSyncService.broadcast(Type.PORT_CREATED, process.getWorkflowId(), response.processIoId());
+        return response;
     }
 
     @Override
     public ProcessIoResponse getProcessIo(String processIoId) {
-        return toResponse(findActiveProcessIo(processIoId));
+        return toResponse(projectAccessService.requireProcessIoReadAccess(processIoId));
     }
 
     @Override
     @Transactional
     public ProcessIoResponse updateProcessIo(String processIoId, ProcessIoUpdateRequest request) {
-        ProcessIo processIo = findActiveProcessIo(processIoId);
+        ProcessIo processIo = projectAccessService.requireProcessIoWriteAccess(processIoId);
 
         if (hasText(request.itemId())) {
             Item item = findActiveItem(request.itemId());
-            Process process = findActiveProcess(processIo.getProcessId());
+            Process process = projectAccessService.requireProcessWriteAccess(processIo.getProcessId());
             validateSameProject(process.getProjectId(), item.getProjectId());
             processIo.setItemId(item.getItemId());
         }
@@ -111,29 +118,25 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         if (request.allowShortageYn() != null) {
             processIo.setAllowShortageYn(defaultYn(request.allowShortageYn(), processIo.getAllowShortageYn()));
         }
-        return toResponse(processIoRepository.save(processIo));
+        ProcessIo saved = processIoRepository.save(processIo);
+        Process parentProcess = projectAccessService.requireProcessWriteAccess(saved.getProcessId());
+        graphSyncService.broadcast(Type.PORT_UPDATED, parentProcess.getWorkflowId(), saved.getProcessIoId());
+        return toResponse(saved);
     }
 
     @Override
     @Transactional
     public void deleteProcessIo(String processIoId) {
-        ProcessIo processIo = findActiveProcessIo(processIoId);
+        ProcessIo processIo = projectAccessService.requireProcessIoWriteAccess(processIoId);
+        Process parentProcess = projectAccessService.requireProcessWriteAccess(processIo.getProcessId());
+        String workflowId = parentProcess.getWorkflowId();
         processIo.setDeletedYn(DELETED);
         processIoRepository.save(processIo);
-    }
-
-    private Process findActiveProcess(String processId) {
-        return processRepository.findByProcessIdAndDeletedYn(processId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        graphSyncService.broadcast(Type.PORT_DELETED, workflowId, processIoId);
     }
 
     private Item findActiveItem(String itemId) {
         return itemRepository.findByItemIdAndDeletedYn(itemId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-    }
-
-    private ProcessIo findActiveProcessIo(String processIoId) {
-        return processIoRepository.findByProcessIoIdAndDeletedYn(processIoId, NOT_DELETED)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 

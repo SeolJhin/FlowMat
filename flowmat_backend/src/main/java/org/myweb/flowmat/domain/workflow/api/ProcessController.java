@@ -4,12 +4,14 @@ import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessCreateRequest;
+import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessPositionRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessUpdateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessResponse;
 import org.myweb.flowmat.domain.workflow.application.ProcessService;
 import org.myweb.flowmat.global.response.ApiResponse;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -46,6 +48,14 @@ public class ProcessController {
         @RequestBody ProcessUpdateRequest request
     ) {
         return ApiResponse.ok(processService.updateProcess(processId, request));
+    }
+
+    @PatchMapping("/{processId}/position")
+    public ApiResponse<ProcessResponse> updatePosition(
+        @PathVariable("processId") String processId,
+        @Valid @RequestBody ProcessPositionRequest request
+    ) {
+        return ApiResponse.ok(processService.updatePosition(processId, request));
     }
 
     @DeleteMapping("/{processId}")

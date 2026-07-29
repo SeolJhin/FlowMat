@@ -9,10 +9,17 @@ function isApiEnvelope(value: unknown): value is ApiEnvelope<unknown> {
   return typeof value === 'object' && value !== null && 'success' in value && 'message' in value
 }
 
+function buildHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = localStorage.getItem('access_token')
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  return headers
+}
+
 async function request<T>(method: HttpMethod, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildHeaders(),
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
 
@@ -34,5 +41,6 @@ export const httpClient = {
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body: unknown) => request<T>('POST', path, body),
   put: <T>(path: string, body: unknown) => request<T>('PUT', path, body),
+  patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, body),
   delete: <T>(path: string) => request<T>('DELETE', path),
 }

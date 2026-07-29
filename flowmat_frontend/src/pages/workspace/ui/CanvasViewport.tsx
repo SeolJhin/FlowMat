@@ -1,19 +1,32 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
+import { toPng } from 'html-to-image'
 import {
+  experimental_useOnNodesChangeMiddleware,
   ReactFlow,
   Background,
   BackgroundVariant,
   Controls,
   MiniMap,
   useViewport,
+  getBezierPath,
+  useUpdateNodeInternals,
+  useOnViewportChange,
+  reconnectEdge,
+  getNodesBounds,
+  getViewportForBounds,
+  useReactFlow,
   type NodeChange,
   type EdgeChange,
   type Connection,
   type OnConnectStart,
   type OnConnectEnd,
+  type OnNodeDrag,
+  type OnReconnect,
   type ReactFlowInstance,
   type Node,
   type Edge,
+  type Viewport,
+  type ConnectionLineComponentProps,
   applyNodeChanges,
   applyEdgeChanges,
 } from '@xyflow/react'
@@ -21,18 +34,21 @@ import '@xyflow/react/dist/style.css'
 import type {
   CanvasNodeViewModel,
   CanvasEdgeViewModel,
-  CanvasMode,
   ConnectStartPayload,
   ConnectCompletePayload,
 } from '../../../entities/workflow/model/types'
 import type { WorkflowPaletteTool } from '../../../entities/workflow/model/nodeCatalog'
 import { CanvasNode } from './CanvasNode'
 import { CanvasEdge } from './CanvasEdge'
+import { PALETTE_DRAG_MIME } from './canvasConstants'
 import { useWorkspaceStore } from '../model/workspaceStore'
 import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
-
-/** dataTransfer MIME type used by palette drag-to-create. */
-export const PALETTE_DRAG_MIME = 'application/flowmat-node-tool'
+import {
+  useWorkflowSync,
+  type NodeMoveMessage,
+  type PresenceMessage,
+  type GraphChangeMessage,
+} from '../../../entities/workflow/api/useWorkflowSync'
 
 const nodeTypes = { flowmatNode: CanvasNode }
 const edgeTypes = { flowmatEdge: CanvasEdge }
@@ -98,6 +114,40 @@ function calculateSnapGuides(
   return [bestX?.guide, bestY?.guide].filter(Boolean) as SnapGuide[]
 }
 
+function CustomConnectionLine({
+  fromX,
+  fromY,
+  toX,
+  toY,
+  fromPosition,
+  toPosition,
+  connectionStatus,
+}: ConnectionLineComponentProps) {
+  const [path] = getBezierPath({
+    sourceX: fromX,
+    sourceY: fromY,
+    sourcePosition: fromPosition,
+    targetX: toX,
+    targetY: toY,
+    targetPosition: toPosition,
+  })
+
+  const stroke =
+    connectionStatus === 'valid'
+      ? '#22c55e'
+      : connectionStatus === 'invalid'
+        ? '#ef4444'
+        : '#94a3b8'
+
+  return (
+    <path
+      d={path}
+      fill="none"
+      style={{ stroke, strokeWidth: 2, strokeDasharray: '6 3' }}
+    />
+  )
+}
+
 // Renders alignment guide lines in screen space (must be inside ReactFlow for context)
 function SnapGuideLayer({ guides }: { guides: SnapGuide[] }) {
   const { x: vpX, y: vpY, zoom } = useViewport()
@@ -149,12 +199,74 @@ function SnapGuideLayer({ guides }: { guides: SnapGuide[] }) {
   )
 }
 
+function ExportController({ onReady }: { onReady?: (fn: (filename: string) => void) => void }) {
+  const { getNodes } = useReactFlow()
+  const getNodesRef = useRef(getNodes)
+  getNodesRef.current = getNodes
+
+  useEffect(() => {
+    onReady?.((filename: string) => {
+      const nodes = getNodesRef.current() as unknown as RfNode[]
+      if (nodes.length === 0) return
+      const bounds = getNodesBounds(nodes as unknown as Node[])
+      const W = 2400
+      const H = 1600
+      const viewport = getViewportForBounds(bounds, W, H, 0.1, 2, 0.1)
+      const el = document.querySelector('.react-flow__viewport') as HTMLElement | null
+      if (!el) return
+      void toPng(el, {
+        backgroundColor: '#f4f3f8',
+        width: W,
+        height: H,
+        style: {
+          width: `${W}px`,
+          height: `${H}px`,
+          transform: `translate(${viewport.x}px,${viewport.y}px) scale(${viewport.zoom})`,
+          transformOrigin: 'top left',
+        },
+      }).then((dataUrl) => {
+        const a = document.createElement('a')
+        a.href = dataUrl
+        a.download = `${filename}.png`
+        a.click()
+      })
+    })
+  }, [onReady])
+
+  return null
+}
+
+function ViewportPersister({ storageKey }: { storageKey: string }) {
+  useOnViewportChange({
+    onEnd: (viewport: Viewport) => {
+      localStorage.setItem(storageKey, JSON.stringify(viewport))
+    },
+  })
+  return null
+}
+
+/** Calls updateNodeInternals for nodes whose handle count changed. Must be inside ReactFlow. */
+function NodesChangeMiddleware() {
+  experimental_useOnNodesChangeMiddleware((changes) =>
+    changes.filter((c) => !(c.type === 'position' && c.dragging))
+  )
+  return null
+}
+
+function InternalsUpdater({ nodeIds }: { nodeIds: string[] }) {
+  const updateNodeInternals = useUpdateNodeInternals()
+  useEffect(() => {
+    if (nodeIds.length > 0) updateNodeInternals(nodeIds)
+  }, [nodeIds, updateNodeInternals])
+  return null
+}
+
 interface Props {
+  workflowId: string
   nodes: CanvasNodeViewModel[]
   edges: CanvasEdgeViewModel[]
   selectedNodeId: string | null
   selectedEdgeId: string | null
-  canvasMode: CanvasMode
   drawingEnabled: boolean
   onNodeSelect(id: string): void
   onEdgeSelect(id: string): void
@@ -170,6 +282,26 @@ interface Props {
     fromHandleType: 'source' | 'target'
     flowPosition: { x: number; y: number }
     screenPosition: { x: number; y: number }
+  }): void
+  onFitViewReady?(fn: () => void): void
+  onSelectAllReady?(fn: () => void): void
+  onExportReady?(fn: (filename: string) => void): void
+  onEdgeReconnect?(oldEdgeId: string, newConnection: ConnectCompletePayload): void
+  onPresence?(msg: PresenceMessage): void
+  onGraphChange?(msg: GraphChangeMessage): void
+  onReconnect?(): void
+  onBeforeDelete?(params: { nodeIds: string[]; edgeIds: string[] }): Promise<boolean>
+  onDeleteElements?(params: { nodeIds: string[]; edgeIds: string[] }): Promise<void>
+  onDeleteReady?(api: {
+    deleteSelection(): Promise<void>
+    deleteNode(nodeId: string): Promise<void>
+    deleteEdge(edgeId: string): Promise<void>
+  }): void
+  editingPresence?: ReadonlyMap<string, string>
+  onSyncReady?(api: {
+    sendPresence: (msg: Omit<PresenceMessage, 'userId' | 'clientId' | 'workflowId' | 'timestamp'>) => void
+    clientId: string
+    ownUserId: string | null
   }): void
 }
 
@@ -219,7 +351,18 @@ function toRfEdges(edges: CanvasEdgeViewModel[], selectedId: string | null): RfE
   }))
 }
 
+function loadSavedViewport(storageKey: string): Viewport | undefined {
+  try {
+    const raw = localStorage.getItem(storageKey)
+    if (!raw) return undefined
+    return JSON.parse(raw) as Viewport
+  } catch {
+    return undefined
+  }
+}
+
 export function CanvasViewport({
+  workflowId,
   nodes,
   edges,
   selectedNodeId,
@@ -234,32 +377,106 @@ export function CanvasViewport({
   onCanvasClick,
   onNodeDrop,
   onConnectDropOnCanvas,
+  onFitViewReady,
+  onSelectAllReady,
+  onExportReady,
+  onEdgeReconnect,
+  onPresence,
+  onGraphChange,
+  onReconnect,
+  onBeforeDelete,
+  onDeleteElements,
+  onDeleteReady,
+  onSyncReady,
+  editingPresence,
 }: Props) {
-  const { selectNode, selectEdge } = useWorkspaceStore()
+  const storageKey = `flowmat-viewport-${workflowId}`
+  const savedViewport = useMemo(() => loadSavedViewport(storageKey), [storageKey])
+  const { selectNode, selectEdge, startInlineEdit, startInlineEditEdge, setMultiSelect } = useWorkspaceStore()
+
+  const applyRemoteNodeMove = useCallback((message: NodeMoveMessage) => {
+    setLocalNodes((nds) =>
+      nds.map((n) =>
+        n.id === message.processId
+          ? { ...n, position: { x: message.x, y: message.y } }
+          : n
+      )
+    )
+  }, [])
+
+  const { sendNodeMove, sendPresence, clientId, ownUserId } = useWorkflowSync(
+    workflowId,
+    applyRemoteNodeMove,
+    onPresence,
+    onGraphChange,
+    onReconnect,
+  )
+
+  const onSyncReadyRef = useRef(onSyncReady)
+  onSyncReadyRef.current = onSyncReady
+  useEffect(() => {
+    onSyncReadyRef.current?.({ sendPresence, clientId, ownUserId })
+  }, [sendPresence, clientId, ownUserId])
   const setHoveredEdgeId = useCanvasInteractionStore((s) => s.setHoveredEdgeId)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
+
+  useEffect(() => {
+    if (reactFlowInstance) {
+      onFitViewReady?.(() => reactFlowInstance.fitView({ padding: 0.15, duration: 300 }))
+      onSelectAllReady?.(() => {
+        setLocalNodes((nds) => nds.map((n) => ({ ...n, selected: true })))
+      })
+      onDeleteReady?.({
+        deleteSelection: async () => {
+          const selectedNodes = reactFlowInstance.getNodes().filter((node) => node.selected)
+          const selectedEdges = reactFlowInstance.getEdges().filter((edge) => edge.selected)
+          await reactFlowInstance.deleteElements({ nodes: selectedNodes, edges: selectedEdges })
+        },
+        deleteNode: async (nodeId: string) => {
+          await reactFlowInstance.deleteElements({ nodes: [{ id: nodeId }] })
+        },
+        deleteEdge: async (edgeId: string) => {
+          await reactFlowInstance.deleteElements({ edges: [{ id: edgeId }] })
+        },
+      })
+    }
+  }, [reactFlowInstance, onDeleteReady, onFitViewReady, onSelectAllReady])
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([])
+  const [nodesToUpdateInternals, setNodesToUpdateInternals] = useState<string[]>([])
 
   const [localNodes, setLocalNodes] = useState<RfNode[]>(() => toRfNodes(nodes, selectedNodeId))
   const [localEdges, setLocalEdges] = useState<RfEdge[]>(() => toRfEdges(edges, selectedEdgeId))
 
   // Keep a ref so snap calculation always reads the latest positions without deps churn
   const localNodesRef = useRef<RfNode[]>(localNodes)
+  // Track I/O counts per node to detect handle additions/removals
+  const ioCountRef = useRef<Map<string, number>>(new Map())
 
   useEffect(() => {
+    const changed: string[] = []
+    for (const node of nodes) {
+      const ioCount = node.inputs.length + node.outputs.length
+      const prev = ioCountRef.current.get(node.id)
+      if (prev !== undefined && prev !== ioCount) changed.push(node.id)
+      ioCountRef.current.set(node.id, ioCount)
+    }
+    if (changed.length > 0) setNodesToUpdateInternals(changed)
+
     setLocalNodes((prev) => {
       const next = toRfNodes(nodes, selectedNodeId)
       const updated = next.map((n) => {
         const existing = prev.find((p) => p.id === n.id)
+        const editingByUserId = editingPresence?.get(n.id) ?? null
+        const nodeWithEditing: RfNode = { ...n, data: { ...n.data, editingByUserId } }
         if (existing && (existing.width !== n.width || existing.height !== n.height)) {
-          return { ...n, width: existing.width, height: existing.height }
+          return { ...nodeWithEditing, width: existing.width, height: existing.height }
         }
-        return n
+        return nodeWithEditing
       })
       localNodesRef.current = updated
       return updated
     })
-  }, [nodes, selectedNodeId])
+  }, [nodes, selectedNodeId, editingPresence])
 
   useEffect(() => {
     setLocalEdges(toRfEdges(edges, selectedEdgeId))
@@ -268,7 +485,7 @@ export function CanvasViewport({
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       setLocalNodes((nds) => {
-        const updated = applyNodeChanges(changes, nds) as RfNode[]
+        const updated = applyNodeChanges(changes, nds as unknown as Node[]) as unknown as RfNode[]
         localNodesRef.current = updated
         return updated
       })
@@ -286,10 +503,10 @@ export function CanvasViewport({
   )
 
   const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
-    setLocalEdges((eds) => applyEdgeChanges(changes, eds) as RfEdge[])
+    setLocalEdges((eds) => applyEdgeChanges(changes, eds as unknown as Edge[]) as unknown as RfEdge[])
   }, [])
 
-  const handleNodeDrag = useCallback((_event: MouseEvent, node: Node) => {
+  const handleNodeDrag = useCallback((_event: unknown, node: Node) => {
     const current = localNodesRef.current
     const dragging = current.find((n) => n.id === node.id)
     if (!dragging) return
@@ -304,7 +521,9 @@ export function CanvasViewport({
         others
       )
     )
-  }, [])
+
+    sendNodeMove(node.id, node.position.x, node.position.y)
+  }, [sendNodeMove])
 
   const handleNodeDragStop = useCallback(() => {
     setSnapGuides([])
@@ -317,6 +536,42 @@ export function CanvasViewport({
       }
     },
     [onConnectStart]
+  )
+
+  // experimental_useOnNodesChangeMiddleware moved into NodesChangeMiddleware below
+  // (must be called inside the ReactFlow context, not in the parent component)
+
+  const handleReconnect: OnReconnect = useCallback(
+    (oldEdge, newConnection) => {
+      setLocalEdges((eds) => reconnectEdge(oldEdge, newConnection, eds as unknown as Edge[]) as unknown as RfEdge[])
+      if (onEdgeReconnect && newConnection.source && newConnection.target) {
+        onEdgeReconnect(oldEdge.id, {
+          fromProcessId: newConnection.source,
+          toProcessId: newConnection.target,
+          fromIoId: newConnection.sourceHandle ?? null,
+          toIoId: newConnection.targetHandle ?? null,
+          sourceHandle: newConnection.sourceHandle ?? 'out-default',
+          targetHandle: newConnection.targetHandle ?? 'in-default',
+        })
+      }
+    },
+    [onEdgeReconnect]
+  )
+
+  const handleIsValidConnection = useCallback(
+    (connection: Connection | Edge) => {
+      if (connection.source === connection.target) return false
+      const sh = 'sourceHandle' in connection ? (connection.sourceHandle ?? null) : null
+      const th = 'targetHandle' in connection ? (connection.targetHandle ?? null) : null
+      return !localEdges.some(
+        (e) =>
+          e.source === connection.source &&
+          e.target === connection.target &&
+          e.sourceHandle === sh &&
+          e.targetHandle === th
+      )
+    },
+    [localEdges]
   )
 
   const handleConnect = useCallback(
@@ -403,12 +658,34 @@ export function CanvasViewport({
     [onCanvasClick, reactFlowInstance]
   )
 
+  const handleBeforeDelete = useCallback(
+    async ({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) => {
+      if (!onBeforeDelete) return true
+      return onBeforeDelete({
+        nodeIds: nodes.map((node) => node.id),
+        edgeIds: edges.map((edge) => edge.id),
+      })
+    },
+    [onBeforeDelete]
+  )
+
+  const handleDelete = useCallback(
+    async ({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) => {
+      if (!onDeleteElements) return
+      await onDeleteElements({
+        nodeIds: nodes.map((node) => node.id),
+        edgeIds: edges.map((edge) => edge.id),
+      })
+    },
+    [onDeleteElements]
+  )
+
   return (
     <div style={{ width: '100%', height: '100%', cursor: drawingEnabled ? 'crosshair' : 'default' }}>
       <ReactFlow
         onInit={setReactFlowInstance}
-        nodes={localNodes}
-        edges={localEdges}
+        nodes={localNodes as unknown as Node[]}
+        edges={localEdges as unknown as Edge[]}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={handleNodesChange}
@@ -417,28 +694,60 @@ export function CanvasViewport({
           selectNode(node.id)
           onNodeSelect(node.id)
         }}
+        onNodeDoubleClick={(_e, node) => {
+          startInlineEdit(node.id)
+        }}
+        onEdgeDoubleClick={(_e, edge) => {
+          selectEdge(edge.id)
+          startInlineEditEdge(edge.id)
+        }}
+        onSelectionChange={({ nodes: selNodes }) => {
+          if (selNodes.length > 1) setMultiSelect()
+        }}
         onEdgeClick={(_e, edge) => {
           selectEdge(edge.id)
           onEdgeSelect(edge.id)
         }}
-        onNodeDrag={handleNodeDrag}
+        onNodeDrag={handleNodeDrag as OnNodeDrag}
         onNodeDragStop={handleNodeDragStop}
         onConnectStart={handleConnectStart}
         onConnect={handleConnect}
+        onReconnect={handleReconnect}
         onConnectEnd={handleConnectEnd}
         onPaneClick={handlePaneClick}
+        onMouseMove={(e: React.MouseEvent) => {
+          sendPresence({ type: 'CURSOR_MOVED', cursorX: e.clientX, cursorY: e.clientY })
+        }}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         onEdgeMouseEnter={handleEdgeMouseEnter}
         onEdgeMouseLeave={handleEdgeMouseLeave}
-        fitView
+        connectionLineComponent={CustomConnectionLine}
+        colorMode="system"
+        isValidConnection={handleIsValidConnection}
+        onBeforeDelete={handleBeforeDelete}
+        onDelete={(payload) => {
+          void handleDelete({
+            nodes: payload.nodes as unknown as Node[],
+            edges: payload.edges as unknown as Edge[],
+          })
+        }}
+        onlyRenderVisibleElements={localNodes.length > 50}
+        {...(savedViewport
+          ? { defaultViewport: savedViewport }
+          : { fitView: true, fitViewOptions: { padding: 0.15 } }
+        )}
         minZoom={0.1}
         maxZoom={2.5}
         snapToGrid
         snapGrid={[8, 8]}
         deleteKeyCode={null}
       >
+        <NodesChangeMiddleware />
         <SnapGuideLayer guides={snapGuides} />
+        <InternalsUpdater nodeIds={nodesToUpdateInternals} />
+        <ViewportPersister storageKey={storageKey} />
+        <ExportController onReady={onExportReady} />
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--border)" />
         <Controls />
         <MiniMap zoomable pannable nodeStrokeWidth={2} />

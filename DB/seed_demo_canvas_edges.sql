@@ -135,7 +135,7 @@ VALUES (
     'itm_demo_mix_output',
     'pio_demo_input_out',
     'pio_demo_mix_in',
-    'material',
+    'material_flow',
     'Material Flow',
     1.0000,
     'kg',

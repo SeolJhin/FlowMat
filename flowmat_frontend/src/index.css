@@ -185,13 +185,23 @@ code {
 }
 
 .workspace-panel--left {
-  width: 220px;
-  border-right: 1px solid var(--border);
+  border-right: none;
 }
 
 .workspace-panel--right {
-  width: 296px;
-  border-left: 1px solid var(--border);
+  border-left: none;
+}
+
+.panel-resize-handle {
+  width: 4px;
+  flex-shrink: 0;
+  background: var(--border);
+  cursor: col-resize;
+  transition: background 0.15s;
+}
+
+.panel-resize-handle:hover {
+  background: var(--accent);
 }
 
 .workspace-canvas {
@@ -296,6 +306,43 @@ code {
   white-space: nowrap;
 }
 
+.canvas-node__port--candidate {
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.canvas-node__port--targeted {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.canvas-node__port--rejected {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.canvas-node__port--origin .canvas-node__port-name,
+.canvas-node__port--candidate .canvas-node__port-name,
+.canvas-node__port--targeted .canvas-node__port-name,
+.canvas-node__port--rejected .canvas-node__port-name {
+  color: var(--text-h);
+}
+
+.canvas-node__editing-badge {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: #0369a1;
+  background: #e0f2fe;
+  border-radius: 999px;
+  padding: 3px 5px;
+  flex-shrink: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .canvas-node__editing-badge {
+    color: #7dd3fc;
+    background: rgba(14, 116, 144, 0.32);
+  }
+}
+
 /* ============================================================
    React Flow overrides
    ============================================================ */
@@ -369,6 +416,115 @@ code {
   border-radius: 8px !important;
   overflow: hidden;
   box-shadow: var(--node-shadow) !important;
+}
+
+/* ============================================================
+   Inspector panel
+   ============================================================ */
+.inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  font-size: 13px;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.inspector__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-h);
+  margin: 0 0 10px;
+  padding: 0 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inspector__fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0 0 12px;
+  font-size: 12px;
+}
+
+.inspector__fields dt {
+  color: var(--text);
+  opacity: 0.6;
+  font-weight: 500;
+  white-space: nowrap;
+  align-self: start;
+  padding-top: 1px;
+}
+
+.inspector__fields dd {
+  margin: 0;
+  color: var(--text-h);
+  word-break: break-all;
+}
+
+.inspector__section {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 4px;
+}
+
+.inspector__hint {
+  font-size: 11px;
+  color: var(--text);
+  opacity: 0.5;
+  margin-top: 6px;
+  line-height: 1.6;
+}
+
+.inspector__port-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text);
+  width: 100%;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.inspector__port-row:hover {
+  background: var(--surface);
+}
+
+.inspector__port-row--selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.inspector__port-name {
+  flex: 1;
+  font-weight: 600;
+  color: var(--text-h);
+  text-align: left;
+}
+
+.inspector__port-unit {
+  font-size: 10px;
+  color: var(--text);
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.inspector__port-badge {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--bg);
+  background: var(--accent);
+  border-radius: 8px;
+  padding: 1px 5px;
 }
 
 /* ============================================================
@@ -529,6 +685,223 @@ code {
 }
 
 /* ============================================================
+   Save status indicator
+   ============================================================ */
+.save-status {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 10px;
+  transition: opacity 0.3s;
+}
+
+.save-status--saving {
+  color: var(--text);
+  opacity: 0.6;
+}
+
+.save-status--saved {
+  color: #16a34a;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .save-status--saved {
+    color: #4ade80;
+    background: #052e16;
+    border-color: #166534;
+  }
+}
+
+/* ============================================================
+   Node inline name editor
+   ============================================================ */
+.canvas-node__name-input {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--sans);
+  color: var(--text-h);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  outline: none;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+/* ============================================================
+   Color picker popup
+   ============================================================ */
+.color-picker-popup {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  width: 108px;
+  z-index: 100;
+}
+
+.color-picker-popup__chip {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid white;
+  cursor: pointer;
+  transition: transform 0.1s;
+  padding: 0;
+}
+
+.color-picker-popup__chip:hover {
+  transform: scale(1.2);
+}
+
+/* ============================================================
+   Node toolbar (NodeToolbar floating buttons)
+   ============================================================ */
+.node-toolbar__group {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  position: relative;
+}
+
+.node-toolbar__btn {
+  min-width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0 7px;
+  box-shadow: var(--node-shadow);
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.node-toolbar__btn--swatch {
+  width: 24px;
+  min-width: 24px;
+  padding: 0;
+}
+
+.node-toolbar__btn:hover {
+  background: var(--surface);
+  border-color: var(--accent-border);
+}
+
+.node-toolbar__btn--delete:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+
+/* ============================================================
+   Edge toolbar
+   ============================================================ */
+.edge-toolbar__group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ============================================================
+   Edge delete button
+   ============================================================ */
+.edge-delete-button {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid #fca5a5;
+  background: var(--bg);
+  color: #ef4444;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: var(--node-shadow);
+  transition: scale 0.12s ease, background 0.12s ease;
+}
+
+.edge-delete-button:hover {
+  scale: 1.15;
+  background: #fef2f2;
+}
+
+.edge-label {
+  font-size: 11px;
+  color: #475569;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .edge-label {
+    color: #cbd5e1;
+    background: #0f172a;
+    border-color: #334155;
+  }
+}
+
+/* ============================================================
+   Port connection count badge
+   ============================================================ */
+.canvas-node__port-badge {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--mono);
+  line-height: 1;
+  color: var(--bg);
+  background: var(--accent);
+  border-radius: 10px;
+  padding: 1px 4px;
+  min-width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   Topbar home link
+   ============================================================ */
+.topbar-home-link {
+  font-size: 12px;
+  color: var(--text);
+  opacity: 0.6;
+  text-decoration: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: opacity 0.1s, background 0.1s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.topbar-home-link:hover {
+  opacity: 1;
+  background: var(--surface);
+}
+
+/* ============================================================
    Topbar button overrides (workspace context)
    ============================================================ */
 .workspace-topbar button {
@@ -540,7 +913,116 @@ code {
   white-space: nowrap;
 }
 
+.workspace-topbar__name-input {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--sans);
+  color: var(--text-h);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  outline: none;
+  min-width: 120px;
+  max-width: 260px;
+}
+
+/* ============================================================
+   Presence — 접속자 아바타 + 원격 커서
+   ============================================================ */
+.presence-avatars {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.presence-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--bg);
+  cursor: default;
+  flex-shrink: 0;
+}
+
+.presence-avatar--overflow {
+  background: var(--border);
+  color: var(--text);
+  font-size: 9px;
+}
+
+.remote-cursor {
+  position: absolute;
+  pointer-events: none;
+  z-index: 1000;
+  transform: translate(-4px, -4px);
+}
+
+.remote-cursor__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #f43f5e;
+  border: 2px solid white;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+
+.remote-cursor__label {
+  position: absolute;
+  top: 12px;
+  left: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: white;
+  background: #f43f5e;
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.workflow-switcher {
+  font-size: 12px;
+  font-family: var(--sans);
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-h);
+  cursor: pointer;
+  max-width: 180px;
+}
+
 .workspace-topbar button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ============================================================
+   FlowMat login screen — ripple button + status-dot pulse
+   (used with Tailwind arbitrary [animation:...] classes in
+   HomeRoute.tsx / FlowCanvasBackground.tsx)
+   ============================================================ */
+@keyframes flowmat-ripple {
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@keyframes flowmat-pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }

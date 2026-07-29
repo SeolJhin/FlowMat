@@ -13,6 +13,8 @@ public record ProcessResponse(
     Double posY,
     Double width,
     Double height,
-    String processDesc
+    String processDesc,
+    int version,
+    int versionNonce
 ) {
 }

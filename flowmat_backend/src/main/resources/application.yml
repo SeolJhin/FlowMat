@@ -19,11 +19,57 @@ spring:
       hibernate:
         format_sql: true
     open-in-view: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      connect-timeout: 2000
+      timeout: 2000
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+
+jwt:
+  secret: ${JWT_SECRET:flowmat-local-dev-secret-key-32bytes!!}
+  access-token-expiry-seconds: ${JWT_ACCESS_EXPIRY:3600}
+  refresh-token-expiry-seconds: ${JWT_REFRESH_EXPIRY:2592000}
 
 server:
   servlet:
     context-path: /api
 
+slack:
+  webhook-url: ${SLACK_WEBHOOK_URL:}
+
+app:
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+  oauth2:
+    redirect-uri: ${APP_OAUTH2_REDIRECT_URI:http://localhost:5173/oauth2/success}
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
+  workflow-collab:
+    graph:
+      retention: ${APP_WORKFLOW_COLLAB_GRAPH_RETENTION:P31D}
+      key-ttl: ${APP_WORKFLOW_COLLAB_GRAPH_KEY_TTL:P35D}
+    presence:
+      heartbeat-timeout: ${APP_WORKFLOW_COLLAB_PRESENCE_HEARTBEAT_TIMEOUT:PT45S}
+      cleanup-interval: ${APP_WORKFLOW_COLLAB_PRESENCE_CLEANUP_INTERVAL:PT15S}
+
 logging:
   level:
     org.hibernate.SQL: debug
+
+# OAuth2 provider templates.
+# Enable a provider by setting its env vars.
+# GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
+# KAKAO_CLIENT_ID / KAKAO_CLIENT_SECRET
+# GOOGLE_REDIRECT_URI / KAKAO_REDIRECT_URI

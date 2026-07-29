@@ -7,7 +7,7 @@ import org.myweb.flowmat.domain.catalog.api.dto.request.ItemUpdateRequest;
 import org.myweb.flowmat.domain.catalog.api.dto.response.ItemResponse;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
-import org.myweb.flowmat.domain.project.repository.ProjectRepository;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
@@ -23,12 +23,12 @@ public class ItemServiceImpl implements ItemService {
     private static final String DELETED = "Y";
 
     private final ItemRepository itemRepository;
-    private final ProjectRepository projectRepository;
     private final IdGenerator idGenerator;
+    private final ProjectAccessService projectAccessService;
 
     @Override
     public List<ItemResponse> listItems(String projectId) {
-        ensureProjectExists(projectId);
+        projectAccessService.requireProjectReadAccess(projectId);
         return itemRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(projectId, NOT_DELETED).stream()
             .map(ItemServiceImpl::toResponse)
             .toList();
@@ -37,7 +37,7 @@ public class ItemServiceImpl implements ItemService {
     @Override
     @Transactional
     public ItemResponse createItem(ItemCreateRequest request) {
-        ensureProjectExists(request.projectId());
+        projectAccessService.requireProjectWriteAccess(request.projectId());
 
         Item item = new Item();
         item.setItemId(idGenerator.generate());
@@ -55,13 +55,16 @@ public class ItemServiceImpl implements ItemService {
 
     @Override
     public ItemResponse getItem(String itemId) {
-        return toResponse(findActiveItem(itemId));
+        Item item = findActiveItem(itemId);
+        projectAccessService.requireProjectReadAccess(item.getProjectId());
+        return toResponse(item);
     }
 
     @Override
     @Transactional
     public ItemResponse updateItem(String itemId, ItemUpdateRequest request) {
         Item item = findActiveItem(itemId);
+        projectAccessService.requireProjectWriteAccess(item.getProjectId());
         if (hasText(request.itemName())) {
             item.setItemName(request.itemName().trim());
         }
@@ -87,14 +90,10 @@ public class ItemServiceImpl implements ItemService {
     @Transactional
     public void deleteItem(String itemId) {
         Item item = findActiveItem(itemId);
+        projectAccessService.requireProjectOwnerAccess(item.getProjectId());
         item.setDeletedYn(DELETED);
         item.setItemStatus("deleted");
         itemRepository.save(item);
-    }
-
-    private void ensureProjectExists(String projectId) {
-        projectRepository.findByProjectIdAndDeletedYn(projectId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
     private Item findActiveItem(String itemId) {

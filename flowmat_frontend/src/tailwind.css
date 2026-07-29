@@ -1,0 +1,56 @@
+/*
+ * Tailwind CSS v4 entry point — scoped to just the utility classes, with
+ * Preflight (Tailwind's global CSS reset) deliberately left out.
+ *
+ * Why: the rest of FlowMat's UI (canvas, inspector, etc.) is styled with
+ * plain hand-written CSS in `index.css`, which assumes normal browser
+ * defaults. Preflight resets things like button/heading/list styling
+ * globally, which would visibly change those existing screens. Omitting
+ * `tailwindcss/preflight.css` here keeps Tailwind's utility classes
+ * (`flex`, `text-sm`, `rounded-lg`, ...) available for new UI (e.g. the
+ * login/home page) without touching anything already built.
+ *
+ * See: https://tailwindcss.com/docs/preflight#disabling-preflight
+ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/*
+ * Preflight normally includes `* { box-sizing: border-box }` — without it,
+ * elements default to content-box, so `border`/padding get added ON TOP of
+ * a `w-full`/percentage width instead of being included in it. That made
+ * bordered cards and inputs visibly overflow their parent container.
+ * This single rule is extremely unlikely to affect any existing hand-written
+ * CSS (box-sizing only changes width math, not visual styling), so it's
+ * safe to add on its own without pulling in the rest of Preflight.
+ */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+  }
+}
+
+/*
+ * Preflight also normally strips the browser's native <button> chrome
+ * (the grey background/border you get for free otherwise). Without it,
+ * any button we don't explicitly give a background/border to falls back
+ * to that native look — which is exactly the "grey box" behind the
+ * Login/Sign Up tab buttons. This mirrors Tailwind's own Preflight rule
+ * for buttons specifically, so it's a known-safe, targeted addition.
+ */
+@layer base {
+  button {
+    appearance: none;
+    background-color: transparent;
+    background-image: none;
+    border: 0;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    padding: 0;
+    margin: 0;
+  }
+}

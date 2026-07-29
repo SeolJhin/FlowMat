@@ -1,12 +1,18 @@
-import type { WorkflowCanvasDto, ProcessIoDto } from '../../../shared/types/api'
+import type {
+  WorkflowCanvasDto,
+  ProcessDto,
+  ProcessIoDto,
+  ProcessConnectionDto,
+} from '../../../shared/types/api'
 import type {
   WorkflowCanvasViewModel,
   CanvasNodeViewModel,
   CanvasPortViewModel,
   CanvasEdgeViewModel,
+  WorkflowHeaderViewModel,
 } from './types'
 
-function toPortViewModel(dto: ProcessIoDto): CanvasPortViewModel {
+export function toPortViewModel(dto: ProcessIoDto): CanvasPortViewModel {
   return {
     id: dto.processIoId,
     processIoId: dto.processIoId,
@@ -25,62 +31,63 @@ function toPortViewModel(dto: ProcessIoDto): CanvasPortViewModel {
   }
 }
 
-export function toWorkflowCanvasViewModel(dto: WorkflowCanvasDto): WorkflowCanvasViewModel {
-  // Step 1: index processIos by processId
-  const iosByProcess: Record<string, ProcessIoDto[]> = {}
-  for (const io of dto.processIos) {
-    if (!iosByProcess[io.processId]) iosByProcess[io.processId] = []
-    iosByProcess[io.processId].push(io)
+export function toNodeViewModel(dto: ProcessDto, processIos: ProcessIoDto[]): CanvasNodeViewModel {
+  const inputs = processIos.filter((io) => io.direction === 'input').map(toPortViewModel)
+  const outputs = processIos.filter((io) => io.direction === 'output').map(toPortViewModel)
+
+  return {
+    id: dto.processId,
+    processId: dto.processId,
+    projectId: dto.projectId,
+    workflowId: dto.workflowId,
+    name: dto.processName,
+    processType: dto.processType,
+    nodeType: dto.nodeType,
+    status: dto.processStatus,
+    colorScheme: dto.colorScheme,
+    position: { x: dto.posX, y: dto.posY },
+    size: { width: dto.width, height: dto.height },
+    description: dto.processDesc,
+    inputs,
+    outputs,
+    inputCount: inputs.length,
+    outputCount: outputs.length,
+    version: dto.version,
+    versionNonce: dto.versionNonce,
   }
+}
 
-  // Step 2 & 3: build nodes
-  const nodes: CanvasNodeViewModel[] = dto.processes.map((p) => {
-    const allIos = iosByProcess[p.processId] ?? []
-    const inputs = allIos.filter((io) => io.direction === 'input').map(toPortViewModel)
-    const outputs = allIos.filter((io) => io.direction === 'output').map(toPortViewModel)
+export function toEdgeViewModel(dto: ProcessConnectionDto): CanvasEdgeViewModel {
+  return {
+    id: dto.connectionId,
+    connectionId: dto.connectionId,
+    source: dto.fromProcessId,
+    target: dto.toProcessId,
+    sourceHandle: dto.sourceHandle,
+    targetHandle: dto.targetHandle,
+    fromProcessId: dto.fromProcessId,
+    toProcessId: dto.toProcessId,
+    fromIoId: dto.fromIoId,
+    toIoId: dto.toIoId,
+    itemId: dto.itemId,
+    connectionType: dto.connectionType,
+    label: dto.connectionLabel,
+    flowRate: dto.flowRate !== null ? String(dto.flowRate) : null,
+    unit: dto.unit,
+    delayTimeSec: dto.delayTimeSec,
+    lossRate: dto.lossRate,
+    priority: dto.priority,
+    version: dto.version,
+    versionNonce: dto.versionNonce,
+  }
+}
 
-    return {
-      id: p.processId,
-      processId: p.processId,
-      projectId: p.projectId,
-      workflowId: p.workflowId,
-      name: p.processName,
-      processType: p.processType,
-      nodeType: p.nodeType,
-      status: p.processStatus,
-      colorScheme: p.colorScheme,
-      position: { x: p.posX, y: p.posY },
-      size: { width: p.width, height: p.height },
-      description: p.processDesc,
-      inputs,
-      outputs,
-      inputCount: inputs.length,
-      outputCount: outputs.length,
-    }
-  })
-
-  // Step 4: build edges
-  const edges: CanvasEdgeViewModel[] = dto.connections.map((c) => ({
-    id: c.connectionId,
-    connectionId: c.connectionId,
-    source: c.fromProcessId,
-    target: c.toProcessId,
-    sourceHandle: c.sourceHandle,
-    targetHandle: c.targetHandle,
-    fromProcessId: c.fromProcessId,
-    toProcessId: c.toProcessId,
-    fromIoId: c.fromIoId,
-    toIoId: c.toIoId,
-    connectionType: c.connectionType,
-    label: c.connectionLabel,
-    flowRate: c.flowRate !== null ? String(c.flowRate) : null,
-    unit: c.unit,
-    delayTimeSec: c.delayTimeSec,
-    lossRate: c.lossRate,
-    priority: c.priority,
-  }))
-
-  // Step 5: derive maps
+export function buildWorkflowCanvasViewModel(
+  workflow: WorkflowHeaderViewModel,
+  graphSeq: number,
+  nodes: CanvasNodeViewModel[],
+  edges: CanvasEdgeViewModel[]
+): WorkflowCanvasViewModel {
   const nodeMap: Record<string, CanvasNodeViewModel> = {}
   const portMap: Record<string, CanvasPortViewModel> = {}
 
@@ -92,17 +99,32 @@ export function toWorkflowCanvasViewModel(dto: WorkflowCanvasDto): WorkflowCanva
   }
 
   return {
-    workflow: {
-      workflowId: dto.workflow.workflowId,
-      projectId: dto.workflow.projectId,
-      workflowName: dto.workflow.workflowName,
-      workflowDesc: dto.workflow.workflowDesc,
-      workflowType: dto.workflow.workflowType,
-      workflowStatus: dto.workflow.workflowStatus,
-    },
+    workflow,
+    graphSeq,
     nodes,
     edges,
     nodeMap,
     portMap,
   }
+}
+
+export function toWorkflowCanvasViewModel(dto: WorkflowCanvasDto): WorkflowCanvasViewModel {
+  const iosByProcess: Record<string, ProcessIoDto[]> = {}
+  for (const io of dto.processIos) {
+    if (!iosByProcess[io.processId]) iosByProcess[io.processId] = []
+    iosByProcess[io.processId].push(io)
+  }
+
+  const workflow: WorkflowHeaderViewModel = {
+    workflowId: dto.workflow.workflowId,
+    projectId: dto.workflow.projectId,
+    workflowName: dto.workflow.workflowName,
+    workflowDesc: dto.workflow.workflowDesc,
+    workflowType: dto.workflow.workflowType,
+    workflowStatus: dto.workflow.workflowStatus,
+  }
+  const nodes = dto.processes.map((process) => toNodeViewModel(process, iosByProcess[process.processId] ?? []))
+  const edges = dto.connections.map(toEdgeViewModel)
+
+  return buildWorkflowCanvasViewModel(workflow, dto.graphSeq, nodes, edges)
 }

@@ -7,4 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface WorkflowTemplateRepository extends JpaRepository<WorkflowTemplate, String> {
 
     List<WorkflowTemplate> findAllByOrderBySortOrderAscCreatedAtAsc();
+
+    List<WorkflowTemplate> findAllByPublicYnOrderBySortOrderAscCreatedAtAsc(String publicYn);
 }

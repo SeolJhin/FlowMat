@@ -1,32 +1,101 @@
-import { useEffect } from 'react'
+﻿import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import { useIsMutating, useQueryClient } from '@tanstack/react-query'
 import type {
   ConnectCompletePayload,
   ConnectStartPayload,
   WorkflowCanvasViewModel,
 } from '../../../entities/workflow/model/types'
+import { fetchWorkflowGraphChanges } from '../../../entities/workflow/api/workflowGraphChanges'
+import { fetchWorkflowPresenceSnapshot } from '../../../entities/workflow/api/workflowPresenceSnapshot'
+import { applyGraphChangesToCanvas } from '../../../entities/workflow/model/applyGraphChangesToCanvas'
 import { useWorkspaceStore } from '../model/workspaceStore'
 import { useWorkflowCanvasActions } from '../model/useWorkflowCanvasActions'
 import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
-import { CanvasViewport, PALETTE_DRAG_MIME } from './CanvasViewport'
-import { ConnectionInspector } from './ConnectionInspector'
-import { NodeInspector } from './NodeInspector'
-import { NodePickerPopup } from './NodePickerPopup'
+import { getRelatedConnectionIds } from '../../../entities/workflow/model/connectionPolicy'
+import { useAutoLayout } from '../model/useAutoLayout'
+import { CANVAS_ACTIONS } from '../model/canvasActions'
+import { useWorkflowsQuery } from '../../../entities/workflow/api/useWorkflowsQuery'
+import { useUpdateWorkflowMutation } from '../../../entities/workflow/api/useUpdateWorkflowMutation'
+import type { PresenceMessage, GraphChangeMessage } from '../../../entities/workflow/api/useWorkflowSync'
+import { Link, useNavigate } from 'react-router-dom'
+import { PALETTE_DRAG_MIME } from './canvasConstants'
+import {
+  preloadCanvasViewport,
+  preloadConnectionInspector,
+  preloadNodeInspector,
+  preloadNodePickerPopup,
+} from './workspacePreload'
+
+const CanvasViewport = lazy(() =>
+  preloadCanvasViewport().then((module) => ({ default: module.CanvasViewport }))
+)
+const ConnectionInspector = lazy(() =>
+  preloadConnectionInspector().then((module) => ({ default: module.ConnectionInspector }))
+)
+const NodeInspector = lazy(() =>
+  preloadNodeInspector().then((module) => ({ default: module.NodeInspector }))
+)
+const NodePickerPopup = lazy(() =>
+  preloadNodePickerPopup().then((module) => ({ default: module.NodePickerPopup }))
+)
 
 interface Props {
   canvas: WorkflowCanvasViewModel
+  projectId: string
 }
 
-export function WorkflowCanvasPage({ canvas }: Props) {
+function CanvasFallback() {
+  return <div className="workspace-loading">Loading canvas...</div>
+}
+
+function InspectorFallback() {
+  return (
+    <div className="inspector-summary">
+      <p>Loading inspector...</p>
+    </div>
+  )
+}
+
+export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   const {
     selectedProcessId,
     selectedConnectionId,
     selectedPortId,
     inspectorMode,
-    canvasMode,
     selectNode,
     selectEdge,
     clearSelection,
+    pendingRename,
+    clearPendingRename,
+    inlineEditingNodeId,
+    inlineEditingEdgeId,
+    stopInlineEditEdge,
+    panelWidths,
   } = useWorkspaceStore()
+
+  const panelWidthRef = useRef(panelWidths)
+  panelWidthRef.current = panelWidths
+  const [localPanelWidths, setLocalPanelWidths] = useState(panelWidths)
+
+  const makeResizeHandler = useCallback(
+    (side: 'left' | 'right') =>
+      (e: React.MouseEvent) => {
+        e.preventDefault()
+        const startX = e.clientX
+        const startWidth = side === 'left' ? localPanelWidths.left : localPanelWidths.right
+        function onMove(ev: MouseEvent) {
+          const delta = side === 'left' ? ev.clientX - startX : startX - ev.clientX
+          setLocalPanelWidths((w) => ({ ...w, [side]: Math.max(160, Math.min(400, startWidth + delta)) }))
+        }
+        function onUp() {
+          window.removeEventListener('mousemove', onMove)
+          window.removeEventListener('mouseup', onUp)
+        }
+        window.addEventListener('mousemove', onMove)
+        window.addEventListener('mouseup', onUp)
+      },
+    [localPanelWidths.left, localPanelWidths.right]
+  )
 
   const {
     activeTool,
@@ -44,17 +113,332 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     updatePort,
     deletePort,
     saveNodePosition,
+    duplicateNode,
+    batchUpdateNodePositions,
+    updateConnection,
     deleteConnection,
+    deleteElements,
     deleteNode,
     createConnection,
   } = useWorkflowCanvasActions({ canvas, clearSelection })
 
+  const navigate = useNavigate()
+  const updateWorkflowMutation = useUpdateWorkflowMutation()
+  const workflowsQuery = useWorkflowsQuery(canvas.workflow.projectId)
+
+  // Presence: remote cursor + node-editing state
+  const [remoteCursors, setRemoteCursors] = useState<
+    Map<string, { x: number; y: number; type: string }>
+  >(new Map())
+  const [editingPresence, setEditingPresence] = useState<ReadonlyMap<string, string>>(new Map())
+  const [syncClientId, setSyncClientId] = useState('')
+  const [syncUserId, setSyncUserId] = useState<string | null>(null)
+  const sendPresenceRef = useRef<
+    (msg: Omit<PresenceMessage, 'userId' | 'clientId' | 'workflowId' | 'timestamp'>) => void
+  >(() => {})
+
+  const handlePresence = useCallback((msg: PresenceMessage) => {
+    if (!msg.userId) return
+    const uid = msg.userId
+
+    setRemoteCursors((prev) => {
+      const next = new Map(prev)
+      if (msg.type === 'LEAVE') {
+        next.delete(uid)
+      } else if (msg.type === 'CURSOR_MOVED' && msg.cursorX != null && msg.cursorY != null) {
+        next.set(uid, { x: msg.cursorX, y: msg.cursorY, type: msg.type })
+      } else if (msg.type === 'JOIN' || msg.type === 'NODE_EDITING') {
+        next.set(uid, { x: 0, y: 0, type: msg.type })
+      }
+      return next
+    })
+
+    if (msg.type === 'NODE_EDITING' || msg.type === 'LEAVE') {
+      setEditingPresence((prev) => {
+        const next = new Map(prev)
+        for (const [nodeId, editUid] of next) {
+          if (editUid === uid) next.delete(nodeId)
+        }
+        if (msg.type === 'NODE_EDITING' && msg.editingProcessId) {
+          next.set(msg.editingProcessId, uid)
+        }
+        return next
+      })
+    }
+  }, [])
+
+  const queryClient = useQueryClient()
+  const graphSeqRef = useRef(canvas.graphSeq)
+  const deferredGraphResyncFromRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    graphSeqRef.current = canvas.graphSeq
+    deferredGraphResyncFromRef.current = null
+  }, [canvas.workflow.workflowId, canvas.graphSeq])
+
+  const applyGraphChanges = useCallback((changes: GraphChangeMessage[]) => {
+    if (changes.length === 0) return
+
+    const maxSeq = changes.reduce((max, change) => Math.max(max, change.seq), graphSeqRef.current)
+    let deferredFromSeq: number | null = null
+
+    queryClient.setQueryData<WorkflowCanvasViewModel>(
+      ['workflow-canvas', canvas.workflow.workflowId],
+      (current) => {
+        if (!current) return current
+
+        const applicableChanges = changes.filter((change) => {
+          const state = useWorkspaceStore.getState()
+          const shouldSkip =
+            (change.changeType === 'NODE_UPDATED' && change.entityId === state.inlineEditingNodeId) ||
+            (change.changeType === 'CONNECTION_UPDATED' && change.entityId === state.inlineEditingEdgeId) ||
+            (change.changeType === 'WORKFLOW_UPDATED' && editingWorkflowNameRef.current)
+          if (!shouldSkip) return true
+          const candidate = Math.max(0, change.seq - 1)
+          deferredFromSeq = deferredFromSeq == null ? candidate : Math.min(deferredFromSeq, candidate)
+          return false
+        })
+
+        if (applicableChanges.length === 0) {
+          return { ...current, graphSeq: maxSeq }
+        }
+
+        return applyGraphChangesToCanvas(current, applicableChanges)
+      }
+    )
+
+    graphSeqRef.current = maxSeq
+    if (deferredFromSeq != null) {
+      deferredGraphResyncFromRef.current =
+        deferredGraphResyncFromRef.current == null
+          ? deferredFromSeq
+          : Math.min(deferredGraphResyncFromRef.current, deferredFromSeq)
+    }
+  }, [queryClient, canvas.workflow.workflowId])
+
+  const resyncGraphChanges = useCallback(async (sinceSeq: number) => {
+    try {
+      const data = await fetchWorkflowGraphChanges(canvas.workflow.workflowId, sinceSeq)
+      if (data.resetRequired) {
+        await queryClient.invalidateQueries({
+          queryKey: ['workflow-canvas', canvas.workflow.workflowId],
+        })
+        return
+      }
+      if (data.changes.length > 0) {
+        applyGraphChanges(data.changes)
+        return
+      }
+      if (data.currentSeq <= graphSeqRef.current) return
+      graphSeqRef.current = data.currentSeq
+      queryClient.setQueryData<WorkflowCanvasViewModel>(
+        ['workflow-canvas', canvas.workflow.workflowId],
+        (current) => (current ? { ...current, graphSeq: data.currentSeq } : current)
+      )
+    } catch {
+      await queryClient.invalidateQueries({
+        queryKey: ['workflow-canvas', canvas.workflow.workflowId],
+      })
+    }
+  }, [applyGraphChanges, queryClient, canvas.workflow.workflowId])
+
+  const loadPresenceSnapshot = useCallback(async (ownUserId: string | null) => {
+    try {
+      const snapshot = await fetchWorkflowPresenceSnapshot(canvas.workflow.workflowId)
+      const cursorMap = new Map<string, { x: number; y: number; type: string }>()
+      const editingMap = new Map<string, string>()
+      for (const entry of snapshot) {
+        if (!entry.userId || entry.userId === ownUserId) continue
+        if (entry.cursorX != null && entry.cursorY != null) {
+          cursorMap.set(entry.userId, { x: entry.cursorX, y: entry.cursorY, type: entry.type })
+        } else {
+          cursorMap.set(entry.userId, { x: 0, y: 0, type: entry.type })
+        }
+        if (entry.editingProcessId) {
+          editingMap.set(entry.editingProcessId, entry.userId)
+        }
+      }
+      setRemoteCursors(cursorMap)
+      setEditingPresence(editingMap)
+    } catch {
+      // Ignore snapshot failures; live presence stream will continue to work.
+    }
+  }, [canvas.workflow.workflowId])
+
+  const handleGraphChange = useCallback((msg: GraphChangeMessage) => {
+    if (msg.seq <= graphSeqRef.current) return
+    if (msg.seq === graphSeqRef.current + 1) {
+      applyGraphChanges([msg])
+      return
+    }
+    void resyncGraphChanges(graphSeqRef.current)
+  }, [applyGraphChanges, resyncGraphChanges])
+
+  const handleReconnect = useCallback(() => {
+    void resyncGraphChanges(graphSeqRef.current)
+    void loadPresenceSnapshot(syncUserId)
+  }, [loadPresenceSnapshot, resyncGraphChanges, syncUserId])
+
+  useEffect(() => {
+    if (inlineEditingNodeId || deferredGraphResyncFromRef.current == null) return
+    const sinceSeq = deferredGraphResyncFromRef.current
+    deferredGraphResyncFromRef.current = null
+    void resyncGraphChanges(sinceSeq)
+  }, [inlineEditingNodeId, resyncGraphChanges])
+
+  const handleSyncReady = useCallback((api: {
+    sendPresence: (msg: Omit<PresenceMessage, 'userId' | 'clientId' | 'workflowId' | 'timestamp'>) => void
+    clientId: string
+    ownUserId: string | null
+  }) => {
+    sendPresenceRef.current = api.sendPresence
+    setSyncClientId(api.clientId)
+    setSyncUserId(api.ownUserId)
+    void loadPresenceSnapshot(api.ownUserId)
+  }, [loadPresenceSnapshot])
+
+  useEffect(() => {
+    sendPresenceRef.current({ type: 'NODE_EDITING', editingProcessId: selectedProcessId ?? undefined })
+  }, [selectedProcessId])
+
+  // Item I: broadcast LEAVE when the tab closes or navigates away
+  useEffect(() => {
+    const onUnload = () => sendPresenceRef.current({ type: 'LEAVE' })
+    window.addEventListener('beforeunload', onUnload)
+    return () => {
+      window.removeEventListener('beforeunload', onUnload)
+      sendPresenceRef.current({ type: 'LEAVE' })
+    }
+  }, [])
+
+  const workflows = workflowsQuery.data ?? []
+  const [editingWorkflowName, setEditingWorkflowName] = useState(false)
+  const [draftWorkflowName, setDraftWorkflowName] = useState(canvas.workflow.workflowName)
+  const workflowNameInputRef = useRef<HTMLInputElement>(null)
+  const editingWorkflowNameRef = useRef(false)
+
+  useEffect(() => {
+    editingWorkflowNameRef.current = editingWorkflowName
+  }, [editingWorkflowName])
+
+  useEffect(() => {
+    if (editingWorkflowName) workflowNameInputRef.current?.select()
+  }, [editingWorkflowName])
+
+  async function commitWorkflowName() {
+    setEditingWorkflowName(false)
+    const trimmed = draftWorkflowName.trim()
+    if (!trimmed || trimmed === canvas.workflow.workflowName) return
+    await updateWorkflowMutation.mutateAsync({
+      workflowId: canvas.workflow.workflowId,
+      workflowName: trimmed,
+    })
+  }
+
+  const isMutating = useIsMutating()
+  const [savedLabel, setSavedLabel] = useState<'saving' | 'saved' | null>(null)
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (isMutating > 0) {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+      setSavedLabel('saving')
+    } else if (savedLabel === 'saving') {
+      setSavedLabel('saved')
+      savedTimerRef.current = setTimeout(() => setSavedLabel(null), 2000)
+    }
+  }, [isMutating, savedLabel])
+
+  const { applyLayout } = useAutoLayout({
+    nodes: canvas.nodes,
+    edges: canvas.edges,
+    onBatchUpdate: batchUpdateNodePositions,
+    onFitView: () => fitViewRef.current(),
+  })
+
   const nodePicker = useCanvasInteractionStore((s) => s.nodePicker)
   const openNodePicker = useCanvasInteractionStore((s) => s.openNodePicker)
   const closeNodePicker = useCanvasInteractionStore((s) => s.closeNodePicker)
+  const pendingDeleteNodeId = useCanvasInteractionStore((s) => s.pendingDeleteNodeId)
+  const pendingDeleteEdgeId = useCanvasInteractionStore((s) => s.pendingDeleteEdgeId)
+  const clearDeleteRequest = useCanvasInteractionStore((s) => s.clearDeleteRequest)
+  const pendingDuplicateNodeId = useCanvasInteractionStore((s) => s.pendingDuplicateNodeId)
+  const clearDuplicateRequest = useCanvasInteractionStore((s) => s.clearDuplicateRequest)
+  const pendingColorChange = useCanvasInteractionStore((s) => s.pendingColorChange)
+  const clearColorChange = useCanvasInteractionStore((s) => s.clearColorChange)
 
   const { past, future, undo, redo } = commandHistory
 
+  // Declare refs and stable callbacks BEFORE any useEffect that references them
+  const canvasRef = useRef(canvas)
+  canvasRef.current = canvas
+  const canvasContainerRef = useRef<HTMLElement>(null)
+  const fitViewRef = useRef<() => void>(() => {})
+  const selectAllRef = useRef<() => void>(() => {})
+  const exportPngRef = useRef<(filename: string) => void>(() => {})
+
+  const deleteApiRef = useRef<{
+    deleteSelection(): Promise<void>
+    deleteNode(nodeId: string): Promise<void>
+    deleteEdge(edgeId: string): Promise<void>
+  }>({
+    deleteSelection: async () => {},
+    deleteNode: async () => {},
+    deleteEdge: async () => {},
+  })
+
+  const handleBeforeDelete = useCallback(
+    async ({ nodeIds, edgeIds }: { nodeIds: string[]; edgeIds: string[] }) => {
+      if (nodeIds.length === 0) return true
+
+      const connectedEdgeIds = new Set<string>()
+      for (const nodeId of nodeIds) {
+        for (const edgeId of getRelatedConnectionIds(canvasRef.current.edges, nodeId)) {
+          connectedEdgeIds.add(edgeId)
+        }
+      }
+
+      const connectedCount = connectedEdgeIds.size
+      if (connectedCount === 0) return true
+
+      const extraEdgeCount = [...connectedEdgeIds].filter((edgeId) => !edgeIds.includes(edgeId)).length
+      const message =
+        nodeIds.length === 1
+          ? `Deleting this node will also remove ${connectedCount} connected connection${connectedCount === 1 ? '' : 's'}. Continue?`
+          : `Deleting ${nodeIds.length} nodes will also remove ${connectedCount} connected connections${extraEdgeCount > 0 ? ` (${extraEdgeCount} implicit)` : ''}. Continue?`
+
+      return window.confirm(message)
+    },
+    []
+  )
+
+  const handleDeleteElements = useCallback(
+    async ({ nodeIds, edgeIds }: { nodeIds: string[]; edgeIds: string[] }) => {
+      if (nodeIds.length === 0 && edgeIds.length === 0) return
+
+      if (nodeIds.length === 0) {
+        if (edgeIds.length === 1) {
+          await deleteConnection(edgeIds[0])
+          return
+        }
+
+        await deleteElements({ nodeIds, edgeIds })
+        return
+      }
+
+      if (nodeIds.length === 1) {
+        const relatedEdgeIds = new Set(getRelatedConnectionIds(canvasRef.current.edges, nodeIds[0]))
+        const hasStandaloneEdges = edgeIds.some((edgeId) => !relatedEdgeIds.has(edgeId))
+        if (!hasStandaloneEdges) {
+          await deleteNode(nodeIds[0])
+          return
+        }
+      }
+
+      await deleteElements({ nodeIds, edgeIds })
+    },
+    [deleteConnection, deleteElements, deleteNode]
+  )
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement
@@ -63,41 +447,112 @@ export function WorkflowCanvasPage({ canvas }: Props) {
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable
 
-      if (e.ctrlKey || e.metaKey) {
-        if (e.key === 'z' && !e.shiftKey) {
-          e.preventDefault()
-          void undo()
-        } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
-          e.preventDefault()
-          void redo()
-        }
-        return
+      const ctx = {
+        selectedProcessId,
+        selectedConnectionId,
+        isEditing,
+        deleteSelection: () => deleteApiRef.current.deleteSelection(),
+        duplicateNode,
+        clearSelection,
+        selectAll: () => selectAllRef.current(),
+        undo,
+        redo,
       }
 
-      if (!isEditing && (e.key === 'Delete' || e.key === 'Backspace')) {
-        if (selectedProcessId) {
+      for (const action of CANVAS_ACTIONS) {
+        if (action.keyTest(e) && action.predicate(ctx)) {
           e.preventDefault()
-          void deleteNode(selectedProcessId)
-        } else if (selectedConnectionId) {
-          e.preventDefault()
-          void deleteConnection(selectedConnectionId)
+          void action.handler(ctx)
+          break
         }
-      }
-
-      if (e.key === 'Escape') {
-        clearSelection()
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo, selectedProcessId, selectedConnectionId, deleteNode, deleteConnection, clearSelection])
+  }, [undo, redo, selectedProcessId, selectedConnectionId, duplicateNode, clearSelection])
+
+
+  useEffect(() => {
+    if (pendingDeleteNodeId) {
+      clearDeleteRequest()
+      void deleteApiRef.current.deleteNode(pendingDeleteNodeId)
+    }
+  }, [pendingDeleteNodeId, clearDeleteRequest])
+
+  useEffect(() => {
+    if (pendingDeleteEdgeId) {
+      clearDeleteRequest()
+      void deleteApiRef.current.deleteEdge(pendingDeleteEdgeId)
+    }
+  }, [pendingDeleteEdgeId, clearDeleteRequest])
+
+  useEffect(() => {
+    if (pendingDuplicateNodeId) {
+      clearDuplicateRequest()
+      void duplicateNode(pendingDuplicateNodeId)
+    }
+  }, [pendingDuplicateNodeId, clearDuplicateRequest, duplicateNode])
+
+  useEffect(() => {
+    if (pendingColorChange) {
+      clearColorChange()
+      void updateNode({ processId: pendingColorChange.nodeId, colorScheme: pendingColorChange.colorScheme })
+    }
+  }, [pendingColorChange, clearColorChange, updateNode])
+
+  useEffect(() => {
+    if (pendingRename) {
+      clearPendingRename()
+      void updateNode({ processId: pendingRename.nodeId, processName: pendingRename.name })
+    }
+  }, [pendingRename, clearPendingRename, updateNode])
 
   const selectedNode = selectedProcessId ? canvas.nodeMap[selectedProcessId] ?? null : null
   const selectedEdge = selectedConnectionId
     ? canvas.edges.find((edge) => edge.id === selectedConnectionId) ?? null
     : null
   const selectedPort = selectedPortId ? canvas.portMap[selectedPortId] ?? null : null
+
+  function exportJson() {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      workflow: { id: canvas.workflow.workflowId, name: canvas.workflow.workflowName },
+      nodes: canvas.nodes.map((n) => ({
+        id: n.id,
+        name: n.name,
+        nodeType: n.nodeType,
+        processType: n.processType,
+        colorScheme: n.colorScheme,
+        posX: Math.round(n.position.x),
+        posY: Math.round(n.position.y),
+        width: n.size.width,
+        height: n.size.height,
+        description: n.description,
+        inputs: n.inputs.map((p) => ({ name: p.name, ioType: p.ioType, direction: p.direction, quantity: p.quantity, unit: p.unit, colorScheme: p.colorScheme })),
+        outputs: n.outputs.map((p) => ({ name: p.name, ioType: p.ioType, direction: p.direction, quantity: p.quantity, unit: p.unit, colorScheme: p.colorScheme })),
+      })),
+      edges: canvas.edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        connectionType: e.connectionType,
+        label: e.label,
+        flowRate: e.flowRate,
+        unit: e.unit,
+        delayTimeSec: e.delayTimeSec,
+        lossRate: e.lossRate,
+        priority: e.priority,
+      })),
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${canvas.workflow.workflowName}.flowmat.json`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
 
   async function handleNodeDragEnd(processId: string, x: number, y: number) {
     await saveNodePosition(processId, x, y)
@@ -107,8 +562,8 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     await updateNode({ processId, width: Math.round(width), height: Math.round(height) })
   }
 
-  function handleConnectStart(payload: ConnectStartPayload) {
-    console.log('connect start', payload)
+  function handleConnectStart(_payload: ConnectStartPayload) {
+    // pendingConnectionDraft reserved for future collaboration feature
   }
 
   async function handleConnectComplete(payload: ConnectCompletePayload) {
@@ -128,12 +583,77 @@ export function WorkflowCanvasPage({ canvas }: Props) {
   return (
     <div className="workspace-layout">
       <header className="workspace-topbar">
-        <div style={{ display: 'grid', gap: '4px' }}>
-          <span className="workspace-topbar__project">{canvas.workflow.workflowName}</span>
-          <span className="workspace-topbar__status">
-            {canvas.workflow.workflowStatus} | {canvas.workflow.workflowType}
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Link to="/" className="topbar-home-link" title="Back to home">Home</Link>
+          <div style={{ display: 'grid', gap: '4px' }}>
+            {editingWorkflowName ? (
+              <input
+                ref={workflowNameInputRef}
+                className="workspace-topbar__name-input"
+                value={draftWorkflowName}
+                onChange={(e) => setDraftWorkflowName(e.target.value)}
+                onBlur={() => void commitWorkflowName()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void commitWorkflowName()
+                  if (e.key === 'Escape') {
+                    setDraftWorkflowName(canvas.workflow.workflowName)
+                    setEditingWorkflowName(false)
+                  }
+                }}
+              />
+            ) : (
+              <span
+                className="workspace-topbar__project"
+                title="Double-click to rename workflow"
+                onDoubleClick={() => {
+                  setDraftWorkflowName(canvas.workflow.workflowName)
+                  setEditingWorkflowName(true)
+                }}
+              >
+                {canvas.workflow.workflowName}
+              </span>
+            )}
+            <span className="workspace-topbar__status">
+              {canvas.workflow.workflowStatus} | {canvas.workflow.workflowType}
+            </span>
+          </div>
+          {workflows.length > 1 && (
+            <select
+              className="workflow-switcher"
+              value={canvas.workflow.workflowId}
+              onChange={(e) => {
+                navigate(`/projects/${canvas.workflow.projectId}/workflows/${e.target.value}`)
+              }}
+              title="Switch workflow"
+            >
+              {workflows.map((wf) => (
+                <option key={wf.workflowId} value={wf.workflowId}>
+                  {wf.workflowName}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
+        {savedLabel && (
+          <span className={`save-status save-status--${savedLabel}`}>
+            {savedLabel === 'saving' ? 'Saving...' : 'Saved'}
+          </span>
+        )}
+        {remoteCursors.size > 0 && (
+          <div className="presence-avatars" title={`${remoteCursors.size} collaborators online`}>
+            {[...remoteCursors.keys()]
+              .filter((uid) => uid !== syncUserId)
+              .slice(0, 5)
+              .map((uid) => (
+                <span key={uid} className="presence-avatar" title={uid}>
+                  {uid.slice(0, 2).toUpperCase()}
+                </span>
+              ))}
+            {remoteCursors.size > 5 && (
+              <span className="presence-avatar presence-avatar--overflow">+{remoteCursors.size - 5}</span>
+            )}
+          </div>
+        )}
         <div
           style={{
             display: 'flex',
@@ -177,6 +697,38 @@ export function WorkflowCanvasPage({ canvas }: Props) {
           >
             Redo
           </button>
+          <button
+            type="button"
+            onClick={() => void applyLayout('TB')}
+            disabled={canvas.nodes.length === 0}
+            title="Auto layout top to bottom"
+          >
+            Layout TB
+          </button>
+          <button
+            type="button"
+            onClick={() => void applyLayout('LR')}
+            disabled={canvas.nodes.length === 0}
+            title="Auto layout left to right"
+          >
+            Layout LR
+          </button>
+          <button
+            type="button"
+            onClick={exportJson}
+            disabled={canvas.nodes.length === 0}
+            title="Export as JSON"
+          >
+            Export JSON
+          </button>
+          <button
+            type="button"
+            onClick={() => exportPngRef.current(canvas.workflow.workflowName)}
+            disabled={canvas.nodes.length === 0}
+            title="Export as PNG"
+          >
+            Export PNG
+          </button>
           <button type="button" onClick={() => void addNode()}>
             Add Node
           </button>
@@ -206,7 +758,7 @@ export function WorkflowCanvasPage({ canvas }: Props) {
       )}
 
       <div className="workspace-body">
-        <aside className="workspace-panel workspace-panel--left">
+        <aside className="workspace-panel workspace-panel--left" style={{ width: localPanelWidths.left }}>
           <div style={{ display: 'grid', gap: '10px' }}>
             <h3 style={{ margin: 0 }}>Node Palette</h3>
             <p className="panel-placeholder" style={{ margin: 0 }}>
@@ -262,67 +814,118 @@ export function WorkflowCanvasPage({ canvas }: Props) {
           </div>
         </aside>
 
-        <main className="workspace-canvas">
-          <CanvasViewport
-            nodes={canvas.nodes}
-            edges={canvas.edges}
-            selectedNodeId={selectedProcessId}
-            selectedEdgeId={selectedConnectionId}
-            canvasMode={canvasMode}
-            drawingEnabled={activeTool !== 'select'}
-            onNodeSelect={selectNode}
-            onEdgeSelect={selectEdge}
-            onNodeDragEnd={handleNodeDragEnd}
-            onNodeResize={handleNodeResize}
-            onConnectStart={handleConnectStart}
-            onConnectComplete={handleConnectComplete}
-            onCanvasClick={(position) => void createNodeAt(position)}
-            onNodeDrop={(tool, position) => void createNodeFromTool(tool, position)}
-            onConnectDropOnCanvas={(payload) =>
-              openNodePicker({
-                kind: 'connect-drop',
-                flowPosition: payload.flowPosition,
-                screenPosition: payload.screenPosition,
-                draft: {
-                  fromProcessId: payload.fromProcessId,
-                  fromHandleId: payload.fromHandleId,
-                  fromHandleType: payload.fromHandleType,
-                },
-              })
-            }
-          />
-          {nodePicker && (
-            <NodePickerPopup
-              picker={nodePicker}
-              definitions={paletteDefinitions}
-              onPick={(tool) => void handleNodePick(tool)}
-              onClose={closeNodePicker}
+        <div className="panel-resize-handle" onMouseDown={makeResizeHandler('left')} />
+        <main ref={canvasContainerRef as React.RefObject<HTMLElement>} className="workspace-canvas">
+          <Suspense fallback={<CanvasFallback />}>
+            <CanvasViewport
+              workflowId={canvas.workflow.workflowId}
+              nodes={canvas.nodes}
+              edges={canvas.edges}
+              paletteDefinitions={paletteDefinitions}
+              workspaceMessage={workspaceMessage}
+              selectedNodeId={selectedProcessId}
+              selectedEdgeId={selectedConnectionId}
+              drawingEnabled={activeTool !== 'select'}
+              onNodeSelect={selectNode}
+              onEdgeSelect={selectEdge}
+              onNodeDragEnd={handleNodeDragEnd}
+              onNodeResize={handleNodeResize}
+              onConnectStart={handleConnectStart}
+              onConnectComplete={handleConnectComplete}
+              onCanvasClick={(position) => void createNodeAt(position)}
+              onNodeDrop={(tool, position) => void createNodeFromTool(tool, position)}
+              onFitViewReady={(fn) => { fitViewRef.current = fn }}
+              onSelectAllReady={(fn) => { selectAllRef.current = fn }}
+              onExportReady={(fn) => { exportPngRef.current = fn }}
+              onDeleteReady={(api) => { deleteApiRef.current = api }}
+              onPresence={handlePresence}
+              onGraphChange={handleGraphChange}
+              onReconnect={handleReconnect}
+              onBeforeDelete={handleBeforeDelete}
+              onDeleteElements={handleDeleteElements}
+              onSyncReady={handleSyncReady}
+              editingPresence={editingPresence}
+              onEdgeReconnect={async (oldEdgeId, newConnection) => {
+                await deleteConnection(oldEdgeId)
+                await createConnection(newConnection)
+              }}
+              onConnectDropOnCanvas={(payload) =>
+                openNodePicker({
+                  kind: 'connect-drop',
+                  flowPosition: payload.flowPosition,
+                  screenPosition: payload.screenPosition,
+                  draft: {
+                    fromProcessId: payload.fromProcessId,
+                    fromHandleId: payload.fromHandleId,
+                    fromHandleType: payload.fromHandleType,
+                  },
+                })
+              }
             />
-          )}
+            {nodePicker && (
+              <NodePickerPopup
+                picker={nodePicker}
+                definitions={paletteDefinitions}
+                onPick={(tool) => void handleNodePick(tool)}
+                onClose={closeNodePicker}
+              />
+            )}
+          </Suspense>
+          {/* Remote cursor overlay: cursor coordinates are window-relative, so subtract the canvas rect. */}
+          {(() => {
+            const rect = canvasContainerRef.current?.getBoundingClientRect()
+            if (!rect) return null
+            return [...remoteCursors.entries()]
+              .filter(([uid]) => uid !== syncUserId)
+              .map(([uid, cursor]) => (
+                <div
+                  key={uid}
+                  className="remote-cursor"
+                  style={{ left: cursor.x - rect.left, top: cursor.y - rect.top }}
+                >
+                  <div className="remote-cursor__dot" />
+                  <span className="remote-cursor__label">{uid.slice(0, 8)}</span>
+                </div>
+              ))
+          })()}
         </main>
 
-        <aside className="workspace-panel workspace-panel--right">
+        <div className="panel-resize-handle" onMouseDown={makeResizeHandler('right')} />
+        <aside className="workspace-panel workspace-panel--right" style={{ width: localPanelWidths.right }}>
           {inspectorMode === 'node' && (
-            <NodeInspector
-              node={selectedNode}
-              selectedPort={selectedPort}
-              rules={[]}
-              onNodeSubmit={updateNode}
-              onNodeDelete={deleteNode}
-              onPortCreate={createPort}
-              onPortUpdate={updatePort}
-              onPortDelete={deletePort}
-              onOpenRuleBuilder={() => {}}
-            />
+            <Suspense fallback={<InspectorFallback />}>
+              <NodeInspector
+                node={selectedNode}
+                selectedPort={selectedPort}
+                rules={[]}
+                onNodeSubmit={updateNode}
+                onNodeDelete={(processId) => deleteApiRef.current.deleteNode(processId)}
+                onPortCreate={createPort}
+                onPortUpdate={updatePort}
+                onPortDelete={deletePort}
+                onOpenRuleBuilder={() => {}}
+              />
+            </Suspense>
           )}
           {inspectorMode === 'connection' && (
-            <ConnectionInspector
-              edge={selectedEdge}
-              rules={[]}
-              onSubmit={async () => {}}
-              onDelete={deleteConnection}
-              onOpenRuleBuilder={() => {}}
-            />
+            <Suspense fallback={<InspectorFallback />}>
+              <ConnectionInspector
+                edge={selectedEdge}
+                rules={[]}
+                onSubmit={async (input) => { stopInlineEditEdge(); await updateConnection(input) }}
+                focusLabel={inlineEditingEdgeId === selectedEdge?.id}
+                onDelete={(connectionId) => deleteApiRef.current.deleteEdge(connectionId)}
+                onOpenRuleBuilder={() => {}}
+              />
+            </Suspense>
+          )}
+          {inspectorMode === 'multi' && (
+            <div className="inspector-summary">
+              <p>Multiple nodes selected</p>
+              <p className="inspector-hint">
+                Shift+click or drag to multi-select. Bulk delete is not fully supported in the inspector yet.
+              </p>
+            </div>
           )}
           {inspectorMode === 'none' && (
             <div className="inspector-summary">
@@ -337,3 +940,8 @@ export function WorkflowCanvasPage({ canvas }: Props) {
     </div>
   )
 }
+
+
+
+
+

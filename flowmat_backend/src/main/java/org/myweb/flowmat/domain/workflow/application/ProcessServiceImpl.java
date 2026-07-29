@@ -1,13 +1,18 @@
 package org.myweb.flowmat.domain.workflow.application;
 
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessCreateRequest;
+import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessPositionRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessUpdateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessResponse;
 import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
 import org.myweb.flowmat.domain.workflow.domain.enums.NodeType;
+import org.myweb.flowmat.domain.workflow.collab.GraphSyncService;
+import org.myweb.flowmat.domain.workflow.collab.dto.GraphChangeMessage.Type;
 import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
 import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
@@ -28,10 +33,12 @@ public class ProcessServiceImpl implements ProcessService {
     private final ProcessRepository processRepository;
     private final WorkflowRepository workflowRepository;
     private final IdGenerator idGenerator;
+    private final GraphSyncService graphSyncService;
+    private final ProjectAccessService projectAccessService;
 
     @Override
     public List<ProcessResponse> listProcesses(String workflowId) {
-        findActiveWorkflow(workflowId);
+        projectAccessService.requireWorkflowReadAccess(workflowId);
         return processRepository.findAllByWorkflowIdAndDeletedYnOrderByCreatedAtAsc(workflowId, NOT_DELETED).stream()
             .map(ProcessServiceImpl::toResponse)
             .toList();
@@ -40,7 +47,7 @@ public class ProcessServiceImpl implements ProcessService {
     @Override
     @Transactional
     public ProcessResponse createProcess(ProcessCreateRequest request) {
-        Workflow workflow = findActiveWorkflow(request.workflowId());
+        Workflow workflow = projectAccessService.requireWorkflowWriteAccess(request.workflowId());
 
         Process process = new Process();
         process.setProcessId(idGenerator.generate());
@@ -57,18 +64,22 @@ public class ProcessServiceImpl implements ProcessService {
         process.setHeight(defaultIfNull(request.height(), 60.0));
         process.setProcessDesc(trimToNull(request.processDesc()));
         process.setDeletedYn(NOT_DELETED);
-        return toResponse(processRepository.save(process));
+        process.setVersion(1);
+        process.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
+        ProcessResponse response = toResponse(processRepository.save(process));
+        graphSyncService.broadcast(Type.NODE_CREATED, response.workflowId(), response.processId());
+        return response;
     }
 
     @Override
     public ProcessResponse getProcess(String processId) {
-        return toResponse(findActiveProcess(processId));
+        return toResponse(projectAccessService.requireProcessReadAccess(processId));
     }
 
     @Override
     @Transactional
     public ProcessResponse updateProcess(String processId, ProcessUpdateRequest request) {
-        Process process = findActiveProcess(processId);
+        Process process = projectAccessService.requireProcessWriteAccess(processId);
         if (hasText(request.processName())) {
             process.setProcessName(request.processName().trim());
         }
@@ -99,26 +110,35 @@ public class ProcessServiceImpl implements ProcessService {
         if (request.processDesc() != null) {
             process.setProcessDesc(trimToNull(request.processDesc()));
         }
-        return toResponse(processRepository.save(process));
+        process.setVersion(process.getVersion() + 1);
+        process.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
+        ProcessResponse response = toResponse(processRepository.save(process));
+        graphSyncService.broadcast(Type.NODE_UPDATED, response.workflowId(), response.processId());
+        return response;
+    }
+
+    @Override
+    @Transactional
+    public ProcessResponse updatePosition(String processId, ProcessPositionRequest request) {
+        Process process = projectAccessService.requireProcessWriteAccess(processId);
+        process.setPosX(request.posX());
+        process.setPosY(request.posY());
+        process.setVersion(process.getVersion() + 1);
+        process.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
+        ProcessResponse response = toResponse(processRepository.save(process));
+        graphSyncService.broadcast(Type.NODE_UPDATED, response.workflowId(), processId);
+        return response;
     }
 
     @Override
     @Transactional
     public void deleteProcess(String processId) {
-        Process process = findActiveProcess(processId);
+        Process process = projectAccessService.requireProcessWriteAccess(processId);
+        String workflowId = process.getWorkflowId();
         process.setDeletedYn(DELETED);
         process.setProcessStatus("deleted");
         processRepository.save(process);
-    }
-
-    private Workflow findActiveWorkflow(String workflowId) {
-        return workflowRepository.findByWorkflowIdAndDeletedYn(workflowId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-    }
-
-    private Process findActiveProcess(String processId) {
-        return processRepository.findByProcessIdAndDeletedYn(processId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        graphSyncService.broadcast(Type.NODE_DELETED, workflowId, processId);
     }
 
     private static ProcessResponse toResponse(Process process) {
@@ -135,7 +155,9 @@ public class ProcessServiceImpl implements ProcessService {
             process.getPosY(),
             process.getWidth(),
             process.getHeight(),
-            process.getProcessDesc()
+            process.getProcessDesc(),
+            process.getVersion(),
+            process.getVersionNonce()
         );
     }
 

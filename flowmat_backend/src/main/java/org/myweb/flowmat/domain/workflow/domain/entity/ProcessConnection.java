@@ -1,5 +1,6 @@
 package org.myweb.flowmat.domain.workflow.domain.entity;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
@@ -33,4 +34,10 @@ public class ProcessConnection extends CreatedUpdatedAuditEntity {
     private BigDecimal delayTimeSec;
     private BigDecimal lossRate;
     private Integer priority;
+
+    @Column(name = "version")
+    private int version = 1;
+
+    @Column(name = "version_nonce")
+    private int versionNonce;
 }

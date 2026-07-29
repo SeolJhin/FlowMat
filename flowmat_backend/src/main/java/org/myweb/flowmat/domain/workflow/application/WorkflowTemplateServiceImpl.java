@@ -2,9 +2,12 @@ package org.myweb.flowmat.domain.workflow.application;
 
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.project.domain.entity.Project;
 import org.myweb.flowmat.domain.project.repository.ProjectRepository;
 import org.myweb.flowmat.domain.workflow.api.dto.request.WorkflowTemplateApplyRequest;
+import org.myweb.flowmat.global.rbac.PermissionService;
+import org.myweb.flowmat.global.rbac.SystemPermission;
 import org.myweb.flowmat.domain.workflow.api.dto.request.WorkflowTemplateCreateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.WorkflowTemplateUpdateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowResponse;
@@ -25,15 +28,21 @@ import org.springframework.transaction.annotation.Transactional;
 public class WorkflowTemplateServiceImpl implements WorkflowTemplateService {
 
     private static final String NOT_DELETED = "N";
+    private static final String PUBLIC_YES = "Y";
 
     private final WorkflowTemplateRepository workflowTemplateRepository;
     private final WorkflowRepository workflowRepository;
     private final ProjectRepository projectRepository;
     private final IdGenerator idGenerator;
+    private final ProjectAccessService projectAccessService;
+    private final PermissionService permissionService;
 
     @Override
     public List<WorkflowTemplateResponse> listTemplates() {
-        return workflowTemplateRepository.findAllByOrderBySortOrderAscCreatedAtAsc().stream()
+        List<WorkflowTemplate> templates = canReadPrivate()
+            ? workflowTemplateRepository.findAllByOrderBySortOrderAscCreatedAtAsc()
+            : workflowTemplateRepository.findAllByPublicYnOrderBySortOrderAscCreatedAtAsc(PUBLIC_YES);
+        return templates.stream()
             .map(WorkflowTemplateServiceImpl::toResponse)
             .toList();
     }
@@ -41,6 +50,7 @@ public class WorkflowTemplateServiceImpl implements WorkflowTemplateService {
     @Override
     @Transactional
     public WorkflowTemplateResponse createTemplate(WorkflowTemplateCreateRequest request) {
+        permissionService.require(SystemPermission.TEMPLATE_MANAGE);
         WorkflowTemplate template = new WorkflowTemplate();
         template.setTemplateId(idGenerator.generate());
         applyTemplateFields(
@@ -61,12 +71,13 @@ public class WorkflowTemplateServiceImpl implements WorkflowTemplateService {
 
     @Override
     public WorkflowTemplateResponse getTemplate(String templateId) {
-        return toResponse(findTemplate(templateId));
+        return toResponse(findReadableTemplate(templateId));
     }
 
     @Override
     @Transactional
     public WorkflowTemplateResponse updateTemplate(String templateId, WorkflowTemplateUpdateRequest request) {
+        permissionService.require(SystemPermission.TEMPLATE_MANAGE);
         WorkflowTemplate template = findTemplate(templateId);
         if (hasText(request.templateName())) {
             template.setTemplateName(request.templateName().trim());
@@ -104,15 +115,15 @@ public class WorkflowTemplateServiceImpl implements WorkflowTemplateService {
     @Override
     @Transactional
     public void deleteTemplate(String templateId) {
+        permissionService.require(SystemPermission.TEMPLATE_MANAGE);
         workflowTemplateRepository.delete(findTemplate(templateId));
     }
 
     @Override
     @Transactional
     public WorkflowResponse applyTemplate(String templateId, WorkflowTemplateApplyRequest request) {
-        WorkflowTemplate template = findTemplate(templateId);
-        Project project = projectRepository.findByProjectIdAndDeletedYn(request.projectId(), NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        WorkflowTemplate template = findReadableTemplate(templateId);
+        Project project = projectAccessService.requireProjectWriteAccess(request.projectId());
 
         Workflow workflow = new Workflow();
         workflow.setWorkflowId(idGenerator.generate());
@@ -137,6 +148,18 @@ public class WorkflowTemplateServiceImpl implements WorkflowTemplateService {
     private WorkflowTemplate findTemplate(String templateId) {
         return workflowTemplateRepository.findById(templateId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+    }
+
+    private WorkflowTemplate findReadableTemplate(String templateId) {
+        WorkflowTemplate template = findTemplate(templateId);
+        if (!canReadPrivate() && !PUBLIC_YES.equalsIgnoreCase(template.getPublicYn())) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "Private workflow templates require admin access.");
+        }
+        return template;
+    }
+
+    private boolean canReadPrivate() {
+        return permissionService.hasPermission(SystemPermission.TEMPLATE_READ_PRIVATE);
     }
 
     private static void applyTemplateFields(

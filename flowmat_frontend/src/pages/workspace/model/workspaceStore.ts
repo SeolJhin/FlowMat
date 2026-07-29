@@ -8,10 +8,12 @@ interface WorkspaceState {
   inspectorMode: 'none' | 'node' | 'connection' | 'multi'
   canvasMode: CanvasMode
   pendingConnectionDraft: ConnectionDraftState | null
+  pendingRename: { nodeId: string; name: string } | null
   isRuleDrawerOpen: boolean
   isTemplateDrawerOpen: boolean
   activeColorPickerNodeId: string | null
   inlineEditingNodeId: string | null
+  inlineEditingEdgeId: string | null
   viewport: { x: number; y: number; zoom: number }
   panelWidths: { left: number; right: number }
 
@@ -25,6 +27,13 @@ interface WorkspaceState {
   closeRuleDrawer(): void
   startInlineEdit(nodeId: string): void
   stopInlineEdit(): void
+  startInlineEditEdge(edgeId: string): void
+  stopInlineEditEdge(): void
+  commitRename(nodeId: string, name: string): void
+  clearPendingRename(): void
+  setMultiSelect(): void
+  openColorPicker(nodeId: string): void
+  closeColorPicker(): void
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set) => ({
@@ -34,10 +43,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   inspectorMode: 'none',
   canvasMode: 'select',
   pendingConnectionDraft: null,
+  pendingRename: null,
   isRuleDrawerOpen: false,
   isTemplateDrawerOpen: false,
   activeColorPickerNodeId: null,
   inlineEditingNodeId: null,
+  inlineEditingEdgeId: null,
   viewport: { x: 0, y: 0, zoom: 1 },
   panelWidths: { left: 240, right: 320 },
 
@@ -67,6 +78,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       inspectorMode: 'none',
     }),
 
+  setMultiSelect: () =>
+    set({
+      selectedProcessId: null,
+      selectedConnectionId: null,
+      inspectorMode: 'multi',
+    }),
+
+  openColorPicker: (nodeId) => set({ activeColorPickerNodeId: nodeId }),
+  closeColorPicker: () => set({ activeColorPickerNodeId: null }),
+
   setCanvasMode: (mode) => set({ canvasMode: mode }),
 
   setConnectionDraft: (draft) => set({ pendingConnectionDraft: draft }),
@@ -76,6 +97,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   closeRuleDrawer: () => set({ isRuleDrawerOpen: false }),
 
   startInlineEdit: (nodeId) => set({ inlineEditingNodeId: nodeId }),
-
   stopInlineEdit: () => set({ inlineEditingNodeId: null }),
+  startInlineEditEdge: (edgeId) => set({ inlineEditingEdgeId: edgeId }),
+  stopInlineEditEdge: () => set({ inlineEditingEdgeId: null }),
+  commitRename: (nodeId, name) => set({ inlineEditingNodeId: null, pendingRename: { nodeId, name } }),
+  clearPendingRename: () => set({ pendingRename: null }),
 }))
