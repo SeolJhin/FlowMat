@@ -4,13 +4,18 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import java.time.Duration;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.user.api.dto.request.EmailCodeRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.EmailCodeVerifyRequest;
+import org.myweb.flowmat.domain.user.api.dto.request.DormantReactivationRequest;
+import org.myweb.flowmat.domain.user.api.dto.request.DormantTokenRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.FindEmailRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.LogoutRequest;
+import org.myweb.flowmat.domain.user.api.dto.request.OAuthExchangeRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.OAuthSignupCompleteRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.PasswordResetConfirmRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.PasswordResetRequest;
@@ -18,13 +23,17 @@ import org.myweb.flowmat.domain.user.api.dto.request.RefreshTokenRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.SocialLinkStartRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.UserLoginRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.UserSignupRequest;
+import org.myweb.flowmat.domain.user.api.dto.response.OAuthExchangeResponse;
 import org.myweb.flowmat.domain.user.api.dto.response.SocialLinkStartResponse;
 import org.myweb.flowmat.domain.user.api.dto.response.UserTokenResponse;
 import org.myweb.flowmat.domain.user.application.AuthService;
+import org.myweb.flowmat.domain.user.application.AuthRedisStore;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.response.ApiResponse;
 import org.myweb.flowmat.global.security.AuthUser;
+import org.myweb.flowmat.global.security.RefreshTokenCookieService;
+import org.myweb.flowmat.global.security.oauth.OAuthExchangeStore;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -44,11 +53,25 @@ public class AuthController {
     private static final String GUEST_SID_COOKIE_NAME = "guest_sid";
     private static final int GUEST_SID_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
     private static final Pattern GUEST_SID_PATTERN = Pattern.compile("^[A-Za-z0-9_-]{16,128}$");
+    private static final int LOGIN_IP_LIMIT = 12;
+    private static final int LOGIN_ACCOUNT_LIMIT = 8;
+    private static final int EMAIL_CODE_IP_LIMIT = 10;
+    private static final int EMAIL_CODE_EMAIL_LIMIT = 5;
+    private static final int DORMANT_REQUEST_IP_LIMIT = 8;
+    private static final int DORMANT_REQUEST_ACCOUNT_LIMIT = 5;
+    private static final Duration LOGIN_RATE_WINDOW = Duration.ofMinutes(10);
+    private static final Duration EMAIL_CODE_RATE_WINDOW = Duration.ofHours(1);
+    private static final Duration DORMANT_REQUEST_RATE_WINDOW = Duration.ofHours(1);
 
     private final AuthService authService;
+    private final AuthRedisStore authRedisStore;
+    private final RefreshTokenCookieService refreshTokenCookieService;
+    private final OAuthExchangeStore oauthExchangeStore;
 
     @PostMapping("/email/send-code")
-    public ApiResponse<Void> sendEmailCode(@Valid @RequestBody EmailCodeRequest request) {
+    public ApiResponse<Void> sendEmailCode(HttpServletRequest httpRequest, @Valid @RequestBody EmailCodeRequest request) {
+        enforceRateLimit("email-code-ip", clientIpKey(httpRequest), EMAIL_CODE_IP_LIMIT, EMAIL_CODE_RATE_WINDOW);
+        enforceRateLimit("email-code-email", normalizeRateKey(request.userEmail()), EMAIL_CODE_EMAIL_LIMIT, EMAIL_CODE_RATE_WINDOW);
         authService.sendEmailCode(request.userEmail());
         return ApiResponse.ok(null);
     }
@@ -56,6 +79,28 @@ public class AuthController {
     @PostMapping("/email/verify-code")
     public ApiResponse<Void> verifyEmailCode(@Valid @RequestBody EmailCodeVerifyRequest request) {
         authService.verifyEmailCode(request.userEmail(), request.code());
+        return ApiResponse.ok(null);
+    }
+
+    @PostMapping("/dormant/reactivation/request")
+    public ApiResponse<Void> requestDormantReactivation(
+        HttpServletRequest httpRequest,
+        @Valid @RequestBody DormantReactivationRequest request
+    ) {
+        enforceRateLimit("dormant-reactivation-ip", clientIpKey(httpRequest), DORMANT_REQUEST_IP_LIMIT, DORMANT_REQUEST_RATE_WINDOW);
+        enforceRateLimit(
+            "dormant-reactivation-account",
+            normalizeRateKey(request.userIdOrEmail()),
+            DORMANT_REQUEST_ACCOUNT_LIMIT,
+            DORMANT_REQUEST_RATE_WINDOW
+        );
+        authService.requestDormantReactivation(request);
+        return ApiResponse.ok(null);
+    }
+
+    @PostMapping("/dormant/reactivate")
+    public ApiResponse<Void> reactivateDormant(@Valid @RequestBody DormantTokenRequest request) {
+        authService.reactivateDormant(request);
         return ApiResponse.ok(null);
     }
 
@@ -71,8 +116,16 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ApiResponse<UserTokenResponse> login(HttpServletRequest httpRequest, @Valid @RequestBody UserLoginRequest request) {
-        return ApiResponse.ok(authService.login(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest)));
+    public ApiResponse<UserTokenResponse> login(
+        HttpServletRequest httpRequest,
+        HttpServletResponse httpResponse,
+        @Valid @RequestBody UserLoginRequest request
+    ) {
+        enforceRateLimit("login-ip", clientIpKey(httpRequest), LOGIN_IP_LIMIT, LOGIN_RATE_WINDOW);
+        enforceRateLimit("login-account", normalizeRateKey(request.userIdOrEmail()), LOGIN_ACCOUNT_LIMIT, LOGIN_RATE_WINDOW);
+        UserTokenResponse response = authService.login(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest));
+        writeRefreshCookie(httpRequest, httpResponse, response);
+        return ApiResponse.ok(response);
     }
 
     @PostMapping("/guest-token")
@@ -85,19 +138,50 @@ public class AuthController {
     @PostMapping("/refresh")
     public ApiResponse<UserTokenResponse> refresh(
         HttpServletRequest httpRequest,
+        HttpServletResponse httpResponse,
         @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
         @RequestBody(required = false) RefreshTokenRequest request
     ) {
-        return ApiResponse.ok(authService.refresh(request, extractBearer(authorization), httpRequest.getHeader("User-Agent"), extractIp(httpRequest)));
+        String explicitRefreshToken = request != null && request.refreshToken() != null
+            ? request.refreshToken()
+            : extractBearer(authorization);
+        String cookieRefreshToken = refreshTokenCookieService.resolveRefreshToken(httpRequest);
+        boolean cookieBacked = (explicitRefreshToken == null || explicitRefreshToken.isBlank())
+            && cookieRefreshToken != null
+            && !cookieRefreshToken.isBlank();
+        UserTokenResponse response = authService.refresh(
+            request,
+            explicitRefreshToken != null && !explicitRefreshToken.isBlank() ? explicitRefreshToken : cookieRefreshToken,
+            httpRequest.getHeader("User-Agent"),
+            extractIp(httpRequest)
+        );
+        writeRefreshCookie(httpRequest, httpResponse, response);
+        if (cookieBacked) {
+            return ApiResponse.ok(new UserTokenResponse(
+                response.accessToken(),
+                null,
+                response.deviceId(),
+                response.additionalInfoRequired()
+            ));
+        }
+        return ApiResponse.ok(response);
     }
 
     @PostMapping("/logout")
     public ApiResponse<Void> logout(
+        HttpServletRequest httpRequest,
+        HttpServletResponse httpResponse,
         @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
         @RequestBody(required = false) LogoutRequest request
     ) {
-        String refreshToken = request != null && request.refreshToken() != null ? request.refreshToken() : extractBearer(authorization);
+        String refreshToken = request != null && request.refreshToken() != null
+            ? request.refreshToken()
+            : extractBearer(authorization);
+        if (refreshToken == null || refreshToken.isBlank()) {
+            refreshToken = refreshTokenCookieService.resolveRefreshToken(httpRequest);
+        }
         authService.logout(refreshToken);
+        refreshTokenCookieService.clearRefreshToken(httpRequest, httpResponse);
         return ApiResponse.ok(null);
     }
 
@@ -111,17 +195,39 @@ public class AuthController {
     @PostMapping("/oauth2/kakao/complete")
     public ApiResponse<UserTokenResponse> completeKakaoSignup(
         HttpServletRequest httpRequest,
+        HttpServletResponse httpResponse,
         @Valid @RequestBody OAuthSignupCompleteRequest request
     ) {
-        return ApiResponse.ok(authService.completeKakaoSignup(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest)));
+        UserTokenResponse response = authService.completeKakaoSignup(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest));
+        writeRefreshCookie(httpRequest, httpResponse, response);
+        return ApiResponse.ok(response);
     }
 
     @PostMapping("/oauth2/google/complete")
     public ApiResponse<UserTokenResponse> completeGoogleSignup(
         HttpServletRequest httpRequest,
+        HttpServletResponse httpResponse,
         @Valid @RequestBody OAuthSignupCompleteRequest request
     ) {
-        return ApiResponse.ok(authService.completeGoogleSignup(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest)));
+        UserTokenResponse response = authService.completeGoogleSignup(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest));
+        writeRefreshCookie(httpRequest, httpResponse, response);
+        return ApiResponse.ok(response);
+    }
+
+    @PostMapping("/oauth2/exchange")
+    public ApiResponse<OAuthExchangeResponse> exchangeOAuthResult(@Valid @RequestBody OAuthExchangeRequest request) {
+        OAuthExchangeStore.OAuthExchangeEntry result = oauthExchangeStore.consume(request.code().trim());
+        if (result == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "OAuth exchange code is invalid or expired.");
+        }
+        return ApiResponse.ok(new OAuthExchangeResponse(
+            result.resultType(),
+            result.accessToken(),
+            result.signupToken(),
+            result.provider(),
+            result.deviceId(),
+            result.additionalInfoRequired()
+        ));
     }
 
     @PostMapping("/oauth2/link/start")
@@ -208,5 +314,29 @@ public class AuthController {
         }
         String forwardedProto = request.getHeader("X-Forwarded-Proto");
         return forwardedProto != null && "https".equalsIgnoreCase(forwardedProto.trim());
+    }
+
+    private void writeRefreshCookie(HttpServletRequest request, HttpServletResponse response, UserTokenResponse tokenResponse) {
+        if (tokenResponse != null && tokenResponse.refreshToken() != null && !tokenResponse.refreshToken().isBlank()) {
+            refreshTokenCookieService.writeRefreshToken(request, response, tokenResponse.refreshToken());
+        }
+    }
+
+    private void enforceRateLimit(String category, String subject, int limit, Duration window) {
+        if (!authRedisStore.tryAcquireRateLimit(category, subject, limit, window)) {
+            throw new BusinessException(ErrorCode.RATE_LIMITED);
+        }
+    }
+
+    private String clientIpKey(HttpServletRequest request) {
+        return normalizeRateKey(extractIp(request));
+    }
+
+    private String normalizeRateKey(String raw) {
+        String value = raw == null ? "unknown" : raw.trim().toLowerCase(Locale.ROOT);
+        if (value.isBlank()) {
+            return "unknown";
+        }
+        return value.replace('|', '_').replace(' ', '_');
     }
 }

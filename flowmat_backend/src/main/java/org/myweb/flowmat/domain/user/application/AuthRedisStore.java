@@ -25,6 +25,7 @@ public class AuthRedisStore {
     private static final String LOGIN_FAIL_PREFIX = "auth:loginfail:";
     private static final String LOGIN_LOCK_PREFIX = "auth:loginlock:";
     private static final String FACE_MATCH_PREFIX = "auth:face:match:";
+    private static final String RATE_LIMIT_PREFIX = "auth:ratelimit:";
 
     private final StringRedisTemplate redisTemplate;
 
@@ -184,6 +185,16 @@ public class AuthRedisStore {
         return "%06d".formatted(value);
     }
 
+    public boolean tryAcquireRateLimit(String category, String subject, int limit, Duration window) {
+        return execute(() -> {
+            Long count = redisTemplate.opsForValue().increment(rateLimitKey(category, subject));
+            if (count != null && count == 1L) {
+                redisTemplate.expire(rateLimitKey(category, subject), window);
+            }
+            return count != null && count <= limit;
+        });
+    }
+
     private <T> T execute(RedisCallback<T> callback) {
         try {
             return callback.run();
@@ -210,6 +221,7 @@ public class AuthRedisStore {
     private String loginFailKey(String userId) { return LOGIN_FAIL_PREFIX + userId; }
     private String loginLockKey(String userId) { return LOGIN_LOCK_PREFIX + userId; }
     private String faceMatchKey(String token) { return FACE_MATCH_PREFIX + token; }
+    private String rateLimitKey(String category, String subject) { return RATE_LIMIT_PREFIX + category + ":" + subject; }
 
     private String blankToEmpty(String value) {
         return value == null ? "" : value;

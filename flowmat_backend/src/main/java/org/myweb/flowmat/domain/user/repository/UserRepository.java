@@ -14,6 +14,8 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByUserIdOrUserEmail(String userId, String userEmail);
 
+    Optional<User> findByDormantToken(String dormantToken);
+
     Optional<User> findByUserNameAndUserTel(String userName, String userTel);
 
     boolean existsByUserId(String userId);

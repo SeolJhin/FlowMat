@@ -20,6 +20,10 @@ export interface UserDto {
   userStatus: string
 }
 
+export interface UserPermissionDto {
+  canManageUsers: boolean
+}
+
 export interface ProductionRunDto {
   productionRunId: string
   projectId: string

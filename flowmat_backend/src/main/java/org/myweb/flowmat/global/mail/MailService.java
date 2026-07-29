@@ -67,6 +67,20 @@ public class MailService {
         }
     }
 
+    @Async
+    public void sendDormantReactivationMail(String toEmail, String token) {
+        String reactivateUrl = frontendUrl + "/reactivate-account?token=" + token;
+        if (fromAddress == null || fromAddress.isBlank()) {
+            log.info("Mail not configured; dormant reactivation URL for {} is {}", toEmail, reactivateUrl);
+            return;
+        }
+        try {
+            send(toEmail, "[FlowMat] Reactivate your account", buildDormantReactivationHtml(reactivateUrl));
+        } catch (Exception e) {
+            log.warn("Failed to send dormant reactivation email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     private void send(String to, String subject, String htmlBody) throws Exception {
         MimeMessage message = mailSender.createMimeMessage();
         MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
@@ -121,5 +135,22 @@ public class MailService {
               </p>
             </div>
             """.formatted(resetUrl);
+    }
+
+    private String buildDormantReactivationHtml(String reactivateUrl) {
+        return """
+            <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
+              <h2 style="margin-bottom:8px">Reactivate your FlowMat account</h2>
+              <p>Your account is dormant. Click below to restore access.</p>
+              <a href="%s"
+                 style="display:inline-block;margin-top:16px;padding:10px 20px;
+                        background:#0f766e;color:#fff;border-radius:8px;text-decoration:none">
+                Reactivate Account
+              </a>
+              <p style="margin-top:24px;font-size:12px;color:#888">
+                This link becomes invalid once used or when a newer reactivation email is issued.
+              </p>
+            </div>
+            """.formatted(reactivateUrl);
     }
 }

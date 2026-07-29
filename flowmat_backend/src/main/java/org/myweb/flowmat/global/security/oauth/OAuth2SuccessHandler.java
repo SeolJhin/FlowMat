@@ -16,6 +16,7 @@ import org.myweb.flowmat.domain.user.domain.entity.User;
 import org.myweb.flowmat.domain.user.repository.SocialAccountRepository;
 import org.myweb.flowmat.domain.user.repository.UserRepository;
 import org.myweb.flowmat.global.security.JwtProvider;
+import org.myweb.flowmat.global.security.RefreshTokenCookieService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
@@ -26,11 +27,14 @@ import org.springframework.stereotype.Component;
 public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
 
     private static final String LINK_STATE_PREFIX = "link.";
+    private static final Duration EXCHANGE_TTL = Duration.ofMinutes(5);
 
     private final JwtProvider jwtProvider;
     private final AuthRedisStore authRedisStore;
     private final UserRepository userRepository;
     private final SocialAccountRepository socialAccountRepository;
+    private final OAuthExchangeStore oauthExchangeStore;
+    private final RefreshTokenCookieService refreshTokenCookieService;
 
     @Value("${app.oauth2.redirect-uri:}")
     private String redirectUri;
@@ -59,10 +63,20 @@ public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
                 userContext.getEmail(),
                 userContext.getNickname()
             );
+            String exchangeCode = oauthExchangeStore.issueCode(
+                new OAuthExchangeStore.OAuthExchangeEntry(
+                    OAuthExchangeStore.OAuthExchangeEntry.SIGNUP_REQUIRED,
+                    null,
+                    signupToken,
+                    userContext.getProvider().toLowerCase(),
+                    null,
+                    true
+                ),
+                EXCHANGE_TTL
+            );
             response.sendRedirect(
                 resolvedRedirectUri
-                    + "#signupToken=" + enc(signupToken)
-                    + "&provider=" + enc(userContext.getProvider().toLowerCase())
+                    + "?code=" + enc(exchangeCode)
             );
             return;
         }
@@ -73,13 +87,22 @@ public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
         String jti = jwtProvider.resolveJti(refreshToken);
         String deviceId = "oauth-" + userContext.getProvider().toLowerCase();
         authRedisStore.storeRefreshToken(jti, user.getUserId(), deviceId, Duration.ofMillis(jwtProvider.getRefreshExpiryMs()));
+        refreshTokenCookieService.writeRefreshToken(request, response, refreshToken);
+        String exchangeCode = oauthExchangeStore.issueCode(
+            new OAuthExchangeStore.OAuthExchangeEntry(
+                OAuthExchangeStore.OAuthExchangeEntry.LOGIN,
+                accessToken,
+                null,
+                userContext.getProvider().toLowerCase(),
+                deviceId,
+                isAdditionalInfoRequired(user)
+            ),
+            EXCHANGE_TTL
+        );
 
         response.sendRedirect(
             resolvedRedirectUri
-                + "#accessToken=" + enc(accessToken)
-                + "&refreshToken=" + enc(refreshToken)
-                + "&deviceId=" + enc(deviceId)
-                + "&additionalInfoRequired=" + isAdditionalInfoRequired(user)
+                + "?code=" + enc(exchangeCode)
         );
     }
 

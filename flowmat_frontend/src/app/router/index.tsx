@@ -9,12 +9,19 @@ import {
 } from './routePreload'
 import { preloadWorkspaceRoute } from '../../pages/workspace/ui/workspacePreload'
 import { AuthGuard } from './AuthGuard'
+import { AdminGuard } from './AdminGuard'
 
 const HomeRoute = lazy(() =>
   import('../../pages/home/ui/HomeRoute').then((m) => ({ default: m.HomeRoute }))
 )
 const InviteAcceptRoute = lazy(() =>
   import('../../pages/invite/ui/InviteAcceptRoute').then((m) => ({ default: m.InviteAcceptRoute }))
+)
+const OAuthCallbackRoute = lazy(() =>
+  import('../../pages/oauth/ui/OAuthCallbackRoute').then((m) => ({ default: m.OAuthCallbackRoute }))
+)
+const DormantReactivationRoute = lazy(() =>
+  import('../../pages/dormant/ui/DormantReactivationRoute').then((m) => ({ default: m.DormantReactivationRoute }))
 )
 const AdminRoute = lazy(() =>
   import('../../pages/admin/ui/AdminRoute').then((m) => ({ default: m.AdminRoute }))
@@ -53,12 +60,19 @@ export const router = createBrowserRouter([
   // Public routes
   { path: '/', element: withSuspense(<HomeRoute />) },
   { path: '/invite/accept', element: withSuspense(<InviteAcceptRoute />) },
+  { path: '/oauth2/success', element: withSuspense(<OAuthCallbackRoute />) },
+  { path: '/reactivate-account', element: withSuspense(<DormantReactivationRoute />) },
 
   // Protected routes — AuthGuard redirects to / if no token
   {
     element: <AuthGuard />,
     children: [
-      { path: '/admin', element: withSuspense(<AdminRoute />) },
+      {
+        element: <AdminGuard />,
+        children: [
+          { path: '/admin', element: withSuspense(<AdminRoute />) },
+        ],
+      },
       { path: '/projects/:projectId/settings', element: withSuspense(<ProjectSettingsRoute />) },
       { path: '/projects/:projectId/workflows/:workflowId', element: withSuspense(<WorkspaceRoute />) },
       { path: '/projects/:projectId/inventory', element: withSuspense(<InventoryRoute />) },
