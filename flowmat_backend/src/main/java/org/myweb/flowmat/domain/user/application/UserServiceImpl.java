@@ -174,6 +174,21 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    public void requestDormant(String userId) {
+        User user = userRepository.findByUserId(userId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "User not found."));
+        UserStatus currentStatus = parseStatus(user.getUserStatus());
+        if (currentStatus == UserStatus.WITHDRAWN) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Withdrawn users cannot become dormant.");
+        }
+        if (currentStatus == UserStatus.DORMANT) {
+            return;
+        }
+        applyStatusTransition(user, UserStatus.DORMANT);
+        user.setDormantToken(null);
+    }
+
+    @Override
     public void deleteMe(String userId) {
         User user = userRepository.findByUserId(userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "User not found."));
@@ -190,12 +205,14 @@ public class UserServiceImpl implements UserService {
                 user.setUserStatus("active");
                 user.setLockedAt(null);
                 user.setDormantAt(null);
+                user.setDormantToken(null);
                 authRedisStore.clearLoginFailures(user.getUserId());
             }
             case LOCKED -> {
                 user.setUserStatus("locked");
                 user.setLockedAt(now);
                 user.setDormantAt(null);
+                user.setDormantToken(null);
                 authRedisStore.revokeAllRefreshTokens(user.getUserId());
                 authRedisStore.clearLoginFailures(user.getUserId());
             }
@@ -211,6 +228,7 @@ public class UserServiceImpl implements UserService {
                 user.setDeleteYn("Y");
                 user.setWithdrawnAt(now);
                 user.setDormantAt(null);
+                user.setDormantToken(null);
                 user.setLockedAt(null);
                 authRedisStore.revokeAllRefreshTokens(user.getUserId());
                 authRedisStore.clearLoginFailures(user.getUserId());

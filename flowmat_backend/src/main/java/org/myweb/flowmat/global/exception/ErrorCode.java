@@ -11,6 +11,7 @@ public enum ErrorCode {
     FORBIDDEN(HttpStatus.FORBIDDEN, "You do not have permission."),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error."),
     SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Authentication service is temporarily unavailable."),
+    RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Too many requests. Please try again later."),
 
     TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "Token is invalid."),
     TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "Token has expired."),
@@ -23,6 +24,8 @@ public enum ErrorCode {
     EMAIL_NOT_VERIFIED(HttpStatus.BAD_REQUEST, "Email verification is required."),
     EMAIL_CODE_INVALID(HttpStatus.BAD_REQUEST, "Email verification code is invalid."),
     EMAIL_CODE_COOLDOWN(HttpStatus.TOO_MANY_REQUESTS, "Please wait before requesting another email code."),
+    DORMANT_ACCOUNT(HttpStatus.FORBIDDEN, "This account is dormant and must be reactivated."),
+    DORMANT_TOKEN_INVALID(HttpStatus.BAD_REQUEST, "Dormant account reactivation token is invalid."),
     PASSWORD_RESET_TOKEN_INVALID(HttpStatus.BAD_REQUEST, "Password reset token is invalid."),
     PASSWORD_RESET_TOKEN_EXPIRED(HttpStatus.BAD_REQUEST, "Password reset token has expired."),
     INVALID_PASSWORD(HttpStatus.BAD_REQUEST, "Password is incorrect."),

@@ -28,9 +28,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         "/auth/reset-password/confirm",
         "/auth/email/send-code",
         "/auth/email/verify-code",
+        "/auth/dormant/reactivation/request",
+        "/auth/dormant/reactivate",
         "/auth/face/login",
         "/auth/face/match",
         "/auth/face/select",
+        "/auth/oauth2/exchange",
         "/auth/oauth2/kakao/complete",
         "/auth/oauth2/google/complete"
     );

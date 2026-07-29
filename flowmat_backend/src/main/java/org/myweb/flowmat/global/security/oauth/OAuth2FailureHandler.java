@@ -42,7 +42,7 @@ public class OAuth2FailureHandler implements AuthenticationFailureHandler {
         String resolvedRedirectUri = resolveRedirectUri(request);
         response.sendRedirect(
             resolvedRedirectUri
-                + "#error=oauth_login_failed&reason="
+                + "?error=oauth_login_failed&reason="
                 + URLEncoder.encode(reason, StandardCharsets.UTF_8)
         );
     }

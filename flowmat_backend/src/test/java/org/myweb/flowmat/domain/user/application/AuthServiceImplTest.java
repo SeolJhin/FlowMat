@@ -20,6 +20,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.myweb.flowmat.domain.user.api.dto.request.DormantReactivationRequest;
+import org.myweb.flowmat.domain.user.api.dto.request.DormantTokenRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.OAuthSignupCompleteRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.RefreshTokenRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.UserLoginRequest;
@@ -194,5 +196,48 @@ class AuthServiceImplTest {
         assertThat(response.accessToken()).isEqualTo("access-token");
         verify(userRepository).save(any(User.class));
         verify(socialAccountRepository).save(any());
+    }
+
+    @Test
+    void dormantUserCannotLogin() {
+        user.setUserStatus("dormant");
+        when(userRepository.findByUserId("tester")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("plain-password", "encoded-password")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.login(
+            new UserLoginRequest("tester", "plain-password", "device-1"),
+            "JUnit",
+            "127.0.0.1"
+        ))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(ErrorCode.DORMANT_ACCOUNT);
+    }
+
+    @Test
+    void requestDormantReactivationSendsMailAndStoresToken() {
+        user.setUserStatus("dormant");
+        when(userRepository.findByUserId("tester")).thenReturn(Optional.of(user));
+
+        authService.requestDormantReactivation(new DormantReactivationRequest("tester"));
+
+        assertThat(user.getDormantToken()).isNotBlank();
+        verify(mailService).sendDormantReactivationMail("tester@example.com", user.getDormantToken());
+    }
+
+    @Test
+    void reactivateDormantClearsDormantFields() {
+        user.setUserStatus("dormant");
+        user.setDormantAt(OffsetDateTime.now());
+        user.setDormantToken("reactivate-token");
+        when(userRepository.findByDormantToken("reactivate-token")).thenReturn(Optional.of(user));
+
+        authService.reactivateDormant(new DormantTokenRequest("reactivate-token"));
+
+        assertThat(user.getUserStatus()).isEqualTo("active");
+        assertThat(user.getDormantAt()).isNull();
+        assertThat(user.getDormantToken()).isNull();
+        verify(authRedisStore).revokeAllRefreshTokens("tester");
+        verify(authRedisStore).clearLoginFailures("tester");
     }
 }

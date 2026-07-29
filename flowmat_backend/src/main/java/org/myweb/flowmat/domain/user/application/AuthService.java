@@ -1,6 +1,8 @@
 package org.myweb.flowmat.domain.user.application;
 
 import org.myweb.flowmat.domain.user.api.dto.request.FindEmailRequest;
+import org.myweb.flowmat.domain.user.api.dto.request.DormantReactivationRequest;
+import org.myweb.flowmat.domain.user.api.dto.request.DormantTokenRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.OAuthSignupCompleteRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.PasswordResetConfirmRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.PasswordResetRequest;
@@ -38,6 +40,10 @@ public interface AuthService {
     void verifyPasswordResetToken(String token);
 
     void confirmPasswordReset(PasswordResetConfirmRequest request);
+
+    void requestDormantReactivation(DormantReactivationRequest request);
+
+    void reactivateDormant(DormantTokenRequest request);
 
     UserTokenResponse completeKakaoSignup(OAuthSignupCompleteRequest request, String userAgent, String ipAddress);
 

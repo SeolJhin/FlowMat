@@ -8,6 +8,8 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.user.api.dto.request.FindEmailRequest;
+import org.myweb.flowmat.domain.user.api.dto.request.DormantReactivationRequest;
+import org.myweb.flowmat.domain.user.api.dto.request.DormantTokenRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.OAuthSignupCompleteRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.PasswordResetConfirmRequest;
 import org.myweb.flowmat.domain.user.api.dto.request.PasswordResetRequest;
@@ -164,6 +166,9 @@ public class AuthServiceImpl implements AuthService {
             }
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "User ID/email or password is incorrect.");
         }
+        if (isDormant(user)) {
+            throw new BusinessException(ErrorCode.DORMANT_ACCOUNT, "This account is dormant. Request reactivation to continue.");
+        }
         if (!canLogin(user)) {
             throw new BusinessException(ErrorCode.FORBIDDEN, "This account cannot log in.");
         }
@@ -317,6 +322,39 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    public void requestDormantReactivation(DormantReactivationRequest request) {
+        if (request == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST);
+        }
+        String userIdOrEmail = normalizeRequired(request.userIdOrEmail(), "User ID or email is required.");
+        User user = resolveLoginUser(userIdOrEmail);
+        if (user == null || !isDormant(user)) {
+            return;
+        }
+        String token = UUID.randomUUID().toString().replace("-", "");
+        user.setDormantToken(token);
+        mailService.sendDormantReactivationMail(user.getUserEmail(), token);
+    }
+
+    @Override
+    public void reactivateDormant(DormantTokenRequest request) {
+        if (request == null || !hasText(request.token())) {
+            throw new BusinessException(ErrorCode.DORMANT_TOKEN_INVALID);
+        }
+        User user = userRepository.findByDormantToken(request.token().trim())
+            .orElseThrow(() -> new BusinessException(ErrorCode.DORMANT_TOKEN_INVALID));
+        if (!isDormant(user)) {
+            throw new BusinessException(ErrorCode.DORMANT_TOKEN_INVALID);
+        }
+        user.setUserStatus("active");
+        user.setDormantAt(null);
+        user.setDormantToken(null);
+        user.setLockedAt(null);
+        authRedisStore.revokeAllRefreshTokens(user.getUserId());
+        authRedisStore.clearLoginFailures(user.getUserId());
+    }
+
+    @Override
     public UserTokenResponse completeKakaoSignup(OAuthSignupCompleteRequest request, String userAgent, String ipAddress) {
         return completeOAuthSignup("kakao", request);
     }
@@ -438,8 +476,13 @@ public class AuthServiceImpl implements AuthService {
             return false;
         }
         return !"Y".equalsIgnoreCase(user.getDeleteYn())
+            && !"dormant".equalsIgnoreCase(user.getUserStatus())
             && !"withdrawn".equalsIgnoreCase(user.getUserStatus())
             && !"locked".equalsIgnoreCase(user.getUserStatus());
+    }
+
+    private boolean isDormant(User user) {
+        return user != null && "dormant".equalsIgnoreCase(user.getUserStatus());
     }
 
     private boolean isAdditionalInfoRequired(User user) {
