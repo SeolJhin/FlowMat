@@ -53,11 +53,12 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
   }, [edge])
 
   if (!edge) return null
+  const currentEdge = edge
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
     await onSubmit({
-      connectionId: edge.id,
+      connectionId: currentEdge.id,
       connectionLabel: label.trim() || null,
       connectionType: connectionType.trim(),
       flowRate: flowRate !== '' ? Number(flowRate) : null,
@@ -70,12 +71,12 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
 
   return (
     <div className="inspector">
-      <h3 className="inspector__title">{edge.label || 'Connection'}</h3>
+      <h3 className="inspector__title">{currentEdge.label || 'Connection'}</h3>
       <dl className="inspector__fields">
         <dt>From</dt>
-        <dd style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{edge.fromProcessId}</dd>
+        <dd style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{currentEdge.fromProcessId}</dd>
         <dt>To</dt>
-        <dd style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{edge.toProcessId}</dd>
+        <dd style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{currentEdge.toProcessId}</dd>
       </dl>
 
       <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '10px', marginTop: '16px' }}>
@@ -160,7 +161,7 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
           <button type="submit">Save Connection</button>
           <button
             type="button"
-            onClick={() => void onDelete(edge.id)}
+            onClick={() => void onDelete(currentEdge.id)}
             style={{ border: '1px solid #fca5a5', color: '#991b1b', background: '#fef2f2' }}
           >
             Delete Connection

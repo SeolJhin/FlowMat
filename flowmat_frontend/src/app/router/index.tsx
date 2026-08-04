@@ -1,5 +1,5 @@
 import { Suspense, lazy } from 'react'
-import { Navigate, Outlet, createBrowserRouter } from 'react-router-dom'
+import { Navigate, createBrowserRouter } from 'react-router-dom'
 import {
   preloadInventoryRoute,
   preloadRulesRoute,

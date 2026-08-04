@@ -21,7 +21,7 @@ export interface NodeMoveMessage {
 }
 
 export interface PresenceMessage {
-  type: 'JOIN' | 'LEAVE' | 'HEARTBEAT' | 'CURSOR_MOVED' | 'NODE_EDITING'
+  type: 'JOIN' | 'LEAVE' | 'HEARTBEAT' | 'CURSOR_MOVED' | 'NODE_EDITING' | 'ANNOTATION_DRAWING'
   userId: string | null
   /** Per-tab random UUID. null for server-generated JOIN/LEAVE events. */
   clientId: string | null
@@ -29,6 +29,11 @@ export interface PresenceMessage {
   cursorX?: number | null
   cursorY?: number | null
   editingProcessId?: string | null
+  annotation?: {
+    annotationType: 'freehand' | 'shape' | 'text'
+    points: number[][]
+    inProgress: boolean
+  } | null
   timestamp: number
 }
 

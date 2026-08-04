@@ -37,7 +37,7 @@ function resolveEdgePath(
     targetY: number
     targetPosition: Position
   }
-): [string, number, number] {
+): ReturnType<typeof getBezierPath> {
   const { sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition } = params
 
   if (connectionType === 'control_flow' || connectionType === 'energy_flow') {

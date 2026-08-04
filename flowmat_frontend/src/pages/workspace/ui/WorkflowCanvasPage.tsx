@@ -1,6 +1,8 @@
-﻿import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { useIsMutating, useQueryClient } from '@tanstack/react-query'
 import type {
+  CanvasAnnotationPoint,
+  CanvasAnnotationViewModel,
   ConnectCompletePayload,
   ConnectStartPayload,
   WorkflowCanvasViewModel,
@@ -20,11 +22,26 @@ import type { PresenceMessage, GraphChangeMessage } from '../../../entities/work
 import { Link, useNavigate } from 'react-router-dom'
 import { PALETTE_DRAG_MIME } from './canvasConstants'
 import {
+  useBatchCanvasAnnotationMutation,
+  useCreateCanvasAnnotationMutation,
+  useDeleteCanvasAnnotationMutation,
+  usePatchCanvasAnnotationMutation,
+} from '../../../entities/canvas-annotation/api/canvasAnnotationApi'
+import {
+  computeAlignedPosition,
+  computeDistributedPositions,
+  computeSelectionBounds,
+  type AlignDirection,
+  type DistributeAxis,
+  type LayoutBox,
+} from '../../../entities/canvas-annotation/model/annotationLayout'
+import {
   preloadCanvasViewport,
   preloadConnectionInspector,
   preloadNodeInspector,
   preloadNodePickerPopup,
 } from './workspacePreload'
+import type { WorkflowPaletteTool } from '../../../entities/workflow/model/nodeCatalog'
 
 const CanvasViewport = lazy(() =>
   preloadCanvasViewport().then((module) => ({ default: module.CanvasViewport }))
@@ -42,6 +59,43 @@ const NodePickerPopup = lazy(() =>
 interface Props {
   canvas: WorkflowCanvasViewModel
   projectId: string
+}
+
+const ANNOTATION_TOOL_DEFINITIONS: Array<{
+  tool: Extract<WorkflowPaletteTool, 'annotation-shape' | 'annotation-text' | 'annotation-freehand'>
+  label: string
+  description: string
+}> = [
+  { tool: 'annotation-shape', label: 'Shape', description: 'Place shape annotations on the canvas.' },
+  { tool: 'annotation-text', label: 'Text', description: 'Drop standalone notes on the canvas.' },
+  { tool: 'annotation-freehand', label: 'Freehand', description: 'Sketch directly with live collaborator previews.' },
+]
+
+function getToolLabel(
+  tool: WorkflowPaletteTool,
+  paletteDefinitions: ReturnType<typeof useWorkflowCanvasActions>['paletteDefinitions']
+) {
+  if (tool === 'select') return 'Pointer'
+  const annotationDefinition = ANNOTATION_TOOL_DEFINITIONS.find((definition) => definition.tool === tool)
+  if (annotationDefinition) return annotationDefinition.label
+  return paletteDefinitions.find((definition) => definition.tool === tool)?.label ?? tool
+}
+
+function normalizeFreehand(points: CanvasAnnotationPoint[]) {
+  const xs = points.map((point) => point.x)
+  const ys = points.map((point) => point.y)
+  const minX = Math.min(...xs)
+  const minY = Math.min(...ys)
+  const maxX = Math.max(...xs)
+  const maxY = Math.max(...ys)
+
+  return {
+    posX: Math.round(minX),
+    posY: Math.round(minY),
+    width: Math.max(8, Math.round(maxX - minX)),
+    height: Math.max(8, Math.round(maxY - minY)),
+    points: points.map((point) => [Math.round(point.x - minX), Math.round(point.y - minY)] as [number, number]),
+  }
 }
 
 function CanvasFallback() {
@@ -125,13 +179,22 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   const navigate = useNavigate()
   const updateWorkflowMutation = useUpdateWorkflowMutation()
   const workflowsQuery = useWorkflowsQuery(canvas.workflow.projectId)
+  const createAnnotationMutation = useCreateCanvasAnnotationMutation(canvas.workflow.workflowId)
+  const patchAnnotationMutation = usePatchCanvasAnnotationMutation(canvas.workflow.workflowId)
+  const deleteAnnotationMutation = useDeleteCanvasAnnotationMutation(canvas.workflow.workflowId)
+  const batchAnnotationMutation = useBatchCanvasAnnotationMutation(canvas.workflow.workflowId)
+  const canEditAnnotations =
+    canvas.workflow.currentUserRole === 'editor' || canvas.workflow.currentUserRole === 'owner'
+  const annotationSelectionRef = useRef<() => string[]>(() => [])
 
   // Presence: remote cursor + node-editing state
   const [remoteCursors, setRemoteCursors] = useState<
     Map<string, { x: number; y: number; type: string }>
   >(new Map())
   const [editingPresence, setEditingPresence] = useState<ReadonlyMap<string, string>>(new Map())
-  const [syncClientId, setSyncClientId] = useState('')
+  const [remoteAnnotationPreviews, setRemoteAnnotationPreviews] = useState<
+    ReadonlyMap<string, { points: CanvasAnnotationPoint[]; annotationType: string }>
+  >(new Map())
   const [syncUserId, setSyncUserId] = useState<string | null>(null)
   const sendPresenceRef = useRef<
     (msg: Omit<PresenceMessage, 'userId' | 'clientId' | 'workflowId' | 'timestamp'>) => void
@@ -152,6 +215,21 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
       }
       return next
     })
+
+    if (msg.type === 'ANNOTATION_DRAWING' || msg.type === 'LEAVE') {
+      setRemoteAnnotationPreviews((prev) => {
+        const next = new Map(prev)
+        if (msg.type === 'LEAVE' || !msg.annotation?.inProgress) {
+          next.delete(uid)
+          return next
+        }
+        next.set(uid, {
+          annotationType: msg.annotation.annotationType,
+          points: msg.annotation.points.map(([x, y]) => ({ x, y })),
+        })
+        return next
+      })
+    }
 
     if (msg.type === 'NODE_EDITING' || msg.type === 'LEAVE') {
       setEditingPresence((prev) => {
@@ -292,7 +370,6 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
     ownUserId: string | null
   }) => {
     sendPresenceRef.current = api.sendPresence
-    setSyncClientId(api.clientId)
     setSyncUserId(api.ownUserId)
     void loadPresenceSnapshot(api.ownUserId)
   }, [loadPresenceSnapshot])
@@ -545,6 +622,21 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
         lossRate: e.lossRate,
         priority: e.priority,
       })),
+      annotations: canvas.annotations.map((annotation) => ({
+        id: annotation.id,
+        annotationType: annotation.annotationType,
+        shapeKind: annotation.shapeKind,
+        posX: Math.round(annotation.position.x),
+        posY: Math.round(annotation.position.y),
+        width: annotation.size.width,
+        height: annotation.size.height,
+        rotation: annotation.rotation,
+        points: annotation.points.map((point) => ({ x: point.x, y: point.y })),
+        textContent: annotation.textContent,
+        style: annotation.style,
+        zIndex: annotation.zIndex,
+        groupId: annotation.groupId,
+      })),
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const a = document.createElement('a')
@@ -568,6 +660,131 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
 
   async function handleConnectComplete(payload: ConnectCompletePayload) {
     await createConnection(payload)
+  }
+
+  async function handleCreateShapeAnnotation(position: { x: number; y: number }) {
+    await createAnnotationMutation.mutateAsync({
+      annotationType: 'shape',
+      shapeKind: 'rectangle',
+      posX: Math.round(position.x - 80),
+      posY: Math.round(position.y - 48),
+      width: 160,
+      height: 96,
+      style: {
+        stroke: 'var(--text-h)',
+        strokeWidth: 2,
+        fill: 'transparent',
+      },
+    })
+  }
+
+  async function handleCreateTextAnnotation(position: { x: number; y: number }) {
+    await createAnnotationMutation.mutateAsync({
+      annotationType: 'text',
+      posX: Math.round(position.x - 110),
+      posY: Math.round(position.y - 28),
+      width: 220,
+      height: 56,
+      textContent: 'New note',
+      style: {
+        stroke: 'var(--text-h)',
+        strokeWidth: 1,
+        fill: 'rgba(255,255,255,0.72)',
+      },
+    })
+  }
+
+  async function handleCompleteFreehand(points: CanvasAnnotationPoint[]) {
+    if (points.length < 2) return
+    const normalized = normalizeFreehand(points)
+    await createAnnotationMutation.mutateAsync({
+      annotationType: 'freehand',
+      posX: normalized.posX,
+      posY: normalized.posY,
+      width: normalized.width,
+      height: normalized.height,
+      points: normalized.points,
+      style: {
+        stroke: 'var(--accent)',
+        strokeWidth: 2,
+      },
+    })
+  }
+
+  async function handleUpdateAnnotation(
+    annotationId: string,
+    input: {
+      posX?: number
+      posY?: number
+      width?: number
+      height?: number
+      textContent?: string
+      version?: number
+      versionNonce?: number
+    }
+  ) {
+    await patchAnnotationMutation.mutateAsync({ annotationId, input })
+  }
+
+  async function handleDeleteAnnotations(annotationIds: string[]) {
+    await Promise.all(annotationIds.map((annotationId) => deleteAnnotationMutation.mutateAsync(annotationId)))
+  }
+
+  function getSelectedAnnotations(): CanvasAnnotationViewModel[] {
+    const ids = new Set(annotationSelectionRef.current())
+    return canvas.annotations.filter((annotation) => ids.has(annotation.id))
+  }
+
+  function toLayoutBox(annotation: CanvasAnnotationViewModel): LayoutBox {
+    return {
+      id: annotation.id,
+      x: annotation.position.x,
+      y: annotation.position.y,
+      width: annotation.size.width,
+      height: annotation.size.height,
+    }
+  }
+
+  async function handleAlign(direction: AlignDirection) {
+    if (!canEditAnnotations) return
+    const selected = getSelectedAnnotations()
+    if (selected.length < 2) return
+    const bounds = computeSelectionBounds(selected.map(toLayoutBox))
+    const items = selected.map((annotation) => {
+      const position = computeAlignedPosition(toLayoutBox(annotation), bounds, direction)
+      return { annotationId: annotation.id, posX: position.x, posY: position.y }
+    })
+    await batchAnnotationMutation.mutateAsync({ items })
+  }
+
+  async function handleDistribute(axis: DistributeAxis) {
+    if (!canEditAnnotations) return
+    const selected = getSelectedAnnotations()
+    if (selected.length < 3) return
+    const positions = computeDistributedPositions(selected.map(toLayoutBox), axis)
+    const items = positions.map((position) => ({
+      annotationId: position.id,
+      posX: position.x,
+      posY: position.y,
+    }))
+    await batchAnnotationMutation.mutateAsync({ items })
+  }
+
+  async function handleGroup() {
+    if (!canEditAnnotations) return
+    const selected = getSelectedAnnotations()
+    if (selected.length < 2) return
+    const groupId = `grp_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+    const items = selected.map((annotation) => ({ annotationId: annotation.id, groupId }))
+    await batchAnnotationMutation.mutateAsync({ items })
+  }
+
+  async function handleUngroup() {
+    if (!canEditAnnotations) return
+    const selected = getSelectedAnnotations()
+    if (selected.length === 0) return
+    const items = selected.map((annotation) => ({ annotationId: annotation.id, groupId: '' }))
+    await batchAnnotationMutation.mutateAsync({ items })
   }
 
   async function handleNodePick(tool: Parameters<typeof createNodeFromTool>[0]) {
@@ -664,22 +881,37 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
           }}
         >
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {(['select', ...paletteDefinitions.map((definition) => definition.tool)] as const).map(
-              (tool) => (
-                <button
-                  key={tool}
-                  type="button"
-                  onClick={() => setActiveTool(tool)}
-                  style={{
-                    border:
-                      activeTool === tool ? '1px solid var(--accent)' : '1px solid var(--border)',
-                    background: activeTool === tool ? 'var(--accent-bg)' : 'transparent',
-                  }}
-                >
-                  {tool === 'select' ? 'Pointer' : tool}
-                </button>
-              )
-            )}
+            {(['select', ...paletteDefinitions.map((definition) => definition.tool)] as const).map((tool) => (
+              <button
+                key={tool}
+                type="button"
+                onClick={() => setActiveTool(tool)}
+                style={{
+                  border:
+                    activeTool === tool ? '1px solid var(--accent)' : '1px solid var(--border)',
+                  background: activeTool === tool ? 'var(--accent-bg)' : 'transparent',
+                }}
+              >
+                {getToolLabel(tool, paletteDefinitions)}
+              </button>
+            ))}
+            {ANNOTATION_TOOL_DEFINITIONS.map((definition) => (
+              <button
+                key={definition.tool}
+                type="button"
+                disabled={!canEditAnnotations}
+                title={canEditAnnotations ? undefined : 'Viewers cannot create annotations'}
+                onClick={() => setActiveTool(definition.tool)}
+                style={{
+                  border:
+                    activeTool === definition.tool ? '1px solid var(--accent)' : '1px solid var(--border)',
+                  background: activeTool === definition.tool ? 'var(--accent-bg)' : 'transparent',
+                  opacity: canEditAnnotations ? 1 : 0.5,
+                }}
+              >
+                {definition.label}
+              </button>
+            ))}
           </div>
           <button
             type="button"
@@ -733,11 +965,14 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
             Add Node
           </button>
           <span style={{ fontSize: '13px', opacity: 0.8 }}>
-            Current tool:{' '}
-            {activeTool === 'select'
-              ? 'pointer'
-              : paletteDefinitions.find((definition) => definition.tool === activeTool)?.label}
-            . Click the canvas to place a node, then drag between handles to connect.
+            Current tool: {getToolLabel(activeTool, paletteDefinitions)}.{' '}
+            {activeTool === 'annotation-freehand'
+              ? 'Drag on empty canvas to sketch. Collaborators see a live preview before the final stroke is saved.'
+              : activeTool === 'annotation-shape'
+                ? 'Click empty canvas to drop a shape annotation.'
+                : activeTool === 'annotation-text'
+                  ? 'Click empty canvas to drop a text annotation.'
+                  : 'Click the canvas to place a node, then drag between handles to connect.'}
           </span>
         </div>
       </header>
@@ -811,6 +1046,68 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
             >
               Pointer
             </button>
+            <div style={{ marginTop: '8px', display: 'grid', gap: '8px' }}>
+              <h3 style={{ margin: 0 }}>Annotations</h3>
+              <p className="panel-placeholder" style={{ margin: 0 }}>
+                Shapes and notes persist as a separate canvas layer. Freehand relays live while drawing.
+              </p>
+              {ANNOTATION_TOOL_DEFINITIONS.map((definition) => (
+                <button
+                  key={definition.tool}
+                  type="button"
+                  disabled={!canEditAnnotations}
+                  onClick={() => setActiveTool(definition.tool)}
+                  style={{
+                    textAlign: 'left',
+                    padding: '12px 14px',
+                    borderRadius: '12px',
+                    border:
+                      activeTool === definition.tool
+                        ? '1px solid var(--accent)'
+                        : '1px solid var(--border)',
+                    background:
+                      activeTool === definition.tool ? 'var(--accent-bg)' : 'var(--surface)',
+                    display: 'grid',
+                    gap: '4px',
+                    opacity: canEditAnnotations ? 1 : 0.5,
+                  }}
+                >
+                  <strong>{definition.label}</strong>
+                  <span style={{ fontSize: '12px', opacity: 0.75 }}>{definition.description}</span>
+                </button>
+              ))}
+              {canEditAnnotations && (
+                <div style={{ marginTop: '4px', display: 'grid', gap: '6px' }}>
+                  <span className="panel-placeholder" style={{ fontSize: '12px' }}>
+                    Select 2+ annotations on the canvas, then:
+                  </span>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                    <button type="button" title="Align left" onClick={() => void handleAlign('left')}>⟸</button>
+                    <button type="button" title="Align center (horizontal)" onClick={() => void handleAlign('centerX')}>↔</button>
+                    <button type="button" title="Align right" onClick={() => void handleAlign('right')}>⟹</button>
+                    <button type="button" title="Align top" onClick={() => void handleAlign('top')}>⟰</button>
+                    <button type="button" title="Align middle (vertical)" onClick={() => void handleAlign('centerY')}>↕</button>
+                    <button type="button" title="Align bottom" onClick={() => void handleAlign('bottom')}>⟱</button>
+                  </div>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button type="button" title="Distribute horizontally (3+)" onClick={() => void handleDistribute('horizontal')}>
+                      Distribute H
+                    </button>
+                    <button type="button" title="Distribute vertically (3+)" onClick={() => void handleDistribute('vertical')}>
+                      Distribute V
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button type="button" title="Group selected annotations" onClick={() => void handleGroup()}>
+                      Group
+                    </button>
+                    <button type="button" title="Ungroup selected annotations" onClick={() => void handleUngroup()}>
+                      Ungroup
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </aside>
 
@@ -821,11 +1118,12 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
               workflowId={canvas.workflow.workflowId}
               nodes={canvas.nodes}
               edges={canvas.edges}
-              paletteDefinitions={paletteDefinitions}
-              workspaceMessage={workspaceMessage}
+              annotations={canvas.annotations}
+              activeTool={activeTool}
               selectedNodeId={selectedProcessId}
               selectedEdgeId={selectedConnectionId}
               drawingEnabled={activeTool !== 'select'}
+              canEditAnnotations={canEditAnnotations}
               onNodeSelect={selectNode}
               onEdgeSelect={selectEdge}
               onNodeDragEnd={handleNodeDragEnd}
@@ -834,8 +1132,14 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
               onConnectComplete={handleConnectComplete}
               onCanvasClick={(position) => void createNodeAt(position)}
               onNodeDrop={(tool, position) => void createNodeFromTool(tool, position)}
+              onCreateShapeAnnotation={handleCreateShapeAnnotation}
+              onCreateTextAnnotation={handleCreateTextAnnotation}
+              onCompleteFreehand={handleCompleteFreehand}
+              onUpdateAnnotation={handleUpdateAnnotation}
+              onDeleteAnnotations={handleDeleteAnnotations}
               onFitViewReady={(fn) => { fitViewRef.current = fn }}
               onSelectAllReady={(fn) => { selectAllRef.current = fn }}
+              onAnnotationSelectionReady={(fn) => { annotationSelectionRef.current = fn }}
               onExportReady={(fn) => { exportPngRef.current = fn }}
               onDeleteReady={(api) => { deleteApiRef.current = api }}
               onPresence={handlePresence}
@@ -845,6 +1149,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
               onDeleteElements={handleDeleteElements}
               onSyncReady={handleSyncReady}
               editingPresence={editingPresence}
+              remoteAnnotationPreviews={remoteAnnotationPreviews}
               onEdgeReconnect={async (oldEdgeId, newConnection) => {
                 await deleteConnection(oldEdgeId)
                 await createConnection(newConnection)

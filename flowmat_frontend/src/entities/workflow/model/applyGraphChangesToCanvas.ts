@@ -1,10 +1,12 @@
 import type { WorkflowGraphChangeDto } from '../../../shared/types/api'
 import type {
+  CanvasAnnotationViewModel,
   CanvasEdgeViewModel,
   CanvasNodeViewModel,
   WorkflowCanvasViewModel,
 } from './types'
 import {
+  toAnnotationViewModel,
   buildWorkflowCanvasViewModel,
   toEdgeViewModel,
   toNodeViewModel,
@@ -28,12 +30,22 @@ function upsertEdge(edges: CanvasEdgeViewModel[], edge: CanvasEdgeViewModel) {
   edges[index] = edge
 }
 
+function upsertAnnotation(annotations: CanvasAnnotationViewModel[], annotation: CanvasAnnotationViewModel) {
+  const index = annotations.findIndex((item) => item.id === annotation.id)
+  if (index === -1) {
+    annotations.push(annotation)
+    return
+  }
+  annotations[index] = annotation
+}
+
 export function applyGraphChangesToCanvas(
   canvas: WorkflowCanvasViewModel,
   changes: WorkflowGraphChangeDto[]
 ) {
   const nodes = [...canvas.nodes]
   const edges = [...canvas.edges]
+  const annotations = [...canvas.annotations]
   let graphSeq = canvas.graphSeq
 
   for (const change of changes) {
@@ -45,6 +57,7 @@ export function applyGraphChangesToCanvas(
       canvas = {
         ...canvas,
         workflow: {
+          ...canvas.workflow,
           workflowId: workflow.workflowId,
           projectId: workflow.projectId,
           workflowName: workflow.workflowName,
@@ -53,6 +66,19 @@ export function applyGraphChangesToCanvas(
           workflowStatus: workflow.workflowStatus,
         },
       }
+      continue
+    }
+
+    if (change.changeType === 'ANNOTATION_CREATED' || change.changeType === 'ANNOTATION_UPDATED') {
+      const annotation = change.payload?.annotation
+      if (!annotation) continue
+      upsertAnnotation(annotations, toAnnotationViewModel(annotation))
+      continue
+    }
+
+    if (change.changeType === 'ANNOTATION_DELETED') {
+      const nextAnnotations = annotations.filter((annotation) => annotation.id !== change.entityId)
+      annotations.splice(0, annotations.length, ...nextAnnotations)
       continue
     }
 
@@ -90,5 +116,5 @@ export function applyGraphChangesToCanvas(
     }
   }
 
-  return buildWorkflowCanvasViewModel(canvas.workflow, graphSeq, nodes, edges)
+  return buildWorkflowCanvasViewModel(canvas.workflow, graphSeq, nodes, edges, annotations)
 }

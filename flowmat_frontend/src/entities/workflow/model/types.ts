@@ -7,6 +7,7 @@ export interface WorkflowHeaderViewModel {
   workflowDesc: string | null
   workflowType: string
   workflowStatus: string
+  currentUserRole: 'viewer' | 'editor' | 'owner'
 }
 
 export interface CanvasPortViewModel {
@@ -72,13 +73,43 @@ export interface CanvasEdgeViewModel {
   versionNonce: number
 }
 
+export type CanvasAnnotationType = 'shape' | 'freehand' | 'text'
+export type CanvasAnnotationShapeKind = 'rectangle' | 'ellipse' | 'diamond'
+
+export interface CanvasAnnotationPoint {
+  x: number
+  y: number
+}
+
+export interface CanvasAnnotationViewModel {
+  id: string
+  annotationId: string
+  workflowId: string
+  projectId: string
+  annotationType: CanvasAnnotationType
+  shapeKind: CanvasAnnotationShapeKind | null
+  position: { x: number; y: number }
+  size: { width: number; height: number }
+  rotation: number
+  points: CanvasAnnotationPoint[]
+  textContent: string | null
+  style: Record<string, unknown>
+  zIndex: string
+  groupId: string | null
+  locked: boolean
+  version: number
+  versionNonce: number
+}
+
 export interface WorkflowCanvasViewModel {
   workflow: WorkflowHeaderViewModel
   graphSeq: number
   nodes: CanvasNodeViewModel[]
   edges: CanvasEdgeViewModel[]
+  annotations: CanvasAnnotationViewModel[]
   nodeMap: Record<string, CanvasNodeViewModel>
   portMap: Record<string, CanvasPortViewModel>
+  annotationMap: Record<string, CanvasAnnotationViewModel>
 }
 
 // Mutation input types
