@@ -124,6 +124,12 @@ public class ProjectAccessService {
         return project;
     }
 
+    public String resolveCurrentUserRole(String projectId) {
+        Project project = projectRepository.findByProjectIdAndDeletedYn(projectId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        return resolveProjectRole(project, requireCurrentUserId());
+    }
+
     public Workflow requireWorkflowReadAccess(String workflowId) {
         return requireWorkflowReadAccess(workflowId, requireCurrentUserId());
     }

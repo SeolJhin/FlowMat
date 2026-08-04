@@ -21,7 +21,13 @@ function rebuildCanvas(
   nodes: CanvasNodeViewModel[],
   edges = canvas.edges
 ) {
-  return buildWorkflowCanvasViewModel(canvas.workflow, canvas.graphSeq, nodes, edges)
+  return buildWorkflowCanvasViewModel(
+    canvas.workflow,
+    canvas.graphSeq,
+    nodes,
+    edges,
+    canvas.annotations
+  )
 }
 
 function mergeProcessNode(
@@ -187,6 +193,7 @@ export function patchWorkflowCanvasWorkflow(
   patchWorkflowCanvas(queryClient, workflow.workflowId, (current) => ({
     ...current,
     workflow: {
+      ...current.workflow,
       workflowId: workflow.workflowId,
       projectId: workflow.projectId,
       workflowName: workflow.workflowName,
