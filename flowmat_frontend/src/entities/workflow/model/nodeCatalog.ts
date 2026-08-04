@@ -7,6 +7,9 @@ export type WorkflowPaletteTool =
   | 'storage'
   | 'input'
   | 'output'
+  | 'annotation-shape'
+  | 'annotation-text'
+  | 'annotation-freehand'
 
 type WorkflowShapeKind = 'block' | 'circle' | 'pill' | 'dashed'
 

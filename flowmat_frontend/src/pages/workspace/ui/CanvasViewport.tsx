@@ -32,6 +32,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type {
+  CanvasAnnotationViewModel,
   CanvasNodeViewModel,
   CanvasEdgeViewModel,
   ConnectStartPayload,
@@ -39,10 +40,12 @@ import type {
 } from '../../../entities/workflow/model/types'
 import type { WorkflowPaletteTool } from '../../../entities/workflow/model/nodeCatalog'
 import { CanvasNode } from './CanvasNode'
+import { CanvasAnnotationNode } from './CanvasAnnotationNode'
 import { CanvasEdge } from './CanvasEdge'
 import { PALETTE_DRAG_MIME } from './canvasConstants'
 import { useWorkspaceStore } from '../model/workspaceStore'
 import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
+import { useTheme } from '../../../app/providers/ThemeProvider'
 import {
   useWorkflowSync,
   type NodeMoveMessage,
@@ -50,7 +53,7 @@ import {
   type GraphChangeMessage,
 } from '../../../entities/workflow/api/useWorkflowSync'
 
-const nodeTypes = { flowmatNode: CanvasNode }
+const nodeTypes = { flowmatNode: CanvasNode, annotationNode: CanvasAnnotationNode }
 const edgeTypes = { flowmatEdge: CanvasEdge }
 
 const SNAP_THRESHOLD = 8 // flow-space pixels
@@ -60,6 +63,11 @@ interface SnapGuide {
   position: number
   start: number
   end: number
+}
+
+interface AnnotationPreview {
+  points: { x: number; y: number }[]
+  annotationType: string
 }
 
 function calculateSnapGuides(
@@ -199,6 +207,76 @@ function SnapGuideLayer({ guides }: { guides: SnapGuide[] }) {
   )
 }
 
+function buildOverlayPath(
+  points: { x: number; y: number }[],
+  toScreenX: (x: number) => number,
+  toScreenY: (y: number) => number
+) {
+  if (points.length === 0) return ''
+  return points
+    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${toScreenX(point.x)} ${toScreenY(point.y)}`)
+    .join(' ')
+}
+
+function AnnotationPreviewLayer({
+  localDraft,
+  remotePreviews,
+}: {
+  localDraft: { x: number; y: number }[]
+  remotePreviews: ReadonlyMap<string, AnnotationPreview>
+}) {
+  const { x: vpX, y: vpY, zoom } = useViewport()
+  const toScreenX = useCallback((x: number) => x * zoom + vpX, [vpX, zoom])
+  const toScreenY = useCallback((y: number) => y * zoom + vpY, [vpY, zoom])
+
+  const remoteFreehands = [...remotePreviews.values()].filter(
+    (preview) => preview.annotationType === 'freehand' && preview.points.length > 1
+  )
+  const localPath =
+    localDraft.length > 1 ? buildOverlayPath(localDraft, toScreenX, toScreenY) : ''
+
+  if (!localPath && remoteFreehands.length === 0) return null
+
+  return (
+    <svg
+      style={{
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+        zIndex: 7,
+        overflow: 'visible',
+      }}
+    >
+      {remoteFreehands.map((preview, index) => (
+        <path
+          key={`remote-${index}`}
+          d={buildOverlayPath(preview.points, toScreenX, toScreenY)}
+          fill="none"
+          stroke="var(--accent)"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeDasharray="7 5"
+          opacity={0.55}
+        />
+      ))}
+      {localPath && (
+        <path
+          d={localPath}
+          fill="none"
+          stroke="var(--accent)"
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity={0.9}
+        />
+      )}
+    </svg>
+  )
+}
+
 function ExportController({ onReady }: { onReady?: (fn: (filename: string) => void) => void }) {
   const { getNodes } = useReactFlow()
   const getNodesRef = useRef(getNodes)
@@ -265,9 +343,12 @@ interface Props {
   workflowId: string
   nodes: CanvasNodeViewModel[]
   edges: CanvasEdgeViewModel[]
+  annotations: CanvasAnnotationViewModel[]
+  activeTool: WorkflowPaletteTool
   selectedNodeId: string | null
   selectedEdgeId: string | null
   drawingEnabled: boolean
+  canEditAnnotations: boolean
   onNodeSelect(id: string): void
   onEdgeSelect(id: string): void
   onNodeDragEnd(processId: string, x: number, y: number): void
@@ -276,6 +357,22 @@ interface Props {
   onConnectComplete(payload: ConnectCompletePayload): void
   onCanvasClick(position: { x: number; y: number }): void
   onNodeDrop(tool: WorkflowPaletteTool, position: { x: number; y: number }): void
+  onCreateShapeAnnotation(position: { x: number; y: number }): Promise<void>
+  onCreateTextAnnotation(position: { x: number; y: number }): Promise<void>
+  onCompleteFreehand(points: { x: number; y: number }[]): Promise<void>
+  onUpdateAnnotation(
+    annotationId: string,
+    input: {
+      posX?: number
+      posY?: number
+      width?: number
+      height?: number
+      textContent?: string
+      version?: number
+      versionNonce?: number
+    }
+  ): Promise<void>
+  onDeleteAnnotations(annotationIds: string[]): Promise<void>
   onConnectDropOnCanvas(payload: {
     fromProcessId: string
     fromHandleId: string | null
@@ -285,6 +382,7 @@ interface Props {
   }): void
   onFitViewReady?(fn: () => void): void
   onSelectAllReady?(fn: () => void): void
+  onAnnotationSelectionReady?(getSelectedAnnotationIds: () => string[]): void
   onExportReady?(fn: (filename: string) => void): void
   onEdgeReconnect?(oldEdgeId: string, newConnection: ConnectCompletePayload): void
   onPresence?(msg: PresenceMessage): void
@@ -303,16 +401,24 @@ interface Props {
     clientId: string
     ownUserId: string | null
   }): void
+  remoteAnnotationPreviews?: ReadonlyMap<string, { points: { x: number; y: number }[]; annotationType: string }>
 }
 
 type RfNode = {
   id: string
-  type: 'flowmatNode'
+  type: 'flowmatNode' | 'annotationNode'
   position: { x: number; y: number }
   width: number
   height: number
   selected: boolean
-  data: CanvasNodeViewModel
+  draggable?: boolean
+  data:
+    | CanvasNodeViewModel
+    | (CanvasAnnotationViewModel & {
+        onDelete(annotationId: string): void
+        onEditText(annotationId: string): void
+        canEdit: boolean
+      })
 }
 
 type RfEdge = {
@@ -326,7 +432,7 @@ type RfEdge = {
   data: CanvasEdgeViewModel
 }
 
-function toRfNodes(nodes: CanvasNodeViewModel[], selectedId: string | null): RfNode[] {
+function toRfProcessNodes(nodes: CanvasNodeViewModel[], selectedId: string | null): RfNode[] {
   return nodes.map((n) => ({
     id: n.id,
     type: 'flowmatNode' as const,
@@ -335,6 +441,31 @@ function toRfNodes(nodes: CanvasNodeViewModel[], selectedId: string | null): RfN
     height: n.size.height,
     selected: n.id === selectedId,
     data: n,
+  }))
+}
+
+function toRfAnnotationNodes(
+  annotations: CanvasAnnotationViewModel[],
+  callbacks: {
+    onDelete(annotationId: string): void
+    onEditText(annotationId: string): void
+  },
+  canEdit: boolean
+): RfNode[] {
+  return annotations.map((annotation) => ({
+    id: annotation.id,
+    type: 'annotationNode' as const,
+    position: annotation.position,
+    width: annotation.size.width,
+    height: annotation.size.height,
+    selected: false,
+    draggable: canEdit,
+    data: {
+      ...annotation,
+      onDelete: callbacks.onDelete,
+      onEditText: callbacks.onEditText,
+      canEdit,
+    },
   }))
 }
 
@@ -365,9 +496,12 @@ export function CanvasViewport({
   workflowId,
   nodes,
   edges,
+  annotations,
+  activeTool,
   selectedNodeId,
   selectedEdgeId,
   drawingEnabled,
+  canEditAnnotations,
   onNodeSelect,
   onEdgeSelect,
   onNodeDragEnd,
@@ -376,9 +510,15 @@ export function CanvasViewport({
   onConnectComplete,
   onCanvasClick,
   onNodeDrop,
+  onCreateShapeAnnotation,
+  onCreateTextAnnotation,
+  onCompleteFreehand,
+  onUpdateAnnotation,
+  onDeleteAnnotations,
   onConnectDropOnCanvas,
   onFitViewReady,
   onSelectAllReady,
+  onAnnotationSelectionReady,
   onExportReady,
   onEdgeReconnect,
   onPresence,
@@ -389,10 +529,13 @@ export function CanvasViewport({
   onDeleteReady,
   onSyncReady,
   editingPresence,
+  remoteAnnotationPreviews,
 }: Props) {
   const storageKey = `flowmat-viewport-${workflowId}`
   const savedViewport = useMemo(() => loadSavedViewport(storageKey), [storageKey])
-  const { selectNode, selectEdge, startInlineEdit, startInlineEditEdge, setMultiSelect } = useWorkspaceStore()
+  const { resolvedTheme } = useTheme()
+  const { selectNode, selectEdge, clearSelection, startInlineEdit, startInlineEditEdge, setMultiSelect } =
+    useWorkspaceStore()
 
   const applyRemoteNodeMove = useCallback((message: NodeMoveMessage) => {
     setLocalNodes((nds) =>
@@ -439,12 +582,47 @@ export function CanvasViewport({
           await reactFlowInstance.deleteElements({ edges: [{ id: edgeId }] })
         },
       })
+      onAnnotationSelectionReady?.(() =>
+        reactFlowInstance
+          .getNodes()
+          .filter((node) => node.type === 'annotationNode' && node.selected)
+          .map((node) => node.id)
+      )
     }
-  }, [reactFlowInstance, onDeleteReady, onFitViewReady, onSelectAllReady])
+  }, [reactFlowInstance, onDeleteReady, onFitViewReady, onSelectAllReady, onAnnotationSelectionReady])
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([])
   const [nodesToUpdateInternals, setNodesToUpdateInternals] = useState<string[]>([])
+  const [freehandDraft, setFreehandDraft] = useState<{ x: number; y: number }[]>([])
+  const [isFreehandDrawing, setIsFreehandDrawing] = useState(false)
+  const lastAnnotationPresenceSentAtRef = useRef(0)
 
-  const [localNodes, setLocalNodes] = useState<RfNode[]>(() => toRfNodes(nodes, selectedNodeId))
+  const handleDeleteAnnotation = useCallback((annotationId: string) => {
+    void onDeleteAnnotations([annotationId])
+  }, [onDeleteAnnotations])
+
+  const handleEditAnnotationText = useCallback((annotationId: string) => {
+    const annotation = annotations.find((item) => item.id === annotationId)
+    if (!annotation) return
+    const nextText = window.prompt('Edit annotation text', annotation.textContent ?? '')
+    if (nextText == null) return
+    void onUpdateAnnotation(annotationId, {
+      textContent: nextText,
+      version: annotation.version,
+      versionNonce: annotation.versionNonce,
+    })
+  }, [annotations, onUpdateAnnotation])
+
+  const [localNodes, setLocalNodes] = useState<RfNode[]>(() => [
+    ...toRfProcessNodes(nodes, selectedNodeId),
+    ...toRfAnnotationNodes(
+      annotations,
+      {
+        onDelete: handleDeleteAnnotation,
+        onEditText: handleEditAnnotationText,
+      },
+      canEditAnnotations
+    ),
+  ])
   const [localEdges, setLocalEdges] = useState<RfEdge[]>(() => toRfEdges(edges, selectedEdgeId))
 
   // Keep a ref so snap calculation always reads the latest positions without deps churn
@@ -463,20 +641,48 @@ export function CanvasViewport({
     if (changed.length > 0) setNodesToUpdateInternals(changed)
 
     setLocalNodes((prev) => {
-      const next = toRfNodes(nodes, selectedNodeId)
+      const next = [
+        ...toRfProcessNodes(nodes, selectedNodeId),
+        ...toRfAnnotationNodes(
+          annotations,
+          {
+            onDelete: handleDeleteAnnotation,
+            onEditText: handleEditAnnotationText,
+          },
+          canEditAnnotations
+        ),
+      ]
       const updated = next.map((n) => {
         const existing = prev.find((p) => p.id === n.id)
+        if (n.type === 'annotationNode') {
+          if (existing) {
+            return {
+              ...n,
+              selected: existing.selected,
+              width: existing.width ?? n.width,
+              height: existing.height ?? n.height,
+              position: existing.position ?? n.position,
+            }
+          }
+          return n
+        }
         const editingByUserId = editingPresence?.get(n.id) ?? null
         const nodeWithEditing: RfNode = { ...n, data: { ...n.data, editingByUserId } }
-        if (existing && (existing.width !== n.width || existing.height !== n.height)) {
-          return { ...nodeWithEditing, width: existing.width, height: existing.height }
+        if (existing) {
+          return {
+            ...nodeWithEditing,
+            selected: existing.selected,
+            width: existing.width ?? n.width,
+            height: existing.height ?? n.height,
+            position: existing.position ?? n.position,
+          }
         }
         return nodeWithEditing
       })
       localNodesRef.current = updated
       return updated
     })
-  }, [nodes, selectedNodeId, editingPresence])
+  }, [nodes, annotations, selectedNodeId, editingPresence, handleDeleteAnnotation, handleEditAnnotationText, canEditAnnotations])
 
   useEffect(() => {
     setLocalEdges(toRfEdges(edges, selectedEdgeId))
@@ -492,14 +698,34 @@ export function CanvasViewport({
 
       for (const change of changes) {
         if (change.type === 'position' && change.dragging === false && change.position) {
-          onNodeDragEnd(change.id, change.position.x, change.position.y)
+          const annotation = annotations.find((item) => item.id === change.id)
+          if (annotation) {
+            void onUpdateAnnotation(change.id, {
+              posX: change.position.x,
+              posY: change.position.y,
+              version: annotation.version,
+              versionNonce: annotation.versionNonce,
+            })
+          } else {
+            onNodeDragEnd(change.id, change.position.x, change.position.y)
+          }
         }
         if (change.type === 'dimensions' && change.resizing === false && change.dimensions) {
-          onNodeResize(change.id, change.dimensions.width, change.dimensions.height)
+          const annotation = annotations.find((item) => item.id === change.id)
+          if (annotation) {
+            void onUpdateAnnotation(change.id, {
+              width: change.dimensions.width,
+              height: change.dimensions.height,
+              version: annotation.version,
+              versionNonce: annotation.versionNonce,
+            })
+          } else {
+            onNodeResize(change.id, change.dimensions.width, change.dimensions.height)
+          }
         }
       }
     },
-    [onNodeDragEnd, onNodeResize]
+    [annotations, onNodeDragEnd, onNodeResize, onUpdateAnnotation]
   )
 
   const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
@@ -522,7 +748,9 @@ export function CanvasViewport({
       )
     )
 
-    sendNodeMove(node.id, node.position.x, node.position.y)
+    if (node.type === 'flowmatNode') {
+      sendNodeMove(node.id, node.position.x, node.position.y)
+    }
   }, [sendNodeMove])
 
   const handleNodeDragStop = useCallback(() => {
@@ -653,9 +881,17 @@ export function CanvasViewport({
         x: event.clientX,
         y: event.clientY,
       })
+      if (activeTool === 'annotation-shape') {
+        void onCreateShapeAnnotation(position)
+        return
+      }
+      if (activeTool === 'annotation-text') {
+        void onCreateTextAnnotation(position)
+        return
+      }
       onCanvasClick(position)
     },
-    [onCanvasClick, reactFlowInstance]
+    [activeTool, onCanvasClick, onCreateShapeAnnotation, onCreateTextAnnotation, reactFlowInstance]
   )
 
   const handleBeforeDelete = useCallback(
@@ -671,17 +907,108 @@ export function CanvasViewport({
 
   const handleDelete = useCallback(
     async ({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) => {
+      const annotationIds = nodes
+        .filter((node) => node.type === 'annotationNode')
+        .map((node) => node.id)
+      if (annotationIds.length > 0) {
+        await onDeleteAnnotations(annotationIds)
+      }
       if (!onDeleteElements) return
       await onDeleteElements({
-        nodeIds: nodes.map((node) => node.id),
+        nodeIds: nodes.filter((node) => node.type !== 'annotationNode').map((node) => node.id),
         edgeIds: edges.map((edge) => edge.id),
       })
     },
-    [onDeleteElements]
+    [onDeleteAnnotations, onDeleteElements]
+  )
+
+  const emitFreehandPresence = useCallback(
+    (points: { x: number; y: number }[], inProgress: boolean) => {
+      const now = Date.now()
+      if (inProgress && now - lastAnnotationPresenceSentAtRef.current < 40) return
+      lastAnnotationPresenceSentAtRef.current = now
+      sendPresence({
+        type: 'ANNOTATION_DRAWING',
+        annotation: {
+          annotationType: 'freehand',
+          points: points.map((point) => [point.x, point.y]),
+          inProgress,
+        },
+      })
+    },
+    [sendPresence]
+  )
+
+  const appendFreehandPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!reactFlowInstance) return
+      const point = reactFlowInstance.screenToFlowPosition({ x: clientX, y: clientY })
+      setFreehandDraft((prev) => {
+        const last = prev[prev.length - 1]
+        if (last && Math.hypot(last.x - point.x, last.y - point.y) < 2) {
+          return prev
+        }
+        const next = [...prev, point]
+        emitFreehandPresence(next, true)
+        return next
+      })
+    },
+    [emitFreehandPresence, reactFlowInstance]
+  )
+
+  const finishFreehandDrawing = useCallback(() => {
+    if (!isFreehandDrawing) return
+    setIsFreehandDrawing(false)
+    setFreehandDraft((prev) => {
+      if (prev.length > 1) {
+        void onCompleteFreehand(prev)
+      }
+      emitFreehandPresence([], false)
+      return []
+    })
+  }, [emitFreehandPresence, isFreehandDrawing, onCompleteFreehand])
+
+  useEffect(() => {
+    if (!isFreehandDrawing) return
+    const handleWindowMove = (event: globalThis.MouseEvent) => {
+      appendFreehandPoint(event.clientX, event.clientY)
+    }
+    const handleWindowUp = () => {
+      finishFreehandDrawing()
+    }
+
+    window.addEventListener('mousemove', handleWindowMove)
+    window.addEventListener('mouseup', handleWindowUp)
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMove)
+      window.removeEventListener('mouseup', handleWindowUp)
+    }
+  }, [appendFreehandPoint, finishFreehandDrawing, isFreehandDrawing])
+
+  const handleFreehandPointerDown = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (activeTool !== 'annotation-freehand' || event.button !== 0 || !reactFlowInstance) return
+      const target = event.target as HTMLElement | null
+      if (!target?.closest('.react-flow__pane')) return
+      event.preventDefault()
+      setIsFreehandDrawing(true)
+      setFreehandDraft([])
+      appendFreehandPoint(event.clientX, event.clientY)
+    },
+    [activeTool, appendFreehandPoint, reactFlowInstance]
   )
 
   return (
-    <div style={{ width: '100%', height: '100%', cursor: drawingEnabled ? 'crosshair' : 'default' }}>
+    <div
+      style={{ width: '100%', height: '100%', cursor: drawingEnabled ? 'crosshair' : 'default' }}
+      onMouseDown={handleFreehandPointerDown}
+      onMouseLeave={() => {
+        if (isFreehandDrawing) {
+          finishFreehandDrawing()
+        }
+      }}
+    >
       <ReactFlow
         onInit={setReactFlowInstance}
         nodes={localNodes as unknown as Node[]}
@@ -691,10 +1018,30 @@ export function CanvasViewport({
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onNodeClick={(_e, node) => {
+          if (node.type === 'annotationNode') {
+            clearSelection()
+            const annotation = annotations.find((item) => item.id === node.id)
+            if (annotation?.groupId) {
+              const siblingIds = new Set(
+                annotations.filter((item) => item.groupId === annotation.groupId).map((item) => item.id)
+              )
+              setLocalNodes((nds) =>
+                nds.map((n) => (n.type === 'annotationNode' ? { ...n, selected: siblingIds.has(n.id) } : n))
+              )
+            }
+            return
+          }
           selectNode(node.id)
           onNodeSelect(node.id)
         }}
         onNodeDoubleClick={(_e, node) => {
+          if (node.type === 'annotationNode') {
+            const annotation = annotations.find((item) => item.id === node.id)
+            if (annotation?.annotationType === 'text') {
+              handleEditAnnotationText(annotation.id)
+            }
+            return
+          }
           startInlineEdit(node.id)
         }}
         onEdgeDoubleClick={(_e, edge) => {
@@ -723,7 +1070,7 @@ export function CanvasViewport({
         onEdgeMouseEnter={handleEdgeMouseEnter}
         onEdgeMouseLeave={handleEdgeMouseLeave}
         connectionLineComponent={CustomConnectionLine}
-        colorMode="system"
+        colorMode={resolvedTheme}
         isValidConnection={handleIsValidConnection}
         onBeforeDelete={handleBeforeDelete}
         onDelete={(payload) => {
@@ -742,9 +1089,17 @@ export function CanvasViewport({
         snapToGrid
         snapGrid={[8, 8]}
         deleteKeyCode={null}
+        panOnDrag={activeTool !== 'annotation-freehand'}
+        selectionOnDrag={activeTool !== 'annotation-freehand'}
+        elementsSelectable={activeTool !== 'annotation-freehand'}
+        nodesDraggable={activeTool !== 'annotation-freehand'}
       >
         <NodesChangeMiddleware />
         <SnapGuideLayer guides={snapGuides} />
+        <AnnotationPreviewLayer
+          localDraft={freehandDraft}
+          remotePreviews={remoteAnnotationPreviews ?? new Map<string, AnnotationPreview>()}
+        />
         <InternalsUpdater nodeIds={nodesToUpdateInternals} />
         <ViewportPersister storageKey={storageKey} />
         <ExportController onReady={onExportReady} />

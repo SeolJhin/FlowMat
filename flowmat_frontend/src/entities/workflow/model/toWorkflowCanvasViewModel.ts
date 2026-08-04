@@ -3,9 +3,11 @@ import type {
   ProcessDto,
   ProcessIoDto,
   ProcessConnectionDto,
+  CanvasAnnotationDto,
 } from '../../../shared/types/api'
 import type {
   WorkflowCanvasViewModel,
+  CanvasAnnotationViewModel,
   CanvasNodeViewModel,
   CanvasPortViewModel,
   CanvasEdgeViewModel,
@@ -82,14 +84,43 @@ export function toEdgeViewModel(dto: ProcessConnectionDto): CanvasEdgeViewModel 
   }
 }
 
+function normalizeStyle(style: Record<string, unknown> | null): Record<string, unknown> {
+  return style ?? {}
+}
+
+export function toAnnotationViewModel(dto: CanvasAnnotationDto): CanvasAnnotationViewModel {
+  const points = (dto.points ?? []).map(([x, y]) => ({ x, y }))
+  return {
+    id: dto.annotationId,
+    annotationId: dto.annotationId,
+    workflowId: dto.workflowId,
+    projectId: dto.projectId,
+    annotationType: dto.annotationType,
+    shapeKind: dto.shapeKind,
+    position: { x: dto.posX, y: dto.posY },
+    size: { width: dto.width ?? 180, height: dto.height ?? 88 },
+    rotation: dto.rotation ?? 0,
+    points,
+    textContent: dto.textContent,
+    style: normalizeStyle(dto.style),
+    zIndex: dto.zIndex,
+    groupId: dto.groupId,
+    locked: dto.lockedYn === 'Y',
+    version: dto.version,
+    versionNonce: dto.versionNonce,
+  }
+}
+
 export function buildWorkflowCanvasViewModel(
   workflow: WorkflowHeaderViewModel,
   graphSeq: number,
   nodes: CanvasNodeViewModel[],
-  edges: CanvasEdgeViewModel[]
+  edges: CanvasEdgeViewModel[],
+  annotations: CanvasAnnotationViewModel[]
 ): WorkflowCanvasViewModel {
   const nodeMap: Record<string, CanvasNodeViewModel> = {}
   const portMap: Record<string, CanvasPortViewModel> = {}
+  const annotationMap: Record<string, CanvasAnnotationViewModel> = {}
 
   for (const node of nodes) {
     nodeMap[node.id] = node
@@ -98,13 +129,19 @@ export function buildWorkflowCanvasViewModel(
     }
   }
 
+  for (const annotation of annotations) {
+    annotationMap[annotation.id] = annotation
+  }
+
   return {
     workflow,
     graphSeq,
     nodes,
     edges,
+    annotations,
     nodeMap,
     portMap,
+    annotationMap,
   }
 }
 
@@ -122,9 +159,11 @@ export function toWorkflowCanvasViewModel(dto: WorkflowCanvasDto): WorkflowCanva
     workflowDesc: dto.workflow.workflowDesc,
     workflowType: dto.workflow.workflowType,
     workflowStatus: dto.workflow.workflowStatus,
+    currentUserRole: dto.currentUserRole,
   }
   const nodes = dto.processes.map((process) => toNodeViewModel(process, iosByProcess[process.processId] ?? []))
   const edges = dto.connections.map(toEdgeViewModel)
+  const annotations = dto.annotations.map(toAnnotationViewModel)
 
-  return buildWorkflowCanvasViewModel(workflow, dto.graphSeq, nodes, edges)
+  return buildWorkflowCanvasViewModel(workflow, dto.graphSeq, nodes, edges, annotations)
 }

@@ -43,6 +43,10 @@ export default defineConfig({
       '@': resolve(__dirname, 'src'),
     },
   },
+  test: {
+    environment: 'node',
+    include: ['src/**/*.test.ts'],
+  },
   server: {
     proxy: {
       '/api': {

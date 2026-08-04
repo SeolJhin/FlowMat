@@ -4,10 +4,7 @@ import type { ApiEnvelope, WorkflowGraphChangesDto } from '../../../shared/types
 
 export async function fetchWorkflowGraphChanges(workflowId: string, sinceSeq: number) {
   const envelope = await httpClient.get<ApiEnvelope<WorkflowGraphChangesDto>>(
-    `/workflows/${workflowId}/graph-changes`,
-    {
-      params: { sinceSeq },
-    }
+    `/workflows/${workflowId}/graph-changes?sinceSeq=${encodeURIComponent(sinceSeq)}`
   )
   return unwrapApiResponse(envelope)
 }

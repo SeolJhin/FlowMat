@@ -20,7 +20,7 @@ async function applyTemplate({ templateId, ...payload }: ApplyTemplateInput): Pr
   return unwrapApiResponse(envelope)
 }
 
-export function useApplyProcessTemplateMutation(workflowId: string) {
+export function useApplyProcessTemplateMutation(_workflowId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: applyTemplate,

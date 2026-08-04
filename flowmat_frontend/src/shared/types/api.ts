@@ -127,11 +127,33 @@ export interface ProcessConnectionDto {
   versionNonce: number
 }
 
+export interface CanvasAnnotationDto {
+  annotationId: string
+  workflowId: string
+  projectId: string
+  annotationType: 'shape' | 'freehand' | 'text'
+  shapeKind: 'rectangle' | 'ellipse' | 'diamond' | null
+  posX: number
+  posY: number
+  width: number | null
+  height: number | null
+  rotation: number | null
+  points: number[][] | null
+  textContent: string | null
+  style: Record<string, unknown> | null
+  zIndex: string
+  groupId: string | null
+  lockedYn: 'Y' | 'N'
+  version: number
+  versionNonce: number
+}
+
 export interface GraphEntityPayloadDto {
   workflow: WorkflowDto | null
   process: ProcessDto | null
   processIos: ProcessIoDto[]
   connection: ProcessConnectionDto | null
+  annotation: CanvasAnnotationDto | null
 }
 
 export interface WorkflowGraphChangeDto {
@@ -156,6 +178,8 @@ export interface WorkflowCanvasDto {
   processes: ProcessDto[]
   processIos: ProcessIoDto[]
   connections: ProcessConnectionDto[]
+  annotations: CanvasAnnotationDto[]
+  currentUserRole: 'viewer' | 'editor' | 'owner'
 }
 
 export interface FlowRuleDto {
