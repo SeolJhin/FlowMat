@@ -3,6 +3,8 @@ package org.myweb.flowmat.domain.workflow.application;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.workflow.annotation.api.dto.response.CanvasAnnotationResponse;
+import org.myweb.flowmat.domain.workflow.annotation.application.CanvasAnnotationService;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessConnectionResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessIoResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessResponse;
@@ -35,6 +37,7 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
     private final ProcessConnectionRepository processConnectionRepository;
     private final GraphSyncService graphSyncService;
     private final ProjectAccessService projectAccessService;
+    private final CanvasAnnotationService canvasAnnotationService;
 
     @Override
     public WorkflowCanvasResponse getCanvas(String workflowId) {
@@ -50,13 +53,17 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
             : processIoRepository.findAllByProcessIdInAndDeletedYnOrderByCreatedAtAsc(processIds, NOT_DELETED);
         List<ProcessConnection> connections = processConnectionRepository
             .findAllByWorkflowIdAndDeletedYnOrderByCreatedAtAsc(workflow.getWorkflowId(), NOT_DELETED);
+        List<CanvasAnnotationResponse> annotations = canvasAnnotationService.list(workflow.getWorkflowId());
+        String currentUserRole = projectAccessService.resolveCurrentUserRole(workflow.getProjectId());
 
         return new WorkflowCanvasResponse(
             toWorkflowResponse(workflow),
             graphSyncService.getCurrentSeq(workflow.getWorkflowId()),
             processes.stream().map(WorkflowCanvasServiceImpl::toProcessResponse).toList(),
             processIos.stream().map(WorkflowCanvasServiceImpl::toProcessIoResponse).toList(),
-            connections.stream().map(WorkflowCanvasServiceImpl::toConnectionResponse).toList()
+            connections.stream().map(WorkflowCanvasServiceImpl::toConnectionResponse).toList(),
+            annotations,
+            currentUserRole
         );
     }
 

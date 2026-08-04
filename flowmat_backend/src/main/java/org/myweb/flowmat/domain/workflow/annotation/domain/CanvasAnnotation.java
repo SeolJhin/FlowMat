@@ -1,0 +1,56 @@
+package org.myweb.flowmat.domain.workflow.annotation.domain;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import lombok.Getter;
+import lombok.Setter;
+import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
+
+@Getter
+@Setter
+@Entity
+@Table(name = "canvas_annotation")
+public class CanvasAnnotation extends CreatedUpdatedAuditEntity {
+
+    @Id
+    @Column(name = "annotation_id")
+    private String annotationId;
+
+    private String workflowId;
+    private String projectId;
+    private String annotationType;
+    private String shapeKind;
+
+    @Column(name = "pos_x")
+    private Double posX;
+
+    @Column(name = "pos_y")
+    private Double posY;
+
+    private Double width;
+    private Double height;
+    private Double rotation;
+
+    @Column(name = "points_json")
+    private String pointsJson;
+
+    private String textContent;
+    private String imageAssetUrl;
+
+    @Column(name = "style_json")
+    private String styleJson;
+
+    @Column(name = "z_index")
+    private String zIndex;
+
+    private String groupId;
+    private String lockedYn = "N";
+
+    @Column(name = "version")
+    private int version = 1;
+
+    @Column(name = "version_nonce")
+    private long versionNonce = 1L;
+}

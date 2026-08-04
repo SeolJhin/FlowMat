@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.api.dto.request.WorkflowCreateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.WorkflowUpdateRequest;
+import org.myweb.flowmat.domain.workflow.annotation.api.dto.response.CanvasAnnotationResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowCanvasResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowGraphChangesResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowResponse;
@@ -91,6 +92,7 @@ public class WorkflowController {
                 session.cursorX(),
                 session.cursorY(),
                 session.editingProcessId(),
+                null,
                 session.lastSeenAt()
             ))
             .toList();

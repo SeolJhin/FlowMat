@@ -1,8 +1,13 @@
 package org.myweb.flowmat.domain.workflow.collab;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.workflow.annotation.api.dto.response.CanvasAnnotationResponse;
+import org.myweb.flowmat.domain.workflow.annotation.domain.CanvasAnnotation;
+import org.myweb.flowmat.domain.workflow.annotation.repository.CanvasAnnotationRepository;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessIoResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowGraphChangesResponse;
@@ -17,6 +22,8 @@ import org.myweb.flowmat.domain.workflow.repository.ProcessConnectionRepository;
 import org.myweb.flowmat.domain.workflow.repository.ProcessIoRepository;
 import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
 import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
+import org.myweb.flowmat.global.exception.BusinessException;
+import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.security.AuthUser;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.Authentication;
@@ -38,6 +45,8 @@ public class GraphSyncService {
     private final ProcessConnectionRepository processConnectionRepository;
     private final WorkflowRepository workflowRepository;
     private final ProjectAccessService projectAccessService;
+    private final CanvasAnnotationRepository canvasAnnotationRepository;
+    private final ObjectMapper objectMapper;
 
     public void broadcast(Type type, String workflowId, String entityId) {
         broadcast(type, workflowId, entityId, resolveCurrentUserId());
@@ -75,9 +84,14 @@ public class GraphSyncService {
             case CONNECTION_CREATED, CONNECTION_UPDATED -> processConnectionRepository
                 .findByConnectionIdAndDeletedYn(entityId, NOT_DELETED)
                 .map(WorkflowCanvasServiceImpl::toConnectionResponse)
-                .map(connection -> new GraphEntityPayload(null, null, List.of(), connection))
+                .map(connection -> new GraphEntityPayload(null, null, List.of(), connection, null))
                 .orElse(null);
-            case NODE_DELETED, CONNECTION_DELETED -> null;
+            case ANNOTATION_CREATED, ANNOTATION_UPDATED -> canvasAnnotationRepository
+                .findByAnnotationIdAndDeletedYn(entityId, NOT_DELETED)
+                .map(this::toAnnotationResponse)
+                .map(annotation -> new GraphEntityPayload(null, null, List.of(), null, annotation))
+                .orElse(null);
+            case NODE_DELETED, CONNECTION_DELETED, ANNOTATION_DELETED -> null;
         };
     }
 
@@ -86,6 +100,7 @@ public class GraphSyncService {
             WorkflowCanvasServiceImpl.toWorkflowResponse(workflow),
             null,
             List.of(),
+            null,
             null
         );
     }
@@ -97,7 +112,41 @@ public class GraphSyncService {
             .map(WorkflowCanvasServiceImpl::toProcessIoResponse)
             .toList();
         ProcessResponse processResponse = WorkflowCanvasServiceImpl.toProcessResponse(process);
-        return new GraphEntityPayload(null, processResponse, processIos, null);
+        return new GraphEntityPayload(null, processResponse, processIos, null, null);
+    }
+
+    private CanvasAnnotationResponse toAnnotationResponse(CanvasAnnotation annotation) {
+        return new CanvasAnnotationResponse(
+            annotation.getAnnotationId(),
+            annotation.getWorkflowId(),
+            annotation.getProjectId(),
+            annotation.getAnnotationType(),
+            annotation.getShapeKind(),
+            annotation.getPosX(),
+            annotation.getPosY(),
+            annotation.getWidth(),
+            annotation.getHeight(),
+            annotation.getRotation(),
+            readJson(annotation.getPointsJson()),
+            annotation.getTextContent(),
+            readJson(annotation.getStyleJson()),
+            annotation.getZIndex(),
+            annotation.getGroupId(),
+            annotation.getLockedYn(),
+            annotation.getVersion(),
+            annotation.getVersionNonce()
+        );
+    }
+
+    private JsonNode readJson(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(raw);
+        } catch (Exception ex) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "Failed to deserialize annotation JSON.");
+        }
     }
 
     private static String resolveCurrentUserId() {
