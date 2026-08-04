@@ -41,6 +41,7 @@ class PresenceControllerTest {
             null,
             null,
             null,
+            null,
             0L
         );
 
@@ -62,7 +63,7 @@ class PresenceControllerTest {
 
         presenceController.relay(
             "workflow-9",
-            new PresenceMessage(PresenceMessage.Type.LEAVE, null, "client-9", null, null, null, null, 0L),
+            new PresenceMessage(PresenceMessage.Type.LEAVE, null, "client-9", null, null, null, null, null, 0L),
             new UsernamePasswordAuthenticationToken(new AuthUser("user-9"), null),
             headers
         );

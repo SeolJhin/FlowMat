@@ -35,8 +35,10 @@ public class PresenceController {
         if (sessionId != null && userId != null) {
             if (message.type() == PresenceMessage.Type.LEAVE) {
                 sessionRegistry.remove(sessionId);
-            } else {
+            } else if (message.type() != PresenceMessage.Type.ANNOTATION_DRAWING) {
                 sessionRegistry.touch(sessionId, userId, workflowId, message);
+            } else {
+                sessionRegistry.touch(sessionId, userId, workflowId, message.clientId());
             }
         }
 

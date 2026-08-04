@@ -16,6 +16,7 @@ public record PresenceMessage(
     Double cursorX,
     Double cursorY,
     String editingProcessId,
+    AnnotationPresencePayload annotation,
     long timestamp
 ) {
     public enum Type {
@@ -23,21 +24,22 @@ public record PresenceMessage(
         LEAVE,
         HEARTBEAT,
         CURSOR_MOVED,
-        NODE_EDITING
+        NODE_EDITING,
+        ANNOTATION_DRAWING
     }
 
     public static PresenceMessage join(String userId, String clientId, String workflowId) {
-        return new PresenceMessage(Type.JOIN, userId, clientId, workflowId, null, null, null,
+        return new PresenceMessage(Type.JOIN, userId, clientId, workflowId, null, null, null, null,
             System.currentTimeMillis());
     }
 
     public static PresenceMessage leave(String userId, String clientId, String workflowId) {
-        return new PresenceMessage(Type.LEAVE, userId, clientId, workflowId, null, null, null,
+        return new PresenceMessage(Type.LEAVE, userId, clientId, workflowId, null, null, null, null,
             System.currentTimeMillis());
     }
 
     public PresenceMessage withServerValues(String userId, String workflowId) {
-        return new PresenceMessage(type, userId, clientId, workflowId, cursorX, cursorY, editingProcessId,
+        return new PresenceMessage(type, userId, clientId, workflowId, cursorX, cursorY, editingProcessId, annotation,
             System.currentTimeMillis());
     }
 }
