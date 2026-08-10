@@ -22,6 +22,16 @@
 
 논의가 끝나면 이 표의 "상태"를 "완료(날짜)"로 갱신하고, 결론을 해당 절(0절, 3절 등)에도 반영한다.
 
+> **2026-08-11 — 항목 1, 4 임시 진행 메모 (상태는 "미완료" 유지)**
+> nekopunch가 seolly와 즉시 연락이 어려운 상황이라, 아래 조건으로 Step 1을 임시 진행했다:
+> - 항목 1(`widgets/` 신설): 진행함 — 0-1절에 이미 "다른 팀원 코드가 이 폴더를 참조하지
+>   않으므로 충돌 위험 없음"으로 리스크가 낮게 평가되어 있었음을 근거로 함.
+> - 항목 4(브랜치): 진행함 — 브랜치가 `main` 하나로 통합되어 있어 선택지가 없으므로
+>   사실상 이미 답이 정해져 있었음을 근거로 함.
+> - 두 항목 모두 정식 논의가 끝난 것은 아니므로 위 표의 "상태"는 의도적으로 "미완료"로
+>   유지한다. **seolly에게 사후 공유 필요.**
+> - 상세 로그는 9절 참고.
+
 ### 논의 로그
 
 nekopunch가 팀원과 논의한 내용을 시간순으로 여기에 남긴다. 위 표의 번호(#)와 연결해서 적는다.
@@ -291,5 +301,38 @@ Step 6은 1~5가 전부 검증된 뒤에만 진행한다 (기존 기능 삭제�
 각 Step 완료 시 아래에 한 줄씩 추가한다 (날짜, Step, 요약, 커밋 여부).
 
 ```
-(아직 없음 — Step 1부터 시작)
+2026-08-11 — Step 1: 리본 뼈대 완료 (미커밋, diff만 확인 대기)
+
+요약: widgets/canvas-toolbar/에 리본 공통 컴포넌트(Ribbon/RibbonTab/RibbonGroup/
+RibbonButton/types)와 ribbonConfig.ts(구조 전용, buildRibbonTabs(handlers)로 핸들러
+주입)를 생성. WorkflowCanvasPage.tsx의 기존 <header className="workspace-topbar">는
+그대로 두고, 그 아래에 <Ribbon>을 추가로 렌더링(기존 topbar 버튼은 이번 Step에서 이전
+안 함, 나란히 유지). Home/Annotate/View/Collaborate 4개 탭은 구조만 있고 그룹/버튼은
+비워둠(Step 2~4에서 채움). activeRibbonTabId는 WorkflowCanvasPage 로컬 useState.
+
+생성 파일:
+- flowmat_frontend/src/widgets/canvas-toolbar/ui/types.ts
+- flowmat_frontend/src/widgets/canvas-toolbar/ui/Ribbon.tsx
+- flowmat_frontend/src/widgets/canvas-toolbar/ui/RibbonTab.tsx
+- flowmat_frontend/src/widgets/canvas-toolbar/ui/RibbonGroup.tsx
+- flowmat_frontend/src/widgets/canvas-toolbar/ui/RibbonButton.tsx
+- flowmat_frontend/src/widgets/canvas-toolbar/config/ribbonConfig.ts
+- .claude/launch.json (vite dev 서버 프리뷰 실행용, 매 Step 시각 확인에 재사용)
+
+수정 파일:
+- flowmat_frontend/src/pages/workspace/ui/WorkflowCanvasPage.tsx (Ribbon import + 렌더 + activeRibbonTabId state 추가, 기존 로직/타이틀바 미변경)
+- flowmat_frontend/src/index.css (.ribbon* 클래스 추가, 기존 CSS 변수(--bg/--border/--text/--text-h/--accent/--accent-bg/--surface) 재사용해 라이트/다크 자동 대응)
+
+검증:
+- `npm run build` 성공 확인.
+- 실제 화면 확인: 로컬 백엔드가 기동되지 않아(docker daemon 미실행 → 로그인 502) 실제
+  워크스페이스 화면(로그인 후 캔버스)까지는 못 열어봄. 대신 app/router/index.tsx에
+  임시 프리뷰 라우트(`/__ribbon-preview`)를 추가해 동일한 <Ribbon tabs={buildRibbonTabs()}>
+  를 독립적으로 렌더링, 브라우저에서 탭 4개(Home/Annotate/View/Collaborate) 표시 및
+  클릭 시 active 클래스/aria-selected 전환을 DOM에서 직접 확인 완료. 확인 후 임시
+  라우트와 디버그 컴포넌트는 삭제하고 다시 빌드해 원상태 확인함(현재 diff에 남아있지
+  않음). 다음 Step부터는 백엔드(docker compose + Spring Boot)를 먼저 띄우고 실제
+  워크스페이스 화면에서 확인할 것 — 이번엔 시간상 대체 검증으로 넘어감.
+- 팀원 연락 불가로 항목 1(widgets/ 신설), 4(브랜치)를 임시 진행함 — 위 "논의 로그"
+  섹션의 2026-08-11 메모 참고. seolly에게 사후 공유 필요.
 ```

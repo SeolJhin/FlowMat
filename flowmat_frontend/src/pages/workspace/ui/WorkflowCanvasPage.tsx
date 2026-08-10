@@ -42,6 +42,8 @@ import {
   preloadNodePickerPopup,
 } from './workspacePreload'
 import type { WorkflowPaletteTool } from '../../../entities/workflow/model/nodeCatalog'
+import { Ribbon } from '../../../widgets/canvas-toolbar/ui/Ribbon'
+import { buildRibbonTabs } from '../../../widgets/canvas-toolbar/config/ribbonConfig'
 
 const CanvasViewport = lazy(() =>
   preloadCanvasViewport().then((module) => ({ default: module.CanvasViewport }))
@@ -130,6 +132,10 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   const panelWidthRef = useRef(panelWidths)
   panelWidthRef.current = panelWidths
   const [localPanelWidths, setLocalPanelWidths] = useState(panelWidths)
+
+  // Ribbon step 1: skeleton only, tabs not wired to existing topbar actions yet.
+  const [activeRibbonTabId, setActiveRibbonTabId] = useState('home')
+  const ribbonTabs = buildRibbonTabs()
 
   const makeResizeHandler = useCallback(
     (side: 'left' | 'right') =>
@@ -976,6 +982,8 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
           </span>
         </div>
       </header>
+
+      <Ribbon tabs={ribbonTabs} activeTabId={activeRibbonTabId} onTabChange={setActiveRibbonTabId} />
 
       {workspaceMessage && (
         <div

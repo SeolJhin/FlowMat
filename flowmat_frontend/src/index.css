@@ -201,6 +201,115 @@ code {
   opacity: 0.5;
 }
 
+/* ============================================================
+   Ribbon toolbar (widgets/canvas-toolbar) — Step 1 skeleton
+   ============================================================ */
+.ribbon {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.ribbon-tabbar {
+  display: flex;
+  gap: 2px;
+  padding: 0 14px;
+}
+
+.ribbon-tab {
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  opacity: 0.6;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.ribbon-tab:hover {
+  opacity: 0.9;
+}
+
+.ribbon-tab--active {
+  color: var(--text-h);
+  opacity: 1;
+  border-bottom-color: var(--accent);
+}
+
+.ribbon-groups {
+  display: flex;
+  align-items: stretch;
+  min-height: 56px;
+  padding: 0 14px;
+}
+
+.ribbon-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 6px 12px;
+  border-right: 1px solid var(--border);
+}
+
+.ribbon-group:last-child {
+  border-right: none;
+}
+
+.ribbon-group__buttons {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  align-items: center;
+}
+
+.ribbon-group__label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  opacity: 0.45;
+}
+
+.ribbon-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.ribbon-button:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.ribbon-button--active {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--text-h);
+}
+
+.ribbon-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ribbon-button__label {
+  font-size: 10px;
+  line-height: 1;
+}
+
 .workspace-body {
   display: flex;
   flex: 1;
