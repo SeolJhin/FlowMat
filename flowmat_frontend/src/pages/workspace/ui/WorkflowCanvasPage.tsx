@@ -20,7 +20,6 @@ import { useWorkflowsQuery } from '../../../entities/workflow/api/useWorkflowsQu
 import { useUpdateWorkflowMutation } from '../../../entities/workflow/api/useUpdateWorkflowMutation'
 import type { PresenceMessage, GraphChangeMessage } from '../../../entities/workflow/api/useWorkflowSync'
 import { Link, useNavigate } from 'react-router-dom'
-import { PALETTE_DRAG_MIME } from './canvasConstants'
 import {
   useBatchCanvasAnnotationMutation,
   useCreateCanvasAnnotationMutation,
@@ -42,6 +41,7 @@ import {
   preloadNodePickerPopup,
 } from './workspacePreload'
 import type { WorkflowPaletteTool } from '../../../entities/workflow/model/nodeCatalog'
+import { NodePaletteSidebar } from './NodePaletteSidebar'
 import { Ribbon } from '../../../widgets/canvas-toolbar/ui/Ribbon'
 import { buildRibbonTabs } from '../../../widgets/canvas-toolbar/config/ribbonConfig'
 
@@ -1001,122 +1001,20 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
       )}
 
       <div className="workspace-body">
-        <aside className="workspace-panel workspace-panel--left" style={{ width: localPanelWidths.left }}>
-          <div style={{ display: 'grid', gap: '10px' }}>
-            <h3 style={{ margin: 0 }}>Node Palette</h3>
-            <p className="panel-placeholder" style={{ margin: 0 }}>
-              Pick a workflow node, then click any empty canvas area.
-            </p>
-            {paletteDefinitions.map((definition) => (
-              <button
-                key={definition.tool}
-                type="button"
-                draggable
-                onDragStart={(event) => {
-                  event.dataTransfer.setData(PALETTE_DRAG_MIME, definition.tool)
-                  event.dataTransfer.effectAllowed = 'move'
-                }}
-                onClick={() => setActiveTool(definition.tool)}
-                style={{
-                  textAlign: 'left',
-                  padding: '12px 14px',
-                  borderRadius: '12px',
-                  border:
-                    activeTool === definition.tool
-                      ? '1px solid var(--accent)'
-                      : '1px solid var(--border)',
-                  background:
-                    activeTool === definition.tool ? 'var(--accent-bg)' : 'var(--surface)',
-                  display: 'grid',
-                  gap: '4px',
-                  cursor: 'grab',
-                }}
-              >
-                <strong>{definition.label}</strong>
-                <span style={{ fontSize: '12px', opacity: 0.75 }}>
-                  {definition.description}
-                </span>
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => setActiveTool('select')}
-              style={{
-                textAlign: 'left',
-                padding: '12px 14px',
-                borderRadius: '12px',
-                border:
-                  activeTool === 'select'
-                    ? '1px solid var(--accent)'
-                    : '1px solid var(--border)',
-                background: activeTool === 'select' ? 'var(--accent-bg)' : 'var(--surface)',
-              }}
-            >
-              Pointer
-            </button>
-            <div style={{ marginTop: '8px', display: 'grid', gap: '8px' }}>
-              <h3 style={{ margin: 0 }}>Annotations</h3>
-              <p className="panel-placeholder" style={{ margin: 0 }}>
-                Shapes and notes persist as a separate canvas layer. Freehand relays live while drawing.
-              </p>
-              {ANNOTATION_TOOL_DEFINITIONS.map((definition) => (
-                <button
-                  key={definition.tool}
-                  type="button"
-                  disabled={!canEditAnnotations}
-                  onClick={() => setActiveTool(definition.tool)}
-                  style={{
-                    textAlign: 'left',
-                    padding: '12px 14px',
-                    borderRadius: '12px',
-                    border:
-                      activeTool === definition.tool
-                        ? '1px solid var(--accent)'
-                        : '1px solid var(--border)',
-                    background:
-                      activeTool === definition.tool ? 'var(--accent-bg)' : 'var(--surface)',
-                    display: 'grid',
-                    gap: '4px',
-                    opacity: canEditAnnotations ? 1 : 0.5,
-                  }}
-                >
-                  <strong>{definition.label}</strong>
-                  <span style={{ fontSize: '12px', opacity: 0.75 }}>{definition.description}</span>
-                </button>
-              ))}
-              {canEditAnnotations && (
-                <div style={{ marginTop: '4px', display: 'grid', gap: '6px' }}>
-                  <span className="panel-placeholder" style={{ fontSize: '12px' }}>
-                    Select 2+ annotations on the canvas, then:
-                  </span>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
-                    <button type="button" title="Align left" onClick={() => void handleAlign('left')}>⟸</button>
-                    <button type="button" title="Align center (horizontal)" onClick={() => void handleAlign('centerX')}>↔</button>
-                    <button type="button" title="Align right" onClick={() => void handleAlign('right')}>⟹</button>
-                    <button type="button" title="Align top" onClick={() => void handleAlign('top')}>⟰</button>
-                    <button type="button" title="Align middle (vertical)" onClick={() => void handleAlign('centerY')}>↕</button>
-                    <button type="button" title="Align bottom" onClick={() => void handleAlign('bottom')}>⟱</button>
-                  </div>
-                  <div style={{ display: 'flex', gap: '4px' }}>
-                    <button type="button" title="Distribute horizontally (3+)" onClick={() => void handleDistribute('horizontal')}>
-                      Distribute H
-                    </button>
-                    <button type="button" title="Distribute vertically (3+)" onClick={() => void handleDistribute('vertical')}>
-                      Distribute V
-                    </button>
-                  </div>
-                  <div style={{ display: 'flex', gap: '4px' }}>
-                    <button type="button" title="Group selected annotations" onClick={() => void handleGroup()}>
-                      Group
-                    </button>
-                    <button type="button" title="Ungroup selected annotations" onClick={() => void handleUngroup()}>
-                      Ungroup
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+        <aside
+          className="workspace-panel workspace-panel--left"
+          style={{ width: localPanelWidths.left, padding: 0, overflow: 'hidden' }}
+        >
+          <NodePaletteSidebar
+            paletteDefinitions={paletteDefinitions}
+            activeTool={activeTool}
+            setActiveTool={setActiveTool}
+            canEditAnnotations={canEditAnnotations}
+            onAlign={(direction) => void handleAlign(direction)}
+            onDistribute={(axis) => void handleDistribute(axis)}
+            onGroup={() => void handleGroup()}
+            onUngroup={() => void handleUngroup()}
+          />
         </aside>
 
         <div className="panel-resize-handle" onMouseDown={makeResizeHandler('left')} />
@@ -1253,8 +1151,3 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
     </div>
   )
 }
-
-
-
-
-
