@@ -6,6 +6,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
 
 @Getter
@@ -33,13 +35,21 @@ public class CanvasAnnotation extends CreatedUpdatedAuditEntity {
     private Double height;
     private Double rotation;
 
-    @Column(name = "points_json")
+    // Explicit jsonb type mapping: without this, Hibernate binds a NULL
+    // pointsJson (shape/text annotations don't have points) as a plain
+    // varchar parameter, which Postgres rejects for a jsonb column
+    // ("column is of type jsonb but expression is of type character
+    // varying"). Non-null values (freehand) happened to work anyway, which
+    // masked the bug until shape/text annotations were tried.
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "points_json", columnDefinition = "jsonb")
     private String pointsJson;
 
     private String textContent;
     private String imageAssetUrl;
 
-    @Column(name = "style_json")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "style_json", columnDefinition = "jsonb")
     private String styleJson;
 
     @Column(name = "z_index")

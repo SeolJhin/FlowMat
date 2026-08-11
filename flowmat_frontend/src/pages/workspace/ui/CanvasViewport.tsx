@@ -416,7 +416,7 @@ type RfNode = {
     | CanvasNodeViewModel
     | (CanvasAnnotationViewModel & {
         onDelete(annotationId: string): void
-        onEditText(annotationId: string): void
+        onCommitText(annotationId: string, text: string): void
         canEdit: boolean
       })
 }
@@ -448,7 +448,7 @@ function toRfAnnotationNodes(
   annotations: CanvasAnnotationViewModel[],
   callbacks: {
     onDelete(annotationId: string): void
-    onEditText(annotationId: string): void
+    onCommitText(annotationId: string, text: string): void
   },
   canEdit: boolean
 ): RfNode[] {
@@ -463,7 +463,7 @@ function toRfAnnotationNodes(
     data: {
       ...annotation,
       onDelete: callbacks.onDelete,
-      onEditText: callbacks.onEditText,
+      onCommitText: callbacks.onCommitText,
       canEdit,
     },
   }))
@@ -600,13 +600,12 @@ export function CanvasViewport({
     void onDeleteAnnotations([annotationId])
   }, [onDeleteAnnotations])
 
-  const handleEditAnnotationText = useCallback((annotationId: string) => {
+  const handleCommitAnnotationText = useCallback((annotationId: string, text: string) => {
     const annotation = annotations.find((item) => item.id === annotationId)
     if (!annotation) return
-    const nextText = window.prompt('Edit annotation text', annotation.textContent ?? '')
-    if (nextText == null) return
+    if (text === (annotation.textContent ?? '')) return
     void onUpdateAnnotation(annotationId, {
-      textContent: nextText,
+      textContent: text,
       version: annotation.version,
       versionNonce: annotation.versionNonce,
     })
@@ -618,7 +617,7 @@ export function CanvasViewport({
       annotations,
       {
         onDelete: handleDeleteAnnotation,
-        onEditText: handleEditAnnotationText,
+        onCommitText: handleCommitAnnotationText,
       },
       canEditAnnotations
     ),
@@ -647,7 +646,7 @@ export function CanvasViewport({
           annotations,
           {
             onDelete: handleDeleteAnnotation,
-            onEditText: handleEditAnnotationText,
+            onCommitText: handleCommitAnnotationText,
           },
           canEditAnnotations
         ),
@@ -682,7 +681,7 @@ export function CanvasViewport({
       localNodesRef.current = updated
       return updated
     })
-  }, [nodes, annotations, selectedNodeId, editingPresence, handleDeleteAnnotation, handleEditAnnotationText, canEditAnnotations])
+  }, [nodes, annotations, selectedNodeId, editingPresence, handleDeleteAnnotation, handleCommitAnnotationText, canEditAnnotations])
 
   useEffect(() => {
     setLocalEdges(toRfEdges(edges, selectedEdgeId))
@@ -1036,10 +1035,8 @@ export function CanvasViewport({
         }}
         onNodeDoubleClick={(_e, node) => {
           if (node.type === 'annotationNode') {
-            const annotation = annotations.find((item) => item.id === node.id)
-            if (annotation?.annotationType === 'text') {
-              handleEditAnnotationText(annotation.id)
-            }
+            // Text annotations now enter inline edit mode on their own
+            // double-click (see CanvasAnnotationNode), so nothing to do here.
             return
           }
           startInlineEdit(node.id)

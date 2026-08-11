@@ -1,10 +1,10 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { NodeResizer, NodeToolbar, Position, type NodeProps } from '@xyflow/react'
 import type { CanvasAnnotationPoint, CanvasAnnotationViewModel } from '../../../entities/workflow/model/types'
 
 type AnnotationNodeData = CanvasAnnotationViewModel & {
   onDelete(annotationId: string): void
-  onEditText?(annotationId: string): void
+  onCommitText?(annotationId: string, text: string): void
   canEdit: boolean
 }
 
@@ -64,6 +64,41 @@ export function CanvasAnnotationNode({ data, selected }: NodeProps) {
   const fill = resolveFill(annotation.style)
   const strokeWidth = resolveStrokeWidth(annotation.style)
 
+  const [isEditingText, setIsEditingText] = useState(false)
+  const [draftText, setDraftText] = useState(annotation.textContent ?? '')
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // If the server-side text changes while we're not editing (e.g. a
+  // collaborator updated it), keep the draft in sync so it's fresh
+  // whenever editing starts.
+  useEffect(() => {
+    if (!isEditingText) setDraftText(annotation.textContent ?? '')
+  }, [annotation.textContent, isEditingText])
+
+  useEffect(() => {
+    if (isEditingText) {
+      const el = textareaRef.current
+      el?.focus()
+      el?.select()
+    }
+  }, [isEditingText])
+
+  function startEditing() {
+    if (!annotation.canEdit) return
+    setDraftText(annotation.textContent ?? '')
+    setIsEditingText(true)
+  }
+
+  function commitEditing() {
+    setIsEditingText(false)
+    annotation.onCommitText?.(annotation.annotationId, draftText)
+  }
+
+  function cancelEditing() {
+    setDraftText(annotation.textContent ?? '')
+    setIsEditingText(false)
+  }
+
   const freehandPath = useMemo(
     () => buildFreehandPath(annotation.points, annotation.size.width, annotation.size.height),
     [annotation.points, annotation.size.height, annotation.size.width]
@@ -86,13 +121,13 @@ export function CanvasAnnotationNode({ data, selected }: NodeProps) {
       {annotation.canEdit && (
         <NodeToolbar isVisible={selected} position={Position.Top} offset={6} align="center">
           <div className="node-toolbar__group">
-            {annotation.annotationType === 'text' && annotation.onEditText && (
+            {annotation.annotationType === 'text' && annotation.canEdit && (
               <button
                 type="button"
                 className="node-toolbar__btn nodrag nopan"
                 onClick={(event) => {
                   event.stopPropagation()
-                  annotation.onEditText?.(annotation.annotationId)
+                  startEditing()
                 }}
               >
                 Edit
@@ -146,11 +181,33 @@ export function CanvasAnnotationNode({ data, selected }: NodeProps) {
           }}
           onDoubleClick={(event) => {
             event.stopPropagation()
-            if (!annotation.canEdit) return
-            annotation.onEditText?.(annotation.annotationId)
+            startEditing()
           }}
         >
-          <span>{annotation.textContent || 'Text'}</span>
+          {isEditingText ? (
+            <textarea
+              ref={textareaRef}
+              className="canvas-annotation__text-input nodrag nopan"
+              value={draftText}
+              onChange={(event) => setDraftText(event.target.value)}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+              onBlur={commitEditing}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault()
+                  commitEditing()
+                } else if (event.key === 'Escape') {
+                  event.preventDefault()
+                  cancelEditing()
+                }
+                event.stopPropagation()
+              }}
+              style={{ color: stroke }}
+            />
+          ) : (
+            <span>{annotation.textContent || 'Text'}</span>
+          )}
         </div>
       )}
       {annotation.annotationType === 'freehand' && (

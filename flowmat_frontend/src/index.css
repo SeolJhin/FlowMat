@@ -1178,3 +1178,35 @@ code {
     bottom: 10px;
   }
 }
+
+/* ============================================================
+   Canvas annotations — text box + inline edit textarea
+   (canvas-annotation__text previously had no dedicated CSS at
+   all, so its box model came purely from browser defaults)
+   ============================================================ */
+.canvas-annotation__text {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow: hidden;
+  word-break: break-word;
+  cursor: text;
+}
+
+.canvas-annotation__text-input {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  padding: 0;
+}
