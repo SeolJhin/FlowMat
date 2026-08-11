@@ -335,4 +335,47 @@ RibbonButton/types)와 ribbonConfig.ts(구조 전용, buildRibbonTabs(handlers)�
   워크스페이스 화면에서 확인할 것 — 이번엔 시간상 대체 검증으로 넘어감.
 - 팀원 연락 불가로 항목 1(widgets/ 신설), 4(브랜치)를 임시 진행함 — 위 "논의 로그"
   섹션의 2026-08-11 메모 참고. seolly에게 사후 공유 필요.
+
+2026-08-12 — Step 2: Home 탭 완료 (미커밋, diff만 확인 대기)
+
+요약: ribbonConfig.ts의 Home 탭에 Tools/Modify/Layout/Export 4개 그룹과 정적 버튼
+(select-pointer, add-node, undo, redo, layout-tb, layout-lr, export-json, export-png)을
+채움. 아이콘은 문서 2절 표대로 lucide-react에서 매핑(MousePointer2/Plus/Undo2/Redo2/
+AlignVerticalJustifyStart/AlignHorizontalJustifyStart/FileJson/Image). buildRibbonTabs를
+확장해 handlers에 title도 주입 가능하게 하고(disabled와 마찬가지로 런타임에 바뀌는 값이라
+5-1절의 "구조는 config, 핸들러/데이터는 상위 주입" 원칙에 맞춰 처리), 두 번째 인자로
+dynamicButtons(그룹id -> 완성된 RibbonButtonDefinition[])를 추가 — paletteDefinitions
+기반 노드 타입별 도구 버튼처럼 개수가 미리 정해지지 않는 버튼을 Tools 그룹 끝에 이어붙이는
+용도. 아이콘 필드가 실제 WorkflowNodeDefinition에는 없음을 nodeCatalog.ts에서 확인했으므로
+문서 2절의 "아이콘 필드 있으면 사용, 없으면 Shapes" 규칙에 따라 전부 Shapes 아이콘 사용.
+
+WorkflowCanvasPage.tsx는 기존 undo()/redo()/applyLayout()/exportJson()/addNode()/
+setActiveTool() 등 핸들러 로직을 전혀 수정하지 않고, 그대로 참조하는 ribbonHandlers/
+ribbonDynamicButtons 객체만 새로 구성해 buildRibbonTabs(handlers, dynamicButtons)에 주입.
+기존 workspace-topbar는 완전히 제거하지 않고(Step 6 예정), 이번에 리본으로 옮긴 버튼들
+(Pointer/노드 타입별 도구/Undo/Redo/Layout TB/Layout LR/Export JSON/Export PNG/Add Node)만
+JSX 주석으로 숨김 처리. Annotate 탭 영역(ANNOTATION_TOOL_DEFINITIONS 버튼)과 "Current tool: ..."
+상태 텍스트는 Step 3 범위이므로 이번 Step에서 건드리지 않고 그대로 topbar에 유지.
+
+수정 파일:
+- flowmat_frontend/src/widgets/canvas-toolbar/config/ribbonConfig.ts (Home 탭 groups/buttons
+  채움, RibbonButtonHandlers에 title 추가, buildRibbonTabs에 dynamicButtons 2번째 인자 추가)
+- flowmat_frontend/src/pages/workspace/ui/WorkflowCanvasPage.tsx (ribbonHandlers/
+  ribbonDynamicButtons 구성 후 buildRibbonTabs에 주입하도록 변경, 기존 topbar에서
+  리본으로 옮긴 버튼 블록을 주석 처리, 기존 핸들러 함수 내부 로직은 무수정)
+
+검증:
+- `npm run build` 성공, `npx tsc --noEmit` 통과(에러 없음).
+- 로컬 백엔드 미기동으로 실제 워크스페이스 화면 대신, Step 1과 동일하게 임시 프리뷰 라우트
+  (`/__ribbon-preview`)에 mock 상태(activeTool/pastLen/nodeCount)를 가진 디버그 컴포넌트를
+  붙여 Ribbon만 독립 렌더링 후 확인: Home 탭 4개 그룹(Tools/Modify/Layout/Export)과 버튼
+  10개(Pointer/Add Node/동적 노드타입 2개(Process/Equipment)/Undo/Redo/Layout TB/Layout LR/
+  Export JSON/Export PNG)가 모두 렌더링됨. 클릭 시 activeTool 상태 변화 및 active 클래스
+  전환(javascript_tool로 `.ribbon-button--active` 클래스 확인), Undo 클릭 시 pastLen 감소와
+  title 텍스트 변경("Undo: step N" → pastLen 0일 때 disabled=true, title="Nothing to undo")을
+  DOM에서 직접 확인. Annotate 탭 전환 시 그룹이 비어있음(Step 3 전) 확인. 확인 후 임시 라우트와
+  디버그 컴포넌트는 삭제하고 다시 `npm run build` + `npx tsc --noEmit`으로 원상태 재확인함
+  (현재 diff에 남아있지 않음, git status로 확인).
+- 실제 워크스페이스 화면(로그인 후 캔버스)에서의 회귀 확인은 이번에도 로컬 백엔드 부재로
+  못함 — Step 3 이전에 백엔드(docker compose + Spring Boot)를 먼저 띄우고 확인 필요.
 ```

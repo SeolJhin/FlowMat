@@ -42,8 +42,13 @@ import {
   preloadNodePickerPopup,
 } from './workspacePreload'
 import type { WorkflowPaletteTool } from '../../../entities/workflow/model/nodeCatalog'
+import { Shapes } from 'lucide-react'
 import { Ribbon } from '../../../widgets/canvas-toolbar/ui/Ribbon'
-import { buildRibbonTabs } from '../../../widgets/canvas-toolbar/config/ribbonConfig'
+import {
+  buildRibbonTabs,
+  type RibbonButtonHandlers,
+  type RibbonDynamicButtons,
+} from '../../../widgets/canvas-toolbar/config/ribbonConfig'
 
 const CanvasViewport = lazy(() =>
   preloadCanvasViewport().then((module) => ({ default: module.CanvasViewport }))
@@ -133,9 +138,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   panelWidthRef.current = panelWidths
   const [localPanelWidths, setLocalPanelWidths] = useState(panelWidths)
 
-  // Ribbon step 1: skeleton only, tabs not wired to existing topbar actions yet.
   const [activeRibbonTabId, setActiveRibbonTabId] = useState('home')
-  const ribbonTabs = buildRibbonTabs()
 
   const makeResizeHandler = useCallback(
     (side: 'left' | 'right') =>
@@ -803,6 +806,50 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
     }
   }
 
+  // Ribbon step 2: Home tab wired to the same handlers the old topbar buttons used.
+  const ribbonHandlers: RibbonButtonHandlers = {
+    'select-pointer': { onClick: () => setActiveTool('select'), active: activeTool === 'select' },
+    'add-node': { onClick: () => void addNode() },
+    undo: {
+      onClick: () => void undo(),
+      disabled: past.length === 0,
+      title: past.length > 0 ? `Undo: ${past[past.length - 1].label}` : 'Nothing to undo',
+    },
+    redo: {
+      onClick: () => void redo(),
+      disabled: future.length === 0,
+      title: future.length > 0 ? `Redo: ${future[0].label}` : 'Nothing to redo',
+    },
+    'layout-tb': {
+      onClick: () => void applyLayout('TB'),
+      disabled: canvas.nodes.length === 0,
+      title: 'Auto layout top to bottom',
+    },
+    'layout-lr': {
+      onClick: () => void applyLayout('LR'),
+      disabled: canvas.nodes.length === 0,
+      title: 'Auto layout left to right',
+    },
+    'export-json': { onClick: exportJson, disabled: canvas.nodes.length === 0, title: 'Export as JSON' },
+    'export-png': {
+      onClick: () => exportPngRef.current(canvas.workflow.workflowName),
+      disabled: canvas.nodes.length === 0,
+      title: 'Export as PNG',
+    },
+  }
+
+  const ribbonDynamicButtons: RibbonDynamicButtons = {
+    tools: paletteDefinitions.map((definition) => ({
+      id: `tool-${definition.tool}`,
+      icon: Shapes,
+      label: definition.label,
+      onClick: () => setActiveTool(definition.tool),
+      active: activeTool === definition.tool,
+    })),
+  }
+
+  const ribbonTabs = buildRibbonTabs(ribbonHandlers, ribbonDynamicButtons)
+
   return (
     <div className="workspace-layout">
       <header className="workspace-topbar">
@@ -887,20 +934,8 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
           }}
         >
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {(['select', ...paletteDefinitions.map((definition) => definition.tool)] as const).map((tool) => (
-              <button
-                key={tool}
-                type="button"
-                onClick={() => setActiveTool(tool)}
-                style={{
-                  border:
-                    activeTool === tool ? '1px solid var(--accent)' : '1px solid var(--border)',
-                  background: activeTool === tool ? 'var(--accent-bg)' : 'transparent',
-                }}
-              >
-                {getToolLabel(tool, paletteDefinitions)}
-              </button>
-            ))}
+            {/* Pointer + node-type tool buttons moved to Ribbon Home tab > Tools group (Step 2).
+                Annotation tool buttons below stay here until Step 3 (Annotate tab). */}
             {ANNOTATION_TOOL_DEFINITIONS.map((definition) => (
               <button
                 key={definition.tool}
@@ -919,57 +954,8 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={() => void undo()}
-            disabled={past.length === 0}
-            title={past.length > 0 ? `Undo: ${past[past.length - 1].label}` : 'Nothing to undo'}
-          >
-            Undo
-          </button>
-          <button
-            type="button"
-            onClick={() => void redo()}
-            disabled={future.length === 0}
-            title={future.length > 0 ? `Redo: ${future[0].label}` : 'Nothing to redo'}
-          >
-            Redo
-          </button>
-          <button
-            type="button"
-            onClick={() => void applyLayout('TB')}
-            disabled={canvas.nodes.length === 0}
-            title="Auto layout top to bottom"
-          >
-            Layout TB
-          </button>
-          <button
-            type="button"
-            onClick={() => void applyLayout('LR')}
-            disabled={canvas.nodes.length === 0}
-            title="Auto layout left to right"
-          >
-            Layout LR
-          </button>
-          <button
-            type="button"
-            onClick={exportJson}
-            disabled={canvas.nodes.length === 0}
-            title="Export as JSON"
-          >
-            Export JSON
-          </button>
-          <button
-            type="button"
-            onClick={() => exportPngRef.current(canvas.workflow.workflowName)}
-            disabled={canvas.nodes.length === 0}
-            title="Export as PNG"
-          >
-            Export PNG
-          </button>
-          <button type="button" onClick={() => void addNode()}>
-            Add Node
-          </button>
+          {/* Undo/Redo/Layout TB/Layout LR/Export JSON/Export PNG/Add Node moved to
+              Ribbon Home tab > Modify/Layout/Export/Tools groups (Step 2). */}
           <span style={{ fontSize: '13px', opacity: 0.8 }}>
             Current tool: {getToolLabel(activeTool, paletteDefinitions)}.{' '}
             {activeTool === 'annotation-freehand'
