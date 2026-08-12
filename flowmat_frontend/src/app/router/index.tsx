@@ -26,6 +26,9 @@ const DormantReactivationRoute = lazy(() =>
 const AdminRoute = lazy(() =>
   import('../../pages/admin/ui/AdminRoute').then((m) => ({ default: m.AdminRoute }))
 )
+const EditorDemoRoute = lazy(() =>
+  import('../../pages/editor-demo/ui/EditorDemoRoute').then((m) => ({ default: m.EditorDemoRoute }))
+)
 const ProjectSettingsRoute = lazy(() =>
   import('../../pages/project-settings/ui/ProjectSettingsRoute').then((m) => ({ default: m.ProjectSettingsRoute }))
 )
@@ -62,6 +65,7 @@ export const router = createBrowserRouter([
   { path: '/invite/accept', element: withSuspense(<InviteAcceptRoute />) },
   { path: '/oauth2/success', element: withSuspense(<OAuthCallbackRoute />) },
   { path: '/reactivate-account', element: withSuspense(<DormantReactivationRoute />) },
+  { path: '/editor-demo', element: withSuspense(<EditorDemoRoute />) },
 
   // Protected routes — AuthGuard redirects to / if no token
   {
