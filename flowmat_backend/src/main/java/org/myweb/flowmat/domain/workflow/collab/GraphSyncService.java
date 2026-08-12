@@ -92,6 +92,7 @@ public class GraphSyncService {
                 .map(annotation -> new GraphEntityPayload(null, null, List.of(), null, annotation))
                 .orElse(null);
             case NODE_DELETED, CONNECTION_DELETED, ANNOTATION_DELETED -> null;
+            case EDITOR_DOCUMENT_UPDATED -> null;
         };
     }
 
