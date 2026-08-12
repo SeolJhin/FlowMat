@@ -1,20 +1,34 @@
 import type { CSSProperties } from 'react'
 
+export type WorkflowNodePaletteTool = 'process' | 'equipment' | 'storage' | 'input' | 'output'
+
+export type WorkflowAnnotationTool = 'annotation-shape' | 'annotation-text' | 'annotation-freehand'
+
+export type WorkflowEditorTool =
+  | 'editor-rectangle'
+  | 'editor-ellipse'
+  | 'editor-triangle'
+  | 'editor-line'
+  | 'editor-text'
+
 export type WorkflowPaletteTool =
   | 'select'
-  | 'process'
-  | 'equipment'
-  | 'storage'
-  | 'input'
-  | 'output'
-  | 'annotation-shape'
-  | 'annotation-text'
-  | 'annotation-freehand'
+  | WorkflowNodePaletteTool
+  | WorkflowAnnotationTool
+  | WorkflowEditorTool
+
+const WORKFLOW_EDITOR_TOOLS: readonly WorkflowEditorTool[] = [
+  'editor-rectangle',
+  'editor-ellipse',
+  'editor-triangle',
+  'editor-line',
+  'editor-text',
+]
 
 type WorkflowShapeKind = 'block' | 'circle' | 'pill' | 'dashed'
 
 export interface WorkflowNodeDefinition {
-  tool: Exclude<WorkflowPaletteTool, 'select'>
+  tool: WorkflowNodePaletteTool
   nodeType: string
   processType: string
   colorScheme: string
@@ -135,4 +149,8 @@ export function getWorkflowNodeStyle(nodeType: string | null | undefined): CSSPr
     default:
       return { borderRadius: '16px' }
   }
+}
+
+export function isWorkflowEditorTool(tool: WorkflowPaletteTool): tool is WorkflowEditorTool {
+  return WORKFLOW_EDITOR_TOOLS.includes(tool as WorkflowEditorTool)
 }

@@ -1,4 +1,4 @@
-﻿import { useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useCreateProcessConnectionMutation } from '../../../entities/workflow/api/useCreateProcessConnectionMutation'
 import { useCreateProcessIoMutation } from '../../../entities/workflow/api/useCreateProcessIoMutation'
 import { useCreateProcessMutation } from '../../../entities/workflow/api/useCreateProcessMutation'
@@ -594,6 +594,7 @@ export function useWorkflowCanvasActions({
   return {
     activeTool,
     setActiveTool,
+    setWorkspaceMessage,
     workspaceMessage,
     paletteDefinitions,
     commandHistory,

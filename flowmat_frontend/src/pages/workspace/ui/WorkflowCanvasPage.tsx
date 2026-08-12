@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { useIsMutating, useQueryClient } from '@tanstack/react-query'
 import type {
   CanvasAnnotationPoint,
@@ -21,12 +21,22 @@ import { useUpdateWorkflowMutation } from '../../../entities/workflow/api/useUpd
 import type { PresenceMessage, GraphChangeMessage } from '../../../entities/workflow/api/useWorkflowSync'
 import { Link, useNavigate } from 'react-router-dom'
 import { PALETTE_DRAG_MIME } from './canvasConstants'
+import type {
+  WorkspaceEditorCommandApi,
+  WorkspaceEditorSelectionSnapshot,
+} from './WorkspaceEditorLayer'
 import {
   useBatchCanvasAnnotationMutation,
   useCreateCanvasAnnotationMutation,
   useDeleteCanvasAnnotationMutation,
   usePatchCanvasAnnotationMutation,
+  type PatchCanvasAnnotationInput,
 } from '../../../entities/canvas-annotation/api/canvasAnnotationApi'
+import {
+  editorDocumentQueryKey,
+  fetchEditorDocument,
+  saveEditorDocument,
+} from '../../../entities/editor-document/api/editorDocumentApi'
 import {
   computeAlignedPosition,
   computeDistributedPositions,
@@ -41,14 +51,31 @@ import {
   preloadNodeInspector,
   preloadNodePickerPopup,
 } from './workspacePreload'
-import type { WorkflowPaletteTool } from '../../../entities/workflow/model/nodeCatalog'
-import { Shapes } from 'lucide-react'
+import {
+  isWorkflowEditorTool,
+  type WorkflowEditorTool,
+  type WorkflowPaletteTool,
+} from '../../../entities/workflow/model/nodeCatalog'
+import { Circle, Minus, Shapes, Square, Triangle, Type as TypeIcon } from 'lucide-react'
 import { Ribbon } from '../../../widgets/canvas-toolbar/ui/Ribbon'
 import {
   buildRibbonTabs,
   type RibbonButtonHandlers,
   type RibbonDynamicButtons,
 } from '../../../widgets/canvas-toolbar/config/ribbonConfig'
+import {
+  createElementId,
+  createEllipseElement,
+  createLineElement,
+  createRectangleElement,
+  createTextElement,
+  createTriangleElement,
+  insertElement,
+  snapPoint,
+  type EditorDocument,
+  type EditorElement,
+  type Vec2,
+} from '../../../lib/flowmat-editor'
 
 const CanvasViewport = lazy(() =>
   preloadCanvasViewport().then((module) => ({ default: module.CanvasViewport }))
@@ -78,14 +105,63 @@ const ANNOTATION_TOOL_DEFINITIONS: Array<{
   { tool: 'annotation-freehand', label: 'Freehand', description: 'Sketch directly with live collaborator previews.' },
 ]
 
+const EDITOR_TOOL_DEFINITIONS: Array<{
+  tool: WorkflowEditorTool
+  label: string
+  description: string
+  icon: typeof Square
+}> = [
+  { tool: 'editor-rectangle', label: 'Rectangle', description: 'Create backend editor rectangles.', icon: Square },
+  { tool: 'editor-ellipse', label: 'Ellipse', description: 'Create backend editor circles and ovals.', icon: Circle },
+  { tool: 'editor-triangle', label: 'Triangle', description: 'Create backend editor polygon triangles.', icon: Triangle },
+  { tool: 'editor-line', label: 'Line', description: 'Create backend editor lines.', icon: Minus },
+  { tool: 'editor-text', label: 'Text', description: 'Create backend editor text.', icon: TypeIcon },
+]
+
+const EMPTY_EDITOR_SELECTION: WorkspaceEditorSelectionSnapshot = Object.freeze({
+  selectedIds: [],
+  elements: [],
+  canUndo: false,
+  canRedo: false,
+})
+const WORKSPACE_EDITOR_GRID_SIZE = 8
+
 function getToolLabel(
   tool: WorkflowPaletteTool,
   paletteDefinitions: ReturnType<typeof useWorkflowCanvasActions>['paletteDefinitions']
 ) {
   if (tool === 'select') return 'Pointer'
+  const editorDefinition = EDITOR_TOOL_DEFINITIONS.find((definition) => definition.tool === tool)
+  if (editorDefinition) return editorDefinition.label
   const annotationDefinition = ANNOTATION_TOOL_DEFINITIONS.find((definition) => definition.tool === tool)
   if (annotationDefinition) return annotationDefinition.label
   return paletteDefinitions.find((definition) => definition.tool === tool)?.label ?? tool
+}
+
+function getWorkspaceToolShortcut(event: KeyboardEvent): WorkflowPaletteTool | null {
+  if (event.ctrlKey || event.metaKey || event.altKey) return null
+  switch (event.key.toLowerCase()) {
+    case 'v':
+      return 'select'
+    case 'r':
+      return 'editor-rectangle'
+    case 'o':
+      return 'editor-ellipse'
+    case 'l':
+      return 'editor-line'
+    case 't':
+      return 'editor-text'
+    default:
+      return null
+  }
+}
+
+function getUndoRedoShortcut(event: KeyboardEvent): 'undo' | 'redo' | null {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return null
+  const key = event.key.toLowerCase()
+  if (key === 'z') return event.shiftKey ? 'redo' : 'undo'
+  if (key === 'y') return 'redo'
+  return null
 }
 
 function normalizeFreehand(points: CanvasAnnotationPoint[]) {
@@ -105,6 +181,123 @@ function normalizeFreehand(points: CanvasAnnotationPoint[]) {
   }
 }
 
+const WORKSPACE_EDITOR_SHAPE_STYLE = {
+  fill: '#dff7ef',
+  stroke: '#0f766e',
+  strokeWidth: 1.5,
+  strokeStyle: 'solid' as const,
+  opacity: 1,
+}
+
+function createWorkspaceEditorElement(
+  tool: WorkflowEditorTool,
+  position: Vec2,
+  document: EditorDocument,
+): { element: EditorElement; nextElementSeq: number } {
+  const idPrefix = tool === 'editor-text' ? 'text' : 'shape'
+  const nextSequence = nextAvailableElementSequence(document, idPrefix)
+  const id = createElementId(nextSequence, idPrefix)
+  const order = document.elements.length + 1
+
+  switch (tool) {
+    case 'editor-rectangle':
+      return {
+        element: createRectangleElement({
+          id,
+          x: Math.round(position.x - 80),
+          y: Math.round(position.y - 48),
+          width: 160,
+          height: 96,
+          order,
+          cornerRadius: 8,
+          style: WORKSPACE_EDITOR_SHAPE_STYLE,
+        }),
+        nextElementSeq: nextSequence + 1,
+      }
+    case 'editor-ellipse':
+      return {
+        element: createEllipseElement({
+          id,
+          x: Math.round(position.x - 80),
+          y: Math.round(position.y - 48),
+          width: 160,
+          height: 96,
+          order,
+          style: {
+            ...WORKSPACE_EDITOR_SHAPE_STYLE,
+            fill: '#eef2ff',
+            stroke: '#4338ca',
+          },
+        }),
+        nextElementSeq: nextSequence + 1,
+      }
+    case 'editor-triangle':
+      return {
+        element: createTriangleElement({
+          id,
+          x: Math.round(position.x - 75),
+          y: Math.round(position.y - 60),
+          width: 150,
+          height: 120,
+          order,
+          style: {
+            ...WORKSPACE_EDITOR_SHAPE_STYLE,
+            fill: '#fff7ed',
+            stroke: '#c2410c',
+          },
+        }),
+        nextElementSeq: nextSequence + 1,
+      }
+    case 'editor-line':
+      return {
+        element: createLineElement({
+          id,
+          start: { x: Math.round(position.x - 80), y: Math.round(position.y) },
+          end: { x: Math.round(position.x + 80), y: Math.round(position.y) },
+          order,
+          style: {
+            stroke: '#7c3aed',
+            strokeWidth: 3,
+            strokeStyle: 'solid',
+            opacity: 1,
+            startArrow: 'none',
+            endArrow: 'none',
+          },
+        }),
+        nextElementSeq: nextSequence + 1,
+      }
+    case 'editor-text':
+      return {
+        element: createTextElement({
+          id,
+          x: Math.round(position.x - 60),
+          y: Math.round(position.y - 18),
+          width: 140,
+          height: 36,
+          order,
+          text: 'Text',
+          style: {
+            color: '#111827',
+            fontFamily: 'Inter, system-ui, sans-serif',
+            fontSize: 16,
+            fontWeight: 600,
+            opacity: 1,
+          },
+        }),
+        nextElementSeq: nextSequence + 1,
+      }
+  }
+}
+
+function nextAvailableElementSequence(document: EditorDocument, prefix: string) {
+  const ids = new Set(document.elements.map((element) => element.id))
+  let sequence = Math.max(1, document.nextElementSeq)
+  while (ids.has(createElementId(sequence, prefix))) {
+    sequence += 1
+  }
+  return sequence
+}
+
 function CanvasFallback() {
   return <div className="workspace-loading">Loading canvas...</div>
 }
@@ -115,6 +308,188 @@ function InspectorFallback() {
       <p>Loading inspector...</p>
     </div>
   )
+}
+
+function EditorElementInspector({
+  selection,
+  commandsRef,
+}: {
+  selection: WorkspaceEditorSelectionSnapshot
+  commandsRef: MutableRefObject<WorkspaceEditorCommandApi | null>
+}) {
+  const selectedCount = selection.elements.length
+  const firstElement = selection.elements[0] ?? null
+  const summaryLabel = selectedCount === 1 && firstElement
+    ? editorElementLabel(firstElement)
+    : `${selectedCount} editor elements`
+  const style = readEditorSelectionStyle(selection.elements)
+  const supportsFill = selection.elements.some(isShapeEditorElement)
+  const supportsStroke = selection.elements.some((element) => (
+    isShapeEditorElement(element) || element.type === 'line' || element.type === 'freehand' || element.type === 'text'
+  ))
+  const supportsText = firstElement?.type === 'text' && selectedCount === 1
+  const grouped = hasGroupedEditorSelection(selection.elements)
+
+  return (
+    <div className="inspector editor-inspector">
+      <h2 className="inspector__title">{summaryLabel}</h2>
+      <div className="editor-inspector__commands">
+        <button type="button" onClick={() => commandsRef.current?.undo()} disabled={!commandsRef.current || !selection.canUndo}>
+          Undo
+        </button>
+        <button type="button" onClick={() => commandsRef.current?.redo()} disabled={!commandsRef.current || !selection.canRedo}>
+          Redo
+        </button>
+        <button type="button" onClick={() => commandsRef.current?.duplicateSelected()} disabled={!commandsRef.current}>
+          Duplicate
+        </button>
+        <button type="button" onClick={() => commandsRef.current?.deleteSelected()} disabled={!commandsRef.current}>
+          Delete
+        </button>
+        <button type="button" onClick={() => commandsRef.current?.groupSelected()} disabled={!commandsRef.current || selectedCount < 2}>
+          Group
+        </button>
+        <button type="button" onClick={() => commandsRef.current?.ungroupSelected()} disabled={!commandsRef.current || !grouped}>
+          Ungroup
+        </button>
+        <button type="button" onClick={() => commandsRef.current?.sendSelectedToBack()} disabled={!commandsRef.current}>
+          Back
+        </button>
+        <button type="button" onClick={() => commandsRef.current?.bringSelectedToFront()} disabled={!commandsRef.current}>
+          Front
+        </button>
+      </div>
+      <div className="inspector__section">
+        <label className="editor-inspector__field">
+          <span>Fill</span>
+          <input
+            type="color"
+            disabled={!supportsFill}
+            value={toHexColor(style.fill, '#ffffff')}
+            onChange={(event) => commandsRef.current?.updateSelectedStyle({ fill: event.target.value })}
+          />
+        </label>
+        <label className="editor-inspector__field">
+          <span>Stroke</span>
+          <input
+            type="color"
+            disabled={!supportsStroke}
+            value={toHexColor(style.stroke, '#111827')}
+            onChange={(event) => commandsRef.current?.updateSelectedStyle({ stroke: event.target.value, color: event.target.value })}
+          />
+        </label>
+        <label className="editor-inspector__field">
+          <span>Width</span>
+          <input
+            type="number"
+            min={0}
+            max={24}
+            step={0.5}
+            disabled={!supportsStroke}
+            value={style.strokeWidth}
+            onChange={(event) => commandsRef.current?.updateSelectedStyle({ strokeWidth: Number(event.target.value) })}
+          />
+        </label>
+        <label className="editor-inspector__field">
+          <span>Opacity</span>
+          <input
+            type="range"
+            min={0.05}
+            max={1}
+            step={0.05}
+            value={style.opacity}
+            onChange={(event) => commandsRef.current?.updateSelectedStyle({ opacity: Number(event.target.value) })}
+          />
+        </label>
+        {supportsText && (
+          <>
+            <label className="editor-inspector__field">
+              <span>Text</span>
+              <input
+                type="text"
+                value={firstElement.text}
+                onChange={(event) => commandsRef.current?.updateSelectedStyle({ text: event.target.value })}
+              />
+            </label>
+            <label className="editor-inspector__field">
+              <span>Size</span>
+              <input
+                type="number"
+                min={8}
+                max={96}
+                step={1}
+                value={firstElement.style.fontSize}
+                onChange={(event) => commandsRef.current?.updateSelectedStyle({ fontSize: Number(event.target.value) })}
+              />
+            </label>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function readEditorSelectionStyle(elements: readonly EditorElement[]) {
+  const first = elements[0]
+  if (!first) {
+    return { fill: '#ffffff', stroke: '#111827', strokeWidth: 1, opacity: 1 }
+  }
+  if (isShapeEditorElement(first)) {
+    return {
+      fill: first.style.fill,
+      stroke: first.style.stroke,
+      strokeWidth: first.style.strokeWidth,
+      opacity: first.opacity,
+    }
+  }
+  if (first.type === 'line' || first.type === 'freehand') {
+    return {
+      fill: '#ffffff',
+      stroke: first.style.stroke,
+      strokeWidth: first.style.strokeWidth,
+      opacity: first.opacity,
+    }
+  }
+  if (first.type === 'text') {
+    return {
+      fill: '#ffffff',
+      stroke: first.style.color,
+      strokeWidth: 1,
+      opacity: first.opacity,
+    }
+  }
+  return { fill: '#ffffff', stroke: '#111827', strokeWidth: 1, opacity: first.opacity }
+}
+
+function isShapeEditorElement(element: EditorElement) {
+  return element.type === 'rectangle' || element.type === 'ellipse' || element.type === 'polygon'
+}
+
+function hasGroupedEditorSelection(elements: readonly EditorElement[]) {
+  return elements.some((element) => element.parentId != null)
+}
+
+function editorElementLabel(element: EditorElement) {
+  switch (element.type) {
+    case 'rectangle':
+      return 'Rectangle'
+    case 'ellipse':
+      return 'Ellipse'
+    case 'polygon':
+      return 'Polygon'
+    case 'line':
+      return 'Line'
+    case 'freehand':
+      return 'Freehand'
+    case 'text':
+      return 'Text'
+    case 'group':
+      return 'Group'
+  }
+}
+
+function toHexColor(value: string | undefined, fallback: string) {
+  return value && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback
 }
 
 export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
@@ -139,6 +514,8 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   const [localPanelWidths, setLocalPanelWidths] = useState(panelWidths)
 
   const [activeRibbonTabId, setActiveRibbonTabId] = useState('home')
+  const [editorSelection, setEditorSelection] = useState<WorkspaceEditorSelectionSnapshot>(EMPTY_EDITOR_SELECTION)
+  const editorCommandApiRef = useRef<WorkspaceEditorCommandApi | null>(null)
 
   const makeResizeHandler = useCallback(
     (side: 'left' | 'right') =>
@@ -163,6 +540,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   const {
     activeTool,
     setActiveTool,
+    setWorkspaceMessage,
     workspaceMessage,
     paletteDefinitions,
     commandHistory,
@@ -263,6 +641,12 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
     deferredGraphResyncFromRef.current = null
   }, [canvas.workflow.workflowId, canvas.graphSeq])
 
+  const invalidateEditorDocument = useCallback(() => {
+    void queryClient.invalidateQueries({
+      queryKey: editorDocumentQueryKey(canvas.workflow.workflowId),
+    })
+  }, [canvas.workflow.workflowId, queryClient])
+
   const applyGraphChanges = useCallback((changes: GraphChangeMessage[]) => {
     if (changes.length === 0) return
 
@@ -301,7 +685,8 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
           ? deferredFromSeq
           : Math.min(deferredGraphResyncFromRef.current, deferredFromSeq)
     }
-  }, [queryClient, canvas.workflow.workflowId])
+    invalidateEditorDocument()
+  }, [invalidateEditorDocument, queryClient, canvas.workflow.workflowId])
 
   const resyncGraphChanges = useCallback(async (sinceSeq: number) => {
     try {
@@ -310,6 +695,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
         await queryClient.invalidateQueries({
           queryKey: ['workflow-canvas', canvas.workflow.workflowId],
         })
+        invalidateEditorDocument()
         return
       }
       if (data.changes.length > 0) {
@@ -326,8 +712,9 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
       await queryClient.invalidateQueries({
         queryKey: ['workflow-canvas', canvas.workflow.workflowId],
       })
+      invalidateEditorDocument()
     }
-  }, [applyGraphChanges, queryClient, canvas.workflow.workflowId])
+  }, [applyGraphChanges, invalidateEditorDocument, queryClient, canvas.workflow.workflowId])
 
   const loadPresenceSnapshot = useCallback(async (ownUserId: string | null) => {
     try {
@@ -363,8 +750,9 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
 
   const handleReconnect = useCallback(() => {
     void resyncGraphChanges(graphSeqRef.current)
+    invalidateEditorDocument()
     void loadPresenceSnapshot(syncUserId)
-  }, [loadPresenceSnapshot, resyncGraphChanges, syncUserId])
+  }, [invalidateEditorDocument, loadPresenceSnapshot, resyncGraphChanges, syncUserId])
 
   useEffect(() => {
     if (inlineEditingNodeId || deferredGraphResyncFromRef.current == null) return
@@ -442,6 +830,77 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
     onFitView: () => fitViewRef.current(),
   })
 
+  function markEditorDocumentSaved() {
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+    setSavedLabel('saved')
+    savedTimerRef.current = setTimeout(() => setSavedLabel(null), 2000)
+  }
+
+  async function loadEditorDocument() {
+    return fetchEditorDocument(canvas.workflow.workflowId)
+  }
+
+  async function handleSaveEditorDocument() {
+    if (!canEditAnnotations) return
+    setWorkspaceMessage(null)
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+    setSavedLabel('saving')
+
+    try {
+      const editorDocument = await loadEditorDocument()
+      const savedDocument = await saveEditorDocument(canvas.workflow.workflowId, editorDocument)
+      queryClient.setQueryData(editorDocumentQueryKey(canvas.workflow.workflowId), savedDocument)
+      markEditorDocumentSaved()
+    } catch (error) {
+      setSavedLabel(null)
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to save editor document.')
+    }
+  }
+
+  async function handleReloadEditorDocument() {
+    editorCommandApiRef.current?.resetHistory()
+    setEditorSelection(EMPTY_EDITOR_SELECTION)
+    await queryClient.invalidateQueries({
+      queryKey: editorDocumentQueryKey(canvas.workflow.workflowId),
+    })
+  }
+
+  async function handleCreateEditorElement(tool: WorkflowEditorTool, position: Vec2) {
+    if (!canEditAnnotations) return
+    setWorkspaceMessage(null)
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+    setSavedLabel('saving')
+
+    try {
+      const editorDocument = await loadEditorDocument()
+      const snappedPosition = snapPoint(position, { enabled: true, gridSize: WORKSPACE_EDITOR_GRID_SIZE })
+      const { element, nextElementSeq } = createWorkspaceEditorElement(tool, snappedPosition, editorDocument)
+      const nextDocument = {
+        ...insertElement(editorDocument, element),
+        nextElementSeq,
+      }
+      const savedDocument = await saveEditorDocument(canvas.workflow.workflowId, nextDocument)
+      editorCommandApiRef.current?.recordBackendSnapshot(editorDocument, [])
+      queryClient.setQueryData(editorDocumentQueryKey(canvas.workflow.workflowId), savedDocument)
+      markEditorDocumentSaved()
+      setActiveTool('select')
+    } catch (error) {
+      setSavedLabel(null)
+      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to create editor element.')
+    }
+  }
+
+  const handleEditorSelectionChange = useCallback((snapshot: WorkspaceEditorSelectionSnapshot) => {
+    setEditorSelection(snapshot)
+    if (snapshot.elements.length > 0) {
+      clearSelection()
+    }
+  }, [clearSelection])
+
+  const handleEditorCommandReady = useCallback((api: WorkspaceEditorCommandApi | null) => {
+    editorCommandApiRef.current = api
+  }, [])
+
   const nodePicker = useCanvasInteractionStore((s) => s.nodePicker)
   const openNodePicker = useCanvasInteractionStore((s) => s.openNodePicker)
   const closeNodePicker = useCanvasInteractionStore((s) => s.closeNodePicker)
@@ -454,6 +913,13 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   const clearColorChange = useCanvasInteractionStore((s) => s.clearColorChange)
 
   const { past, future, undo, redo } = commandHistory
+  const hasWorkflowSelection = Boolean(selectedProcessId || selectedConnectionId)
+  const isEditorCommandContext = canEditAnnotations && !hasWorkflowSelection && (
+    isWorkflowEditorTool(activeTool) ||
+    editorSelection.elements.length > 0 ||
+    editorSelection.canUndo ||
+    editorSelection.canRedo
+  )
 
   // Declare refs and stable callbacks BEFORE any useEffect that references them
   const canvasRef = useRef(canvas)
@@ -533,6 +999,51 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable
 
+      if (!isEditing) {
+        const shortcutTool = getWorkspaceToolShortcut(e)
+        if (shortcutTool && (shortcutTool === 'select' || canEditAnnotations)) {
+          e.preventDefault()
+          setActiveTool(shortcutTool)
+          if (shortcutTool === 'select') {
+            editorCommandApiRef.current?.clearSelection()
+            setEditorSelection(EMPTY_EDITOR_SELECTION)
+            clearSelection()
+          }
+          return
+        }
+
+        if (e.key === 'Escape' && (activeTool !== 'select' || editorSelection.elements.length > 0)) {
+          e.preventDefault()
+          setActiveTool('select')
+          editorCommandApiRef.current?.clearSelection()
+          setEditorSelection(EMPTY_EDITOR_SELECTION)
+          clearSelection()
+          return
+        }
+
+        if (
+          (e.ctrlKey || e.metaKey) &&
+          e.key.toLowerCase() === 'a' &&
+          (isWorkflowEditorTool(activeTool) || editorSelection.elements.length > 0)
+        ) {
+          e.preventDefault()
+          editorCommandApiRef.current?.selectAll()
+          clearSelection()
+          return
+        }
+
+        const undoRedoShortcut = getUndoRedoShortcut(e)
+        if (undoRedoShortcut && isEditorCommandContext) {
+          e.preventDefault()
+          if (undoRedoShortcut === 'undo') {
+            editorCommandApiRef.current?.undo()
+          } else {
+            editorCommandApiRef.current?.redo()
+          }
+          return
+        }
+      }
+
       const ctx = {
         selectedProcessId,
         selectedConnectionId,
@@ -556,7 +1067,21 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo, selectedProcessId, selectedConnectionId, duplicateNode, clearSelection])
+  }, [
+    activeTool,
+    canEditAnnotations,
+    clearSelection,
+    duplicateNode,
+    editorSelection.canRedo,
+    editorSelection.canUndo,
+    editorSelection.elements.length,
+    isEditorCommandContext,
+    redo,
+    selectedConnectionId,
+    selectedProcessId,
+    setActiveTool,
+    undo,
+  ])
 
 
   useEffect(() => {
@@ -599,6 +1124,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
     ? canvas.edges.find((edge) => edge.id === selectedConnectionId) ?? null
     : null
   const selectedPort = selectedPortId ? canvas.portMap[selectedPortId] ?? null : null
+  const activeInspectorMode = editorSelection.elements.length > 0 ? 'editor' : inspectorMode
 
   function exportJson() {
     const payload = {
@@ -720,18 +1246,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
     })
   }
 
-  async function handleUpdateAnnotation(
-    annotationId: string,
-    input: {
-      posX?: number
-      posY?: number
-      width?: number
-      height?: number
-      textContent?: string
-      version?: number
-      versionNonce?: number
-    }
-  ) {
+  async function handleUpdateAnnotation(annotationId: string, input: PatchCanvasAnnotationInput) {
     await patchAnnotationMutation.mutateAsync({ annotationId, input })
   }
 
@@ -811,14 +1326,30 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
     'select-pointer': { onClick: () => setActiveTool('select'), active: activeTool === 'select' },
     'add-node': { onClick: () => void addNode() },
     undo: {
-      onClick: () => void undo(),
-      disabled: past.length === 0,
-      title: past.length > 0 ? `Undo: ${past[past.length - 1].label}` : 'Nothing to undo',
+      onClick: () => {
+        if (isEditorCommandContext) {
+          editorCommandApiRef.current?.undo()
+          return
+        }
+        void undo()
+      },
+      disabled: isEditorCommandContext ? !editorSelection.canUndo : past.length === 0,
+      title: isEditorCommandContext
+        ? (editorSelection.canUndo ? 'Undo editor document change' : 'Nothing to undo')
+        : (past.length > 0 ? `Undo: ${past[past.length - 1].label}` : 'Nothing to undo'),
     },
     redo: {
-      onClick: () => void redo(),
-      disabled: future.length === 0,
-      title: future.length > 0 ? `Redo: ${future[0].label}` : 'Nothing to redo',
+      onClick: () => {
+        if (isEditorCommandContext) {
+          editorCommandApiRef.current?.redo()
+          return
+        }
+        void redo()
+      },
+      disabled: isEditorCommandContext ? !editorSelection.canRedo : future.length === 0,
+      title: isEditorCommandContext
+        ? (editorSelection.canRedo ? 'Redo editor document change' : 'Nothing to redo')
+        : (future.length > 0 ? `Redo: ${future[0].label}` : 'Nothing to redo'),
     },
     'layout-tb': {
       onClick: () => void applyLayout('TB'),
@@ -836,6 +1367,15 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
       disabled: canvas.nodes.length === 0,
       title: 'Export as PNG',
     },
+    'save-editor-document': {
+      onClick: () => void handleSaveEditorDocument(),
+      disabled: !canEditAnnotations,
+      title: canEditAnnotations ? 'Save editor document elements' : 'Viewers cannot save editor elements',
+    },
+    'reload-editor-document': {
+      onClick: () => void handleReloadEditorDocument(),
+      title: 'Reload editor document elements',
+    },
   }
 
   const ribbonDynamicButtons: RibbonDynamicButtons = {
@@ -845,6 +1385,15 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
       label: definition.label,
       onClick: () => setActiveTool(definition.tool),
       active: activeTool === definition.tool,
+    })),
+    'editor-shapes': EDITOR_TOOL_DEFINITIONS.map((definition) => ({
+      id: `tool-${definition.tool}`,
+      icon: definition.icon,
+      label: definition.label,
+      onClick: () => setActiveTool(definition.tool),
+      active: activeTool === definition.tool,
+      disabled: !canEditAnnotations,
+      title: canEditAnnotations ? definition.description : 'Viewers cannot create editor elements',
     })),
   }
 
@@ -956,7 +1505,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
           </div>
           {/* Undo/Redo/Layout TB/Layout LR/Export JSON/Export PNG/Add Node moved to
               Ribbon Home tab > Modify/Layout/Export/Tools groups (Step 2). */}
-          <span style={{ fontSize: '13px', opacity: 0.8 }}>
+            <span style={{ fontSize: '13px', opacity: 0.8 }}>
             Current tool: {getToolLabel(activeTool, paletteDefinitions)}.{' '}
             {activeTool === 'annotation-freehand'
               ? 'Drag on empty canvas to sketch. Collaborators see a live preview before the final stroke is saved.'
@@ -964,7 +1513,9 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
                 ? 'Click empty canvas to drop a shape annotation.'
                 : activeTool === 'annotation-text'
                   ? 'Click empty canvas to drop a text annotation.'
-                  : 'Click the canvas to place a node, then drag between handles to connect.'}
+                  : activeTool.startsWith('editor-')
+                    ? 'Click empty canvas to create a backend editor element.'
+                    : 'Click the canvas to place a node, then drag between handles to connect.'}
           </span>
         </div>
       </header>
@@ -1040,6 +1591,37 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
             >
               Pointer
             </button>
+            <div style={{ marginTop: '8px', display: 'grid', gap: '8px' }}>
+              <h3 style={{ margin: 0 }}>Editor Shapes</h3>
+              <p className="panel-placeholder" style={{ margin: 0 }}>
+                Rectangles, ellipses, triangles, lines, and text persist in the new editor document.
+              </p>
+              {EDITOR_TOOL_DEFINITIONS.map((definition) => (
+                <button
+                  key={definition.tool}
+                  type="button"
+                  disabled={!canEditAnnotations}
+                  onClick={() => setActiveTool(definition.tool)}
+                  style={{
+                    textAlign: 'left',
+                    padding: '12px 14px',
+                    borderRadius: '12px',
+                    border:
+                      activeTool === definition.tool
+                        ? '1px solid var(--accent)'
+                        : '1px solid var(--border)',
+                    background:
+                      activeTool === definition.tool ? 'var(--accent-bg)' : 'var(--surface)',
+                    display: 'grid',
+                    gap: '4px',
+                    opacity: canEditAnnotations ? 1 : 0.5,
+                  }}
+                >
+                  <strong>{definition.label}</strong>
+                  <span style={{ fontSize: '12px', opacity: 0.75 }}>{definition.description}</span>
+                </button>
+              ))}
+            </div>
             <div style={{ marginTop: '8px', display: 'grid', gap: '8px' }}>
               <h3 style={{ margin: 0 }}>Annotations</h3>
               <p className="panel-placeholder" style={{ margin: 0 }}>
@@ -1118,14 +1700,26 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
               selectedEdgeId={selectedConnectionId}
               drawingEnabled={activeTool !== 'select'}
               canEditAnnotations={canEditAnnotations}
-              onNodeSelect={selectNode}
-              onEdgeSelect={selectEdge}
+              onNodeSelect={(processId) => {
+                editorCommandApiRef.current?.clearSelection()
+                setEditorSelection(EMPTY_EDITOR_SELECTION)
+                selectNode(processId)
+              }}
+              onEdgeSelect={(connectionId) => {
+                editorCommandApiRef.current?.clearSelection()
+                setEditorSelection(EMPTY_EDITOR_SELECTION)
+                selectEdge(connectionId)
+              }}
               onNodeDragEnd={handleNodeDragEnd}
               onNodeResize={handleNodeResize}
               onConnectStart={handleConnectStart}
               onConnectComplete={handleConnectComplete}
-              onCanvasClick={(position) => void createNodeAt(position)}
+              onCanvasClick={(position) => {
+                editorCommandApiRef.current?.clearSelection()
+                void createNodeAt(position)
+              }}
               onNodeDrop={(tool, position) => void createNodeFromTool(tool, position)}
+              onCreateEditorElement={handleCreateEditorElement}
               onCreateShapeAnnotation={handleCreateShapeAnnotation}
               onCreateTextAnnotation={handleCreateTextAnnotation}
               onCompleteFreehand={handleCompleteFreehand}
@@ -1142,6 +1736,9 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
               onBeforeDelete={handleBeforeDelete}
               onDeleteElements={handleDeleteElements}
               onSyncReady={handleSyncReady}
+              onEditorDocumentError={setWorkspaceMessage}
+              onEditorSelectionChange={handleEditorSelectionChange}
+              onEditorCommandReady={handleEditorCommandReady}
               editingPresence={editingPresence}
               remoteAnnotationPreviews={remoteAnnotationPreviews}
               onEdgeReconnect={async (oldEdgeId, newConnection) => {
@@ -1191,7 +1788,13 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
 
         <div className="panel-resize-handle" onMouseDown={makeResizeHandler('right')} />
         <aside className="workspace-panel workspace-panel--right" style={{ width: localPanelWidths.right }}>
-          {inspectorMode === 'node' && (
+          {activeInspectorMode === 'editor' && (
+            <EditorElementInspector
+              selection={editorSelection}
+              commandsRef={editorCommandApiRef}
+            />
+          )}
+          {activeInspectorMode === 'node' && (
             <Suspense fallback={<InspectorFallback />}>
               <NodeInspector
                 node={selectedNode}
@@ -1206,7 +1809,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
               />
             </Suspense>
           )}
-          {inspectorMode === 'connection' && (
+          {activeInspectorMode === 'connection' && (
             <Suspense fallback={<InspectorFallback />}>
               <ConnectionInspector
                 edge={selectedEdge}
@@ -1218,7 +1821,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
               />
             </Suspense>
           )}
-          {inspectorMode === 'multi' && (
+          {activeInspectorMode === 'multi' && (
             <div className="inspector-summary">
               <p>Multiple nodes selected</p>
               <p className="inspector-hint">
@@ -1226,7 +1829,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
               </p>
             </div>
           )}
-          {inspectorMode === 'none' && (
+          {activeInspectorMode === 'none' && (
             <div className="inspector-summary">
               <p>
                 {canvas.nodes.length} nodes | {canvas.edges.length} connections

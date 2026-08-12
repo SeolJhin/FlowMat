@@ -6,6 +6,8 @@ import {
   MousePointer2,
   Plus,
   Redo2,
+  RefreshCw,
+  Save,
   Undo2,
 } from 'lucide-react'
 import type { RibbonButtonDefinition, RibbonGroupDefinition, RibbonTabDefinition } from '../ui/types'
@@ -68,7 +70,25 @@ export const ribbonConfig: RibbonTabSkeleton[] = [
       },
     ],
   },
-  { id: 'annotate', label: 'Annotate', groups: [] },
+  {
+    id: 'annotate',
+    label: 'Annotate',
+    groups: [
+      {
+        id: 'editor-shapes',
+        label: 'Editor Shapes',
+        buttons: [],
+      },
+      {
+        id: 'editor-document',
+        label: 'Editor Document',
+        buttons: [
+          { id: 'save-editor-document', icon: Save, label: 'Save Editor' },
+          { id: 'reload-editor-document', icon: RefreshCw, label: 'Reload' },
+        ],
+      },
+    ],
+  },
   { id: 'view', label: 'View', groups: [] },
   { id: 'collaborate', label: 'Collaborate', groups: [] },
 ]

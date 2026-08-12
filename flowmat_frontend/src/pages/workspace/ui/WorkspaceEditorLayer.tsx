@@ -1,0 +1,1265 @@
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useReactFlow } from '@xyflow/react'
+import {
+  annotationsToEditorDocument,
+  angleBetween,
+  boxCenter,
+  cloneEditorElement,
+  createElementId,
+  createEmptyEditorDocument,
+  cleanupEmptyEditorGroups,
+  deleteElements as deleteEditorElements,
+  expandGroupSelection,
+  findElementsInBox,
+  getSelectedElementBounds,
+  groupEditorElements,
+  insertElement,
+  mergeEditorDocumentsById,
+  moveLineEndpoint,
+  normalizeBox,
+  resizeBoxFromHandle,
+  resizeElementWithinBox,
+  rotateElement,
+  selectElements,
+  snapPoint,
+  toElementId,
+  toSvgRenderNodes,
+  translateElement,
+  ungroupEditorElements,
+  updateElement,
+  editorElementToPatchAnnotationInput,
+  type Box2,
+  type EditorDocument,
+  type EditorElement,
+  type ElementId,
+  type LineEndpoint,
+  type ResizeHandle,
+  type Vec2,
+} from '../../../lib/flowmat-editor'
+import {
+  LineEndpointHandles,
+  SelectionHandles,
+  SelectionOutline,
+  SvgElementView,
+} from '../../../lib/flowmat-editor/react/SvgEditorSurface'
+import {
+  editorDocumentQueryKey,
+  useEditorDocumentQuery,
+  useSaveEditorDocumentMutation,
+} from '../../../entities/editor-document/api/editorDocumentApi'
+import type { CanvasAnnotationViewModel } from '../../../entities/workflow/model/types'
+import type { WorkflowPaletteTool } from '../../../entities/workflow/model/nodeCatalog'
+import type { PatchCanvasAnnotationInput } from '../../../entities/canvas-annotation/api/canvasAnnotationApi'
+
+const WORKSPACE_LAYER_EXTENT = 100000
+const WORKSPACE_GRID_SIZE = 8
+const WORKSPACE_EDITOR_HISTORY_LIMIT = 100
+
+export interface WorkspaceEditorSelectionSnapshot {
+  selectedIds: readonly ElementId[]
+  elements: readonly EditorElement[]
+  canUndo: boolean
+  canRedo: boolean
+}
+
+export interface WorkspaceEditorStylePatch {
+  fill?: string
+  stroke?: string
+  strokeWidth?: number
+  opacity?: number
+  text?: string
+  color?: string
+  fontSize?: number
+}
+
+export interface WorkspaceEditorCommandApi {
+  clearSelection(): void
+  selectAll(): void
+  deleteSelected(): void
+  duplicateSelected(): void
+  groupSelected(): void
+  ungroupSelected(): void
+  bringSelectedToFront(): void
+  sendSelectedToBack(): void
+  updateSelectedStyle(patch: WorkspaceEditorStylePatch): void
+  undo(): void
+  redo(): void
+  canUndo(): boolean
+  canRedo(): boolean
+  recordBackendSnapshot(document: EditorDocument, selectedIds?: readonly ElementId[]): void
+  resetHistory(): void
+}
+
+interface InteractionDocuments {
+  backendDocument: EditorDocument
+  annotationDocument: EditorDocument
+  selectedIds: readonly ElementId[]
+}
+
+interface WorkspaceEditorHistorySnapshot {
+  document: EditorDocument
+  selectedIds: readonly ElementId[]
+}
+
+interface WorkspaceEditorHistoryState {
+  past: readonly WorkspaceEditorHistorySnapshot[]
+  future: readonly WorkspaceEditorHistorySnapshot[]
+}
+
+type EditorInteraction =
+  | { type: 'move'; start: Vec2; base: InteractionDocuments }
+  | { type: 'marquee'; origin: Vec2; current: Vec2 }
+  | { type: 'resize'; handle: ResizeHandle; base: InteractionDocuments; baseBounds: Box2 }
+  | { type: 'line-endpoint'; endpoint: LineEndpoint; base: InteractionDocuments }
+  | {
+      type: 'rotate'
+      center: Vec2
+      startAngle: number
+      base: InteractionDocuments
+      initialRotations: ReadonlyMap<ElementId, number>
+    }
+
+interface Props {
+  workflowId: string
+  annotations: CanvasAnnotationViewModel[]
+  activeTool: WorkflowPaletteTool
+  editable: boolean
+  onError?(message: string): void
+  onSelectionChange?(snapshot: WorkspaceEditorSelectionSnapshot): void
+  onCommandReady?(api: WorkspaceEditorCommandApi | null): void
+  onUpdateAnnotation(annotationId: string, input: PatchCanvasAnnotationInput): Promise<void>
+  onDeleteAnnotations(annotationIds: string[]): Promise<void>
+  onEditAnnotationText?(annotationId: string): void
+}
+
+export function WorkspaceEditorLayer({
+  workflowId,
+  annotations,
+  activeTool,
+  editable,
+  onError,
+  onSelectionChange,
+  onCommandReady,
+  onUpdateAnnotation,
+  onDeleteAnnotations,
+  onEditAnnotationText,
+}: Props) {
+  const { screenToFlowPosition } = useReactFlow()
+  const queryClient = useQueryClient()
+  const { data: backendDocument } = useEditorDocumentQuery(workflowId)
+  const saveMutation = useSaveEditorDocumentMutation(workflowId)
+  const [selectedIds, setSelectedIds] = useState<readonly ElementId[]>([])
+  const [interaction, setInteraction] = useState<EditorInteraction | null>(null)
+  const [draftBackendDocument, setDraftBackendDocument] = useState<EditorDocument | null>(null)
+  const [draftAnnotationDocument, setDraftAnnotationDocument] = useState<EditorDocument | null>(null)
+  const [backendHistory, setBackendHistory] = useState<WorkspaceEditorHistoryState>(() => ({
+    past: [],
+    future: [],
+  }))
+  const [isShiftPressed, setIsShiftPressed] = useState(false)
+
+  const baseBackendDocument = backendDocument ?? createEmptyEditorDocument()
+  const annotationDocument = useMemo(() => annotationsToEditorDocument(annotations), [annotations])
+  const editableDocument = draftBackendDocument ?? baseBackendDocument
+  const editableAnnotationDocument = draftAnnotationDocument ?? annotationDocument
+  const backendElementIds = useMemo(
+    () => new Set(editableDocument.elements.map((element) => element.id)),
+    [editableDocument.elements],
+  )
+  const annotationByElementId = useMemo(
+    () => new Map(annotations.map((annotation) => [toElementId(annotation.annotationId), annotation])),
+    [annotations],
+  )
+  const editableAnnotationIds = useMemo(
+    () => new Set(
+      editableAnnotationDocument.elements
+        .map((element) => element.id)
+        .filter((id) => !backendElementIds.has(id)),
+    ),
+    [backendElementIds, editableAnnotationDocument.elements],
+  )
+  const editableIds = useMemo(
+    () => new Set([...backendElementIds, ...editableAnnotationIds]),
+    [backendElementIds, editableAnnotationIds],
+  )
+  const displayDocument = useMemo(() => {
+    const merged = mergeEditorDocumentsById(editableAnnotationDocument, editableDocument)
+    return selectElements(merged, selectedIds)
+  }, [editableAnnotationDocument, editableDocument, selectedIds])
+  const selectedElements = useMemo(
+    () => displayDocument.elements.filter((element) => selectedIds.includes(element.id)),
+    [displayDocument.elements, selectedIds],
+  )
+  const selectionBounds = getSelectedElementBounds(displayDocument)
+  const marqueeBox = interaction?.type === 'marquee'
+    ? normalizeBox({
+        x: interaction.origin.x,
+        y: interaction.origin.y,
+        width: interaction.current.x - interaction.origin.x,
+        height: interaction.current.y - interaction.origin.y,
+      })
+    : null
+  const marqueeReady = editable && activeTool === 'select' && (isShiftPressed || interaction?.type === 'marquee')
+  const canUndoBackendDocument = backendHistory.past.length > 0
+  const canRedoBackendDocument = backendHistory.future.length > 0
+
+  useEffect(() => {
+    setSelectedIds((current) => current.filter((id) => editableIds.has(id)))
+  }, [editableIds])
+
+  useEffect(() => {
+    onSelectionChange?.({
+      selectedIds,
+      elements: selectedElements,
+      canUndo: canUndoBackendDocument,
+      canRedo: canRedoBackendDocument,
+    })
+  }, [canRedoBackendDocument, canUndoBackendDocument, onSelectionChange, selectedElements, selectedIds])
+
+  const persistDocument = useCallback(
+    async (nextDocument: EditorDocument) => {
+      try {
+        const savedDocument = await saveMutation.mutateAsync({
+          ...nextDocument,
+          selectedIds: [],
+        })
+        queryClient.setQueryData(editorDocumentQueryKey(workflowId), savedDocument)
+      } catch (error) {
+        onError?.(error instanceof Error ? error.message : 'Failed to save editor document.')
+      }
+    },
+    [onError, queryClient, saveMutation, workflowId],
+  )
+
+  const persistAnnotationDocument = useCallback(
+    async (
+      nextDocument: EditorDocument,
+      annotationIds: readonly ElementId[],
+      options: { zIndexById?: ReadonlyMap<ElementId, string> } = {},
+    ) => {
+      try {
+        await Promise.all(annotationIds.map(async (id) => {
+          const annotation = annotationByElementId.get(id)
+          const element = nextDocument.elements.find((item) => item.id === id)
+          if (!annotation || !element) return
+
+          const patchResult = editorElementToPatchAnnotationInput(element, annotation)
+          if (!patchResult.ok) {
+            onError?.(patchResult.reason)
+            return
+          }
+
+          const nextZIndex = options.zIndexById?.get(id)
+          await onUpdateAnnotation(annotation.annotationId, {
+            ...patchResult.value,
+            style: patchResult.value.style
+              ? { ...annotation.style, ...patchResult.value.style }
+              : patchResult.value.style,
+            ...(nextZIndex ? { zIndex: nextZIndex } : {}),
+          })
+        }))
+      } catch (error) {
+        onError?.(error instanceof Error ? error.message : 'Failed to save annotation edits.')
+      }
+    },
+    [annotationByElementId, onError, onUpdateAnnotation],
+  )
+
+  const persistLayerChanges = useCallback(
+    async ({
+      backendDocument: nextBackendDocument,
+      annotationDocument: nextAnnotationDocument,
+      annotationIds = [],
+      deleteAnnotationIds = [],
+      annotationZIndexById,
+    }: {
+      backendDocument?: EditorDocument | null
+      annotationDocument?: EditorDocument | null
+      annotationIds?: readonly ElementId[]
+      deleteAnnotationIds?: readonly ElementId[]
+      annotationZIndexById?: ReadonlyMap<ElementId, string>
+    }) => {
+      const tasks: Array<Promise<unknown>> = []
+      if (nextBackendDocument) tasks.push(persistDocument(nextBackendDocument))
+      if (nextAnnotationDocument && annotationIds.length > 0) {
+        tasks.push(persistAnnotationDocument(nextAnnotationDocument, annotationIds, {
+          zIndexById: annotationZIndexById,
+        }))
+      }
+      if (deleteAnnotationIds.length > 0) {
+        tasks.push(
+          onDeleteAnnotations(deleteAnnotationIds.map((id) => String(id))).catch((error) => {
+            onError?.(error instanceof Error ? error.message : 'Failed to delete annotations.')
+          }),
+        )
+      }
+      await Promise.all(tasks)
+    },
+    [onDeleteAnnotations, onError, persistAnnotationDocument, persistDocument],
+  )
+
+  const pushBackendHistorySnapshot = useCallback((
+    document: EditorDocument,
+    ids: readonly ElementId[] = selectedIds,
+  ) => {
+    const snapshot = createBackendHistorySnapshot(document, ids)
+    setBackendHistory((current) => ({
+      past: [...current.past, snapshot].slice(-WORKSPACE_EDITOR_HISTORY_LIMIT),
+      future: [],
+    }))
+  }, [selectedIds])
+
+  const undoBackendDocument = useCallback(() => {
+    const target = backendHistory.past[backendHistory.past.length - 1]
+    if (!editable || !target) return
+
+    const currentSnapshot = createBackendHistorySnapshot(editableDocument, selectedIds)
+    setBackendHistory({
+      past: backendHistory.past.slice(0, -1),
+      future: [currentSnapshot, ...backendHistory.future],
+    })
+    setSelectedIds(target.selectedIds)
+    setDraftBackendDocument(null)
+    setDraftAnnotationDocument(null)
+    void persistDocument(selectElements(target.document, target.selectedIds))
+  }, [backendHistory, editable, editableDocument, persistDocument, selectedIds])
+
+  const redoBackendDocument = useCallback(() => {
+    const target = backendHistory.future[0]
+    if (!editable || !target) return
+
+    const currentSnapshot = createBackendHistorySnapshot(editableDocument, selectedIds)
+    setBackendHistory({
+      past: [...backendHistory.past, currentSnapshot].slice(-WORKSPACE_EDITOR_HISTORY_LIMIT),
+      future: backendHistory.future.slice(1),
+    })
+    setSelectedIds(target.selectedIds)
+    setDraftBackendDocument(null)
+    setDraftAnnotationDocument(null)
+    void persistDocument(selectElements(target.document, target.selectedIds))
+  }, [backendHistory, editable, editableDocument, persistDocument, selectedIds])
+
+  const resetBackendHistory = useCallback(() => {
+    setBackendHistory({ past: [], future: [] })
+  }, [])
+
+  const deleteSelectedElements = useCallback(async () => {
+    if (!editable || selectedIds.length === 0) return
+    const split = splitSelectedIds(editableDocument, editableAnnotationDocument, selectedIds)
+    const nextBackendDocument = split.backendIds.length > 0
+      ? cleanupEmptyEditorGroups(deleteEditorElements(editableDocument, split.backendIds))
+      : null
+    if (nextBackendDocument && split.annotationIds.length === 0) {
+      pushBackendHistorySnapshot(editableDocument, selectedIds)
+    }
+
+    setSelectedIds([])
+    setDraftBackendDocument(null)
+    setDraftAnnotationDocument(null)
+
+    await persistLayerChanges({
+      backendDocument: nextBackendDocument,
+      deleteAnnotationIds: split.annotationIds,
+    })
+  }, [editable, editableAnnotationDocument, editableDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds])
+
+  const duplicateSelectedElements = useCallback(async () => {
+    if (!editable || selectedIds.length === 0) return
+    const split = splitSelectedIds(editableDocument, editableAnnotationDocument, selectedIds)
+    if (split.annotationIds.length > 0) {
+      onError?.('Legacy annotations cannot be duplicated from the editor layer yet.')
+    }
+    if (split.backendIds.length === 0) return
+
+    pushBackendHistorySnapshot(editableDocument, selectedIds)
+    const result = duplicateEditorElements(editableDocument, split.backendIds)
+    setSelectedIds(result.selectedIds)
+    setDraftBackendDocument(null)
+    setDraftAnnotationDocument(null)
+    await persistDocument(result.document)
+  }, [editable, editableAnnotationDocument, editableDocument, onError, persistDocument, pushBackendHistorySnapshot, selectedIds])
+
+  const groupSelectedElements = useCallback(async () => {
+    if (!editable || selectedIds.length < 2) return
+    const split = splitSelectedIds(editableDocument, editableAnnotationDocument, selectedIds)
+    const canGroupAnnotations = split.annotationIds.length > 1
+    const canGroupBackend = split.backendIds.length > 1
+    if (!canGroupAnnotations && !canGroupBackend) {
+      onError?.('Select at least two elements from the same storage model to group.')
+      return
+    }
+    if (canGroupBackend && !canGroupAnnotations) {
+      pushBackendHistorySnapshot(editableDocument, selectedIds)
+    }
+    if (canGroupAnnotations) {
+      const nextGroupId = `grp_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+      await persistLayerChanges({
+        annotationDocument: transformSelected(editableAnnotationDocument, split.annotationIds, (element) => ({
+          ...element,
+          parentId: toElementId(nextGroupId),
+        })),
+        annotationIds: split.annotationIds,
+      })
+    }
+    if (canGroupBackend) {
+      const result = groupEditorElements(editableDocument, split.backendIds)
+      setSelectedIds([...result.selectedIds, ...split.annotationIds])
+      setDraftBackendDocument(null)
+      setDraftAnnotationDocument(null)
+      await persistDocument(result.document)
+      return
+    }
+    setDraftAnnotationDocument(null)
+  }, [editable, editableAnnotationDocument, editableDocument, onError, persistDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds])
+
+  const ungroupSelectedElements = useCallback(async () => {
+    if (!editable || selectedIds.length === 0) return
+    const split = splitSelectedIds(editableDocument, editableAnnotationDocument, selectedIds)
+    if (split.annotationIds.length > 0) {
+      await persistLayerChanges({
+        annotationDocument: transformSelected(editableAnnotationDocument, split.annotationIds, (element) => ({
+          ...element,
+          parentId: null,
+        })),
+        annotationIds: split.annotationIds,
+      })
+    }
+    if (split.backendIds.length > 0) {
+      if (split.annotationIds.length === 0) {
+        pushBackendHistorySnapshot(editableDocument, selectedIds)
+      }
+      const result = ungroupEditorElements(editableDocument, split.backendIds)
+      setSelectedIds([...result.selectedIds, ...split.annotationIds])
+      setDraftBackendDocument(null)
+      setDraftAnnotationDocument(null)
+      await persistDocument(result.document)
+      return
+    }
+    setDraftAnnotationDocument(null)
+  }, [editable, editableAnnotationDocument, editableDocument, persistDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds])
+
+  const reorderSelectedElementsInLayer = useCallback(async (direction: 'front' | 'back') => {
+    if (!editable || selectedIds.length === 0) return
+    const split = splitSelectedIds(editableDocument, editableAnnotationDocument, selectedIds)
+    const nextBackendDocument = split.backendIds.length > 0
+      ? reorderEditorElements(editableDocument, split.backendIds, direction)
+      : null
+    const annotationZIndexById = split.annotationIds.length > 0
+      ? buildAnnotationZIndexPatch(annotations, split.annotationIds, direction)
+      : undefined
+    if (nextBackendDocument && split.annotationIds.length === 0) {
+      pushBackendHistorySnapshot(editableDocument, selectedIds)
+    }
+
+    setDraftBackendDocument(null)
+    setDraftAnnotationDocument(null)
+    await persistLayerChanges({
+      backendDocument: nextBackendDocument,
+      annotationDocument: split.annotationIds.length > 0 ? editableAnnotationDocument : null,
+      annotationIds: split.annotationIds,
+      annotationZIndexById,
+    })
+  }, [annotations, editable, editableAnnotationDocument, editableDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds])
+
+  const updateSelectedStyle = useCallback(async (patch: WorkspaceEditorStylePatch) => {
+    if (!editable || selectedIds.length === 0) return
+    const split = splitSelectedIds(editableDocument, editableAnnotationDocument, selectedIds)
+    const nextBackendDocument = split.backendIds.length > 0
+      ? selectElements(
+          transformSelected(editableDocument, split.backendIds, (element) => patchEditorElement(element, patch)),
+          selectedIds,
+        )
+      : null
+    const nextAnnotationDocument = split.annotationIds.length > 0
+      ? selectElements(
+          transformSelected(editableAnnotationDocument, split.annotationIds, (element) =>
+            patchEditorElement(element, patch),
+          ),
+          selectedIds,
+        )
+      : null
+    if (nextBackendDocument && split.annotationIds.length === 0) {
+      pushBackendHistorySnapshot(editableDocument, selectedIds)
+    }
+
+    setDraftBackendDocument(null)
+    setDraftAnnotationDocument(null)
+    await persistLayerChanges({
+      backendDocument: nextBackendDocument,
+      annotationDocument: nextAnnotationDocument,
+      annotationIds: split.annotationIds,
+    })
+  }, [editable, editableAnnotationDocument, editableDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Shift') setIsShiftPressed(true)
+    }
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === 'Shift') setIsShiftPressed(false)
+    }
+    const handleBlur = () => setIsShiftPressed(false)
+
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    window.addEventListener('blur', handleBlur)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+      window.removeEventListener('blur', handleBlur)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!editable || selectedIds.length === 0) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isTextEditingTarget(event.target)) return
+      const action = getKeyboardAction(event)
+      if (action === 'none') return
+      event.preventDefault()
+      if (action === 'delete') {
+        void deleteSelectedElements()
+        return
+      }
+      if (action === 'duplicate') {
+        if (event.repeat) return
+        void duplicateSelectedElements()
+        return
+      }
+      if (action === 'group') {
+        if (event.repeat) return
+        void groupSelectedElements()
+        return
+      }
+      if (action === 'ungroup') {
+        if (event.repeat) return
+        void ungroupSelectedElements()
+        return
+      }
+      void reorderSelectedElementsInLayer(action)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [
+    deleteSelectedElements,
+    duplicateSelectedElements,
+    editable,
+    groupSelectedElements,
+    reorderSelectedElementsInLayer,
+    selectedIds.length,
+    ungroupSelectedElements,
+  ])
+
+  useEffect(() => {
+    if (!onCommandReady) return
+    onCommandReady({
+      clearSelection: () => {
+        setSelectedIds([])
+        setDraftBackendDocument(null)
+        setDraftAnnotationDocument(null)
+      },
+      selectAll: () => {
+        if (!editable) return
+        setSelectedIds(getSelectableElementIds(displayDocument, editableIds))
+        setDraftBackendDocument(null)
+        setDraftAnnotationDocument(null)
+      },
+      deleteSelected: () => {
+        void deleteSelectedElements()
+      },
+      duplicateSelected: () => {
+        void duplicateSelectedElements()
+      },
+      groupSelected: () => {
+        void groupSelectedElements()
+      },
+      ungroupSelected: () => {
+        void ungroupSelectedElements()
+      },
+      bringSelectedToFront: () => {
+        void reorderSelectedElementsInLayer('front')
+      },
+      sendSelectedToBack: () => {
+        void reorderSelectedElementsInLayer('back')
+      },
+      updateSelectedStyle: (patch) => {
+        void updateSelectedStyle(patch)
+      },
+      undo: () => {
+        undoBackendDocument()
+      },
+      redo: () => {
+        redoBackendDocument()
+      },
+      canUndo: () => canUndoBackendDocument,
+      canRedo: () => canRedoBackendDocument,
+      recordBackendSnapshot: (document, ids) => {
+        pushBackendHistorySnapshot(document, ids)
+      },
+      resetHistory: () => {
+        resetBackendHistory()
+      },
+    })
+    return () => onCommandReady(null)
+  }, [
+    canRedoBackendDocument,
+    canUndoBackendDocument,
+    deleteSelectedElements,
+    duplicateSelectedElements,
+    displayDocument,
+    editable,
+    editableIds,
+    groupSelectedElements,
+    onCommandReady,
+    pushBackendHistorySnapshot,
+    reorderSelectedElementsInLayer,
+    redoBackendDocument,
+    resetBackendHistory,
+    ungroupSelectedElements,
+    undoBackendDocument,
+    updateSelectedStyle,
+  ])
+
+  function toCanvasPoint(event: ReactPointerEvent<SVGSVGElement>): Vec2 {
+    return screenToFlowPosition({ x: event.clientX, y: event.clientY })
+  }
+
+  function toSnappedCanvasPoint(event: ReactPointerEvent<SVGSVGElement>): Vec2 {
+    const point = toCanvasPoint(event)
+    return event.altKey ? point : snapPoint(point, { enabled: true, gridSize: WORKSPACE_GRID_SIZE })
+  }
+
+  function handlePointerDown(event: ReactPointerEvent<SVGSVGElement>) {
+    if (!editable) return
+    const action = getEditorAction(event)
+    const point = toCanvasPoint(event)
+    const snappedPoint = toSnappedCanvasPoint(event)
+    const targetId = getElementIdFromTarget(event.target)
+
+    if (action.kind === 'line-endpoint') {
+      if (!targetId || !editableIds.has(targetId)) return
+      const target = displayDocument.elements.find((element) => element.id === targetId)
+      if (target?.type !== 'line' || target.rotation !== 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      event.currentTarget.setPointerCapture(event.pointerId)
+      setSelectedIds([targetId])
+      setInteraction({
+        type: 'line-endpoint',
+        endpoint: action.endpoint,
+        base: createInteractionDocuments(editableDocument, editableAnnotationDocument, [targetId]),
+      })
+      return
+    }
+
+    if (action.kind === 'resize' && selectedIds.length > 0) {
+      const bounds = getSelectedElementBounds(selectElements(displayDocument, selectedIds))
+      if (!bounds) return
+      event.preventDefault()
+      event.stopPropagation()
+      event.currentTarget.setPointerCapture(event.pointerId)
+      setInteraction({
+        type: 'resize',
+        handle: action.handle,
+        base: createInteractionDocuments(editableDocument, editableAnnotationDocument, selectedIds),
+        baseBounds: bounds,
+      })
+      return
+    }
+
+    if (action.kind === 'rotate' && selectedIds.length > 0) {
+      const bounds = getSelectedElementBounds(selectElements(displayDocument, selectedIds))
+      if (!bounds) return
+      event.preventDefault()
+      event.stopPropagation()
+      event.currentTarget.setPointerCapture(event.pointerId)
+      const base = createInteractionDocuments(editableDocument, editableAnnotationDocument, selectedIds)
+      setInteraction({
+        type: 'rotate',
+        center: boxCenter(bounds),
+        startAngle: angleBetween(boxCenter(bounds), point),
+        base,
+        initialRotations: readElementRotations(
+          createDisplayDocument(base.annotationDocument, base.backendDocument, base.selectedIds),
+          base.selectedIds,
+        ),
+      })
+      return
+    }
+
+    if (!targetId && activeTool === 'select' && (event.shiftKey || isShiftPressed)) {
+      event.preventDefault()
+      event.stopPropagation()
+      event.currentTarget.setPointerCapture(event.pointerId)
+      setInteraction({ type: 'marquee', origin: point, current: point })
+      setSelectedIds([])
+      setDraftBackendDocument(null)
+      setDraftAnnotationDocument(null)
+      return
+    }
+
+    if (!targetId || !editableIds.has(targetId)) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    event.currentTarget.setPointerCapture(event.pointerId)
+
+    const targetUnitIds = expandWorkspaceSelection(editableDocument, editableAnnotationDocument, annotations, [targetId])
+    const nextSelectedIds = event.shiftKey
+      ? toggleSelectedUnit(selectedIds, targetUnitIds)
+      : targetUnitIds.every((id) => selectedIds.includes(id))
+        ? selectedIds
+        : targetUnitIds
+    setSelectedIds(nextSelectedIds)
+    setInteraction({
+      type: 'move',
+      start: snappedPoint,
+      base: createInteractionDocuments(editableDocument, editableAnnotationDocument, nextSelectedIds),
+    })
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<SVGSVGElement>) {
+    if (!interaction) return
+    event.preventDefault()
+    event.stopPropagation()
+    const point = toCanvasPoint(event)
+    const snappedPoint = toSnappedCanvasPoint(event)
+
+    if (interaction.type === 'marquee') {
+      const box = normalizeBox({
+        x: interaction.origin.x,
+        y: interaction.origin.y,
+        width: point.x - interaction.origin.x,
+        height: point.y - interaction.origin.y,
+      })
+      setInteraction({ ...interaction, current: point })
+      setSelectedIds(expandWorkspaceSelection(
+        editableDocument,
+        editableAnnotationDocument,
+        annotations,
+        findElementsInBox(displayDocument.elements, box),
+      ))
+      return
+    }
+
+    if (interaction.type === 'move') {
+      const dx = snappedPoint.x - interaction.start.x
+      const dy = snappedPoint.y - interaction.start.y
+      const result = transformLayerDocuments(interaction.base, (element) => translateElement(element, { x: dx, y: dy }))
+      setDraftBackendDocument(result.backendDocument)
+      setDraftAnnotationDocument(result.annotationDocument)
+      return
+    }
+
+    if (interaction.type === 'resize') {
+      const nextBounds = resizeBoxFromHandle(interaction.baseBounds, interaction.handle, snappedPoint)
+      const result = transformLayerDocuments(interaction.base, (element) =>
+        resizeElementWithinBox(element, interaction.baseBounds, nextBounds),
+      )
+      setDraftBackendDocument(result.backendDocument)
+      setDraftAnnotationDocument(result.annotationDocument)
+      return
+    }
+
+    if (interaction.type === 'line-endpoint') {
+      const result = transformLayerDocuments(interaction.base, (element) =>
+        element.type === 'line' ? moveLineEndpoint(element, interaction.endpoint, snappedPoint) : element,
+      )
+      setDraftBackendDocument(result.backendDocument)
+      setDraftAnnotationDocument(result.annotationDocument)
+      return
+    }
+
+    const delta = angleBetween(interaction.center, point) - interaction.startAngle
+    const result = transformLayerDocuments(interaction.base, (element) =>
+      rotateElement(element, (interaction.initialRotations.get(element.id) ?? element.rotation) + delta),
+    )
+    setDraftBackendDocument(result.backendDocument)
+    setDraftAnnotationDocument(result.annotationDocument)
+  }
+
+  function handlePointerUp(event: ReactPointerEvent<SVGSVGElement>) {
+    if (!interaction) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    const nextBackendDocument = draftBackendDocument
+    const nextAnnotationDocument = draftAnnotationDocument
+    const selectedIdsToPersist = interaction.type === 'marquee' ? [] : interaction.base.selectedIds
+    setInteraction(null)
+    setDraftBackendDocument(null)
+    setDraftAnnotationDocument(null)
+    if (interaction.type === 'marquee') return
+    if (nextBackendDocument || nextAnnotationDocument) {
+      const split = splitSelectedIds(
+        interaction.base.backendDocument,
+        interaction.base.annotationDocument,
+        selectedIdsToPersist,
+      )
+      if (
+        nextBackendDocument &&
+        split.backendIds.length > 0 &&
+        split.annotationIds.length === 0 &&
+        !areEditorDocumentsEqual(interaction.base.backendDocument, nextBackendDocument)
+      ) {
+        pushBackendHistorySnapshot(interaction.base.backendDocument, selectedIdsToPersist)
+      }
+      void persistLayerChanges({
+        backendDocument: nextBackendDocument,
+        annotationDocument: nextAnnotationDocument,
+        annotationIds: split.annotationIds,
+      })
+    }
+  }
+
+  function handleDoubleClick(event: ReactMouseEvent<SVGSVGElement>) {
+    if (!editable || !onEditAnnotationText) return
+    const targetId = getElementIdFromTarget(event.target)
+    if (!targetId || !editableAnnotationIds.has(targetId)) return
+    const annotation = annotationByElementId.get(targetId)
+    if (annotation?.annotationType !== 'text') return
+    event.preventDefault()
+    event.stopPropagation()
+    onEditAnnotationText(annotation.annotationId)
+  }
+
+  const layerClassName = `flowmat-workspace-editor-layer flowmat-workspace-editor-layer--interactive${
+    marqueeReady ? ' flowmat-workspace-editor-layer--marquee-ready' : ''
+  }`
+
+  return (
+    <svg
+      className={layerClassName}
+      aria-hidden="true"
+      focusable="false"
+      width={WORKSPACE_LAYER_EXTENT * 2}
+      height={WORKSPACE_LAYER_EXTENT * 2}
+      viewBox={`${-WORKSPACE_LAYER_EXTENT} ${-WORKSPACE_LAYER_EXTENT} ${WORKSPACE_LAYER_EXTENT * 2} ${WORKSPACE_LAYER_EXTENT * 2}`}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onDoubleClick={handleDoubleClick}
+      data-active-tool={activeTool}
+    >
+      {toSvgRenderNodes(displayDocument.elements).map((node) => (
+        <SvgElementView
+          key={node.id}
+          element={node.element}
+          transform={node.transform}
+          selected={selectedIds.includes(node.element.id)}
+          preview={false}
+          interactive={editable && editableIds.has(node.element.id)}
+        />
+      ))}
+      {displayDocument.elements.map((element) => (
+        selectedIds.includes(element.id) ? <SelectionOutline key={`${element.id}-selection`} element={element} /> : null
+      ))}
+      {editable && selectionBounds && <SelectionHandles bounds={selectionBounds} />}
+      {editable && displayDocument.elements.map((element) => (
+        selectedIds.includes(element.id) && element.type === 'line' && element.rotation === 0
+          ? <LineEndpointHandles key={`${element.id}-line-endpoints`} element={element} />
+          : null
+      ))}
+      {marqueeBox && <MarqueeBox box={marqueeBox} />}
+    </svg>
+  )
+}
+
+function createBackendHistorySnapshot(
+  document: EditorDocument,
+  selectedIds: readonly ElementId[],
+): WorkspaceEditorHistorySnapshot {
+  const clonedDocument = selectElements(cloneEditorDocumentSnapshot(document), selectedIds)
+  return {
+    document: clonedDocument,
+    selectedIds: clonedDocument.selectedIds,
+  }
+}
+
+function cloneEditorDocumentSnapshot(document: EditorDocument): EditorDocument {
+  return {
+    ...document,
+    camera: { ...document.camera },
+    selectedIds: [...document.selectedIds],
+    elements: document.elements.map(cloneEditorElementSnapshot),
+  }
+}
+
+function cloneEditorElementSnapshot(element: EditorElement): EditorElement {
+  switch (element.type) {
+    case 'rectangle':
+      return { ...element, style: { ...element.style } }
+    case 'ellipse':
+      return { ...element, style: { ...element.style } }
+    case 'polygon':
+      return {
+        ...element,
+        points: element.points.map((point) => ({ ...point })),
+        style: { ...element.style },
+      }
+    case 'line':
+      return {
+        ...element,
+        start: { ...element.start },
+        end: { ...element.end },
+        style: { ...element.style },
+      }
+    case 'freehand':
+      return {
+        ...element,
+        points: element.points.map((point) => ({ ...point })),
+        style: { ...element.style },
+      }
+    case 'text':
+      return { ...element, style: { ...element.style } }
+    case 'group':
+      return { ...element, childIds: [...element.childIds] }
+  }
+}
+
+function areEditorDocumentsEqual(a: EditorDocument, b: EditorDocument): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+function duplicateEditorElements(
+  document: EditorDocument,
+  selectedIds: readonly ElementId[],
+): { document: EditorDocument; selectedIds: ElementId[] } {
+  let nextDocument = document
+  let nextSequence = Math.max(1, document.nextElementSeq)
+  let nextOrder = Math.max(0, ...document.elements.map((element) => element.order)) + 1
+  const usedIds = new Set(document.elements.map((element) => element.id))
+  const newIds: ElementId[] = []
+
+  for (const element of document.elements.filter((item) => selectedIds.includes(item.id))) {
+    while (usedIds.has(createElementId(nextSequence, 'shape'))) nextSequence += 1
+    const id = createElementId(nextSequence, 'shape')
+    usedIds.add(id)
+    nextDocument = insertElement(nextDocument, cloneEditorElement(element, id, nextOrder))
+    newIds.push(id)
+    nextSequence += 1
+    nextOrder += 1
+  }
+
+  return {
+    document: selectElements({ ...nextDocument, nextElementSeq: nextSequence }, newIds),
+    selectedIds: newIds,
+  }
+}
+
+function reorderEditorElements(
+  document: EditorDocument,
+  selectedIds: readonly ElementId[],
+  direction: 'front' | 'back',
+): EditorDocument {
+  const selectedSet = new Set(selectedIds)
+  const sorted = [...document.elements].sort((a, b) => a.order - b.order)
+  const selected = sorted.filter((element) => selectedSet.has(element.id))
+  const rest = sorted.filter((element) => !selectedSet.has(element.id))
+  const nextOrder = direction === 'front' ? [...rest, ...selected] : [...selected, ...rest]
+  return {
+    ...document,
+    elements: nextOrder.map((element, index) => ({ ...element, order: index + 1 })),
+  }
+}
+
+function patchEditorElement(element: EditorElement, patch: WorkspaceEditorStylePatch): EditorElement {
+  const opacity = patch.opacity == null ? undefined : clamp(patch.opacity, 0, 1)
+  const strokeWidth = patch.strokeWidth == null ? undefined : Math.max(0, patch.strokeWidth)
+  const fontSize = patch.fontSize == null ? undefined : Math.max(1, patch.fontSize)
+
+  switch (element.type) {
+    case 'rectangle':
+    case 'ellipse':
+    case 'polygon':
+      return {
+        ...element,
+        opacity: opacity ?? element.opacity,
+        style: {
+          ...element.style,
+          fill: patch.fill ?? element.style.fill,
+          stroke: patch.stroke ?? element.style.stroke,
+          strokeWidth: strokeWidth ?? element.style.strokeWidth,
+          opacity: opacity ?? element.style.opacity,
+        },
+      }
+    case 'line':
+    case 'freehand':
+      return {
+        ...element,
+        opacity: opacity ?? element.opacity,
+        style: {
+          ...element.style,
+          stroke: patch.stroke ?? element.style.stroke,
+          strokeWidth: strokeWidth ?? element.style.strokeWidth,
+          opacity: opacity ?? element.style.opacity,
+        },
+      }
+    case 'text':
+      return {
+        ...element,
+        opacity: opacity ?? element.opacity,
+        text: patch.text ?? element.text,
+        style: {
+          ...element.style,
+          color: patch.color ?? patch.stroke ?? element.style.color,
+          fontSize: fontSize ?? element.style.fontSize,
+          opacity: opacity ?? element.style.opacity,
+        },
+      }
+    case 'group':
+      return element
+  }
+}
+
+function createDisplayDocument(
+  annotationDocument: EditorDocument,
+  backendDocument: EditorDocument,
+  selectedIds: readonly ElementId[],
+): EditorDocument {
+  return selectElements(mergeEditorDocumentsById(annotationDocument, backendDocument), selectedIds)
+}
+
+function createInteractionDocuments(
+  backendDocument: EditorDocument,
+  annotationDocument: EditorDocument,
+  selectedIds: readonly ElementId[],
+): InteractionDocuments {
+  return {
+    backendDocument,
+    annotationDocument,
+    selectedIds,
+  }
+}
+
+function splitSelectedIds(
+  backendDocument: EditorDocument,
+  annotationDocument: EditorDocument,
+  selectedIds: readonly ElementId[],
+): { backendIds: ElementId[]; annotationIds: ElementId[] } {
+  const backendIds = new Set(backendDocument.elements.map((element) => element.id))
+  const annotationIds = new Set(annotationDocument.elements.map((element) => element.id))
+  const split = { backendIds: [] as ElementId[], annotationIds: [] as ElementId[] }
+
+  for (const id of selectedIds) {
+    if (backendIds.has(id)) {
+      split.backendIds.push(id)
+    } else if (annotationIds.has(id)) {
+      split.annotationIds.push(id)
+    }
+  }
+
+  return split
+}
+
+function transformLayerDocuments(
+  base: InteractionDocuments,
+  transform: (element: EditorElement) => EditorElement,
+): { backendDocument: EditorDocument | null; annotationDocument: EditorDocument | null } {
+  const split = splitSelectedIds(base.backendDocument, base.annotationDocument, base.selectedIds)
+  return {
+    backendDocument: split.backendIds.length > 0
+      ? transformSelected(base.backendDocument, split.backendIds, transform)
+      : null,
+    annotationDocument: split.annotationIds.length > 0
+      ? transformSelected(base.annotationDocument, split.annotationIds, transform)
+      : null,
+  }
+}
+
+function expandWorkspaceSelection(
+  backendDocument: EditorDocument,
+  annotationDocument: EditorDocument,
+  annotations: readonly CanvasAnnotationViewModel[],
+  ids: readonly ElementId[],
+): ElementId[] {
+  const split = splitSelectedIds(backendDocument, annotationDocument, ids)
+  return uniqueIds([
+    ...expandGroupSelection(backendDocument, split.backendIds),
+    ...expandAnnotationGroupSelection(annotations, split.annotationIds),
+  ])
+}
+
+function expandAnnotationGroupSelection(
+  annotations: readonly CanvasAnnotationViewModel[],
+  selectedIds: readonly ElementId[],
+): ElementId[] {
+  const selected = new Set(selectedIds.map((id) => String(id)))
+  const groupedIds = new Set<string>()
+  const byId = new Map(annotations.map((annotation) => [annotation.annotationId, annotation]))
+
+  for (const id of selected) {
+    const annotation = byId.get(id)
+    if (!annotation) continue
+    if (!annotation.groupId) {
+      groupedIds.add(id)
+      continue
+    }
+    for (const sibling of annotations) {
+      if (sibling.groupId === annotation.groupId) groupedIds.add(sibling.annotationId)
+    }
+  }
+
+  return [...groupedIds].map((id) => toElementId(id))
+}
+
+function buildAnnotationZIndexPatch(
+  annotations: readonly CanvasAnnotationViewModel[],
+  selectedIds: readonly ElementId[],
+  direction: 'front' | 'back',
+): ReadonlyMap<ElementId, string> {
+  const selected = new Set(selectedIds.map((id) => String(id)))
+  const selectedAnnotations = annotations.filter((annotation) => selected.has(annotation.annotationId))
+  if (selectedAnnotations.length === 0) return new Map()
+
+  const zValues = annotations.map((annotation, index) => readZIndexNumber(annotation.zIndex, index + 1))
+  const boundary = direction === 'front' ? Math.max(...zValues) : Math.min(...zValues)
+  const sortedSelected = selectedAnnotations.sort(
+    (a, b) => readZIndexNumber(a.zIndex, 0) - readZIndexNumber(b.zIndex, 0),
+  )
+  const patch = new Map<ElementId, string>()
+
+  sortedSelected.forEach((annotation, index) => {
+    const offset = direction === 'front' ? index + 1 : index - sortedSelected.length
+    patch.set(toElementId(annotation.annotationId), formatZIndex(boundary + offset))
+  })
+
+  return patch
+}
+
+function readZIndexNumber(value: string, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function formatZIndex(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(6).replace(/\.?0+$/, '')
+}
+
+function readElementRotations(document: EditorDocument, selectedIds: readonly ElementId[]): ReadonlyMap<ElementId, number> {
+  const selected = new Set(selectedIds)
+  return new Map(
+    document.elements
+      .filter((element) => selected.has(element.id))
+      .map((element) => [element.id, element.rotation]),
+  )
+}
+
+function uniqueIds(ids: readonly ElementId[]): ElementId[] {
+  const nextIds: ElementId[] = []
+  for (const id of ids) {
+    if (!nextIds.includes(id)) nextIds.push(id)
+  }
+  return nextIds
+}
+
+function getSelectableElementIds(document: EditorDocument, editableIds: ReadonlySet<ElementId>): ElementId[] {
+  return document.elements
+    .filter((element) => editableIds.has(element.id) && !element.hidden && element.type !== 'group')
+    .map((element) => element.id)
+}
+
+function transformSelected(
+  document: EditorDocument,
+  selectedIds: readonly ElementId[],
+  transform: (element: EditorDocument['elements'][number]) => EditorDocument['elements'][number],
+): EditorDocument {
+  let nextDocument = document
+  for (const id of selectedIds) {
+    nextDocument = updateElement(nextDocument, id, transform)
+  }
+  return nextDocument
+}
+
+function getElementIdFromTarget(target: EventTarget | null): ElementId | null {
+  if (!(target instanceof Element)) return null
+  const element = target.closest('[data-element-id]')
+  const id = element?.getAttribute('data-element-id')
+  return id ? toElementId(id) : null
+}
+
+function getEditorAction(
+  event: ReactPointerEvent<SVGSVGElement>,
+): { kind: 'none' } | { kind: 'rotate' } | { kind: 'resize'; handle: ResizeHandle } | { kind: 'line-endpoint'; endpoint: LineEndpoint } {
+  const target = event.target
+  if (!(target instanceof Element)) return { kind: 'none' }
+  const action = target.getAttribute('data-editor-action')
+  if (action === 'line-endpoint') {
+    const endpoint = target.getAttribute('data-editor-endpoint')
+    if (isLineEndpoint(endpoint)) return { kind: 'line-endpoint', endpoint }
+  }
+  if (action === 'rotate') return { kind: 'rotate' }
+  if (action === 'resize') {
+    const handle = target.getAttribute('data-editor-handle')
+    if (isResizeHandle(handle)) return { kind: 'resize', handle }
+  }
+  return { kind: 'none' }
+}
+
+function isResizeHandle(value: string | null): value is ResizeHandle {
+  return value === 'nw' || value === 'n' || value === 'ne' || value === 'e' || value === 'se' || value === 's' || value === 'sw' || value === 'w'
+}
+
+function isLineEndpoint(value: string | null): value is LineEndpoint {
+  return value === 'start' || value === 'end'
+}
+
+function getKeyboardAction(event: KeyboardEvent): 'none' | 'delete' | 'duplicate' | 'front' | 'back' | 'group' | 'ungroup' {
+  if (event.key === 'Delete' || event.key === 'Backspace') return 'delete'
+  if (event.ctrlKey || event.metaKey) {
+    const key = event.key.toLowerCase()
+    if (key === 'g') return event.shiftKey ? 'ungroup' : 'group'
+    if (key === 'd') return 'duplicate'
+    if (event.key === ']') return 'front'
+    if (event.key === '[') return 'back'
+  }
+  return 'none'
+}
+
+function toggleSelectedUnit(selectedIds: readonly ElementId[], unitIds: readonly ElementId[]): ElementId[] {
+  const unitSet = new Set(unitIds)
+  const hasFullUnit = unitIds.length > 0 && unitIds.every((id) => selectedIds.includes(id))
+  if (hasFullUnit) {
+    return selectedIds.filter((selectedId) => !unitSet.has(selectedId))
+  }
+  const nextIds = [...selectedIds]
+  for (const id of unitIds) {
+    if (!nextIds.includes(id)) nextIds.push(id)
+  }
+  return nextIds
+}
+
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'))
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
+}
+
+function MarqueeBox({ box }: { box: Box2 }) {
+  return (
+    <rect
+      className="flowmat-editor-marquee"
+      x={box.x}
+      y={box.y}
+      width={box.width}
+      height={box.height}
+      vectorEffect="non-scaling-stroke"
+    />
+  )
+}
