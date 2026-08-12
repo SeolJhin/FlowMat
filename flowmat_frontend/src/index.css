@@ -335,6 +335,300 @@ code {
   border-left: none;
 }
 
+.editor-demo {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: 100%;
+  height: 100svh;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--text-h);
+}
+
+.editor-demo__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 64px;
+  padding: 10px 14px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.editor-demo__brand {
+  display: grid;
+  gap: 2px;
+  min-width: 150px;
+}
+
+.editor-demo__brand strong {
+  font-size: 14px;
+}
+
+.editor-demo__brand span {
+  font-size: 11px;
+  color: var(--text);
+  opacity: 0.7;
+}
+
+.editor-demo__controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.editor-demo__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 78px;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.editor-demo__button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text-h);
+}
+
+.editor-demo__button--active {
+  border-color: #0f766e;
+  background: #dff7ef;
+  color: #0f766e;
+}
+
+.editor-demo__button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.editor-demo__stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor-demo__workspace {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 220px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor-demo__workspace--canvas-only {
+  grid-template-columns: minmax(0, 1fr) 220px;
+}
+
+.editor-demo__sidepanel {
+  min-width: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.editor-demo__sidepanel--right {
+  border-right: none;
+  border-left: 1px solid var(--border);
+}
+
+.editor-demo__panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.editor-demo__panel-header button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.editor-demo__layer-list {
+  display: grid;
+  gap: 6px;
+}
+
+.editor-demo__layer {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.editor-demo__layer--active {
+  border-color: #0f766e;
+  background: #dff7ef;
+  color: #0f766e;
+}
+
+.editor-demo__layer small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.62;
+}
+
+.editor-demo__show-panel {
+  position: absolute;
+  z-index: 3;
+  left: 12px;
+  top: 86px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.editor-demo__properties {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 7px 8px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.editor-demo__properties dt {
+  color: var(--text);
+  opacity: 0.65;
+}
+
+.editor-demo__properties dd {
+  margin: 0;
+  color: var(--text-h);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.editor-demo__empty {
+  color: var(--text);
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+.editor-demo__status {
+  display: flex;
+  justify-content: flex-end;
+  gap: 14px;
+  min-height: 34px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+  box-sizing: border-box;
+}
+
+.flowmat-editor-surface {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.flowmat-editor-element {
+  cursor: pointer;
+}
+
+.flowmat-editor-element--preview {
+  pointer-events: none;
+}
+
+.flowmat-editor-selection {
+  fill: none;
+  stroke: #0f766e;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+}
+
+.flowmat-editor-rotate-stem {
+  stroke: #0f766e;
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+.flowmat-editor-resize-handle,
+.flowmat-editor-rotate-handle,
+.flowmat-editor-line-endpoint-handle {
+  fill: #ffffff;
+  stroke: #0f766e;
+  stroke-width: 1.5;
+  cursor: pointer;
+}
+
+.flowmat-editor-line-endpoint-handle {
+  fill: #0f766e;
+  cursor: crosshair;
+}
+
+.flowmat-editor-rotate-handle {
+  fill: #dff7ef;
+}
+
+.flowmat-editor-marquee {
+  fill: rgba(15, 118, 110, 0.12);
+  stroke: #0f766e;
+  stroke-width: 1;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+
+@media (max-width: 980px) {
+  .editor-demo__toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .editor-demo__controls {
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .editor-demo__button {
+    flex: 0 0 auto;
+  }
+
+  .editor-demo__workspace,
+  .editor-demo__workspace--canvas-only {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .editor-demo__sidepanel {
+    display: none;
+  }
+}
+
 .panel-resize-handle {
   width: 4px;
   flex-shrink: 0;
@@ -561,6 +855,41 @@ code {
   box-shadow: var(--node-shadow) !important;
 }
 
+.workspace-canvas-viewport {
+  position: relative;
+}
+
+.flowmat-workspace-editor-layer {
+  position: absolute;
+  left: -100000px;
+  top: -100000px;
+  width: 200000px;
+  height: 200000px;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.flowmat-workspace-editor-layer--interactive .flowmat-editor-element--interactive,
+.flowmat-workspace-editor-layer--interactive .flowmat-editor-resize-handle,
+.flowmat-workspace-editor-layer--interactive .flowmat-editor-rotate-handle,
+.flowmat-workspace-editor-layer--interactive .flowmat-editor-line-endpoint-handle {
+  pointer-events: auto;
+}
+
+.flowmat-workspace-editor-layer--interactive .flowmat-editor-element--interactive {
+  cursor: grab;
+}
+
+.flowmat-workspace-editor-layer--interactive .flowmat-editor-element--interactive:active {
+  cursor: grabbing;
+}
+
+.flowmat-workspace-editor-layer--marquee-ready {
+  cursor: crosshair;
+  pointer-events: auto;
+}
+
 /* ============================================================
    Inspector panel
    ============================================================ */
@@ -668,6 +997,74 @@ code {
   background: var(--accent);
   border-radius: 8px;
   padding: 1px 5px;
+}
+
+.editor-inspector__commands {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.editor-inspector__commands button {
+  min-width: 0;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.editor-inspector__commands button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text-h);
+}
+
+.editor-inspector__commands button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.editor-inspector__field {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 8px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.editor-inspector__field input[type='color'] {
+  width: 100%;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.editor-inspector__field input[type='number'],
+.editor-inspector__field input[type='text'] {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.editor-inspector__field input[type='range'] {
+  width: 100%;
+  min-width: 0;
 }
 
 /* ============================================================
