@@ -61,4 +61,61 @@ describe('editorDocumentBackendAdapter', () => {
     expect(doc.selectedIds).toEqual([])
     expect(doc.nextElementSeq).toBe(3)
   })
+
+  it('round-trips connector bindings on a line element through the backend payload', () => {
+    const line = createLineElement({
+      id: toElementId('line-1'),
+      start: { x: 0, y: 0 },
+      end: { x: 80, y: 0 },
+      startBinding: { elementId: toElementId('rect-1'), anchor: 'right' },
+      endBinding: { elementId: toElementId('rect-2'), anchor: 'left' },
+    })
+    const payload = editorDocumentToBackendSaveInput({
+      ...createEmptyEditorDocument({ nextElementSeq: 2 }),
+      elements: [line],
+    })
+
+    expect(payload.elements[0].geometry).toMatchObject({
+      startBinding: { elementId: 'rect-1', anchor: 'right' },
+      endBinding: { elementId: 'rect-2', anchor: 'left' },
+    })
+
+    const dto: BackendEditorDocumentDto = {
+      ...payload,
+      version: 1,
+      versionNonce: 1,
+      elements: payload.elements.map((element) => ({ ...element, version: 1, versionNonce: 1 })),
+    }
+    const doc = backendDtoToEditorDocument(dto)
+    const restored = doc.elements[0]
+
+    expect(restored.type).toBe('line')
+    if (restored.type === 'line') {
+      expect(restored.startBinding).toEqual({ elementId: 'rect-1', anchor: 'right' })
+      expect(restored.endBinding).toEqual({ elementId: 'rect-2', anchor: 'left' })
+    }
+  })
+
+  it('hydrates a line with no bindings back to null (backward compatible with pre-fix saved data)', () => {
+    const line = createLineElement({ id: toElementId('line-1'), start: { x: 0, y: 0 }, end: { x: 40, y: 0 } })
+    const payload = editorDocumentToBackendSaveInput({
+      ...createEmptyEditorDocument({ nextElementSeq: 2 }),
+      elements: [line],
+    })
+    const dto: BackendEditorDocumentDto = {
+      ...payload,
+      version: 1,
+      versionNonce: 1,
+      elements: payload.elements.map((element) => ({ ...element, version: 1, versionNonce: 1 })),
+    }
+
+    const doc = backendDtoToEditorDocument(dto)
+    const restored = doc.elements[0]
+
+    expect(restored.type).toBe('line')
+    if (restored.type === 'line') {
+      expect(restored.startBinding).toBeNull()
+      expect(restored.endBinding).toBeNull()
+    }
+  })
 })

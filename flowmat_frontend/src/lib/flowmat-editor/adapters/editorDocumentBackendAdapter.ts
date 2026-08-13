@@ -1,6 +1,6 @@
 import type { Camera } from '../model/Camera'
 import type { EditorDocument } from '../model/EditorDocument'
-import type { EditorElement, LineStyle, ShapeStyle, TextStyle } from '../model/EditorElement'
+import type { AnchorSide, ElementBinding, EditorElement, LineStyle, ShapeStyle, TextStyle } from '../model/EditorElement'
 import { toElementId } from '../model/ElementId'
 import {
   fromSerializedEditorDocument,
@@ -109,7 +109,12 @@ function serializedElementToBackendInput(element: SerializedEditorElement): Back
     case 'line':
       return {
         ...common,
-        geometry: { start: element.start, end: element.end },
+        geometry: {
+          start: element.start,
+          end: element.end,
+          startBinding: element.startBinding ?? null,
+          endBinding: element.endBinding ?? null,
+        },
         style: element.style,
       }
     case 'freehand':
@@ -179,6 +184,8 @@ function backendElementToSerialized(element: BackendEditorElementDto): Serialize
         start: readVec2(geometry.start),
         end: readVec2(geometry.end),
         style: readLineStyle(element.style),
+        startBinding: readNullableBinding(geometry.startBinding),
+        endBinding: readNullableBinding(geometry.endBinding),
       }
     case 'freehand':
       return {
@@ -249,6 +256,21 @@ function readVec2(value: unknown) {
     x: readNumber(record.x),
     y: readNumber(record.y),
   }
+}
+
+function readNullableBinding(value: unknown): ElementBinding | null {
+  if (value == null) return null
+  const record = asRecord(value)
+  return {
+    elementId: toElementId(readString(record.elementId)),
+    anchor: readAnchorSide(record.anchor),
+  }
+}
+
+function readAnchorSide(value: unknown): AnchorSide {
+  const text = readString(value)
+  if (text === 'top' || text === 'right' || text === 'bottom' || text === 'left') return text
+  throw new Error(`Unsupported anchor side: ${text}`)
 }
 
 function readVec2Array(value: unknown) {
