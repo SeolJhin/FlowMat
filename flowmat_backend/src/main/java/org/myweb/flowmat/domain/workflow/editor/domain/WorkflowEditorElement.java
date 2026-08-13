@@ -6,6 +6,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
 
 @Getter
@@ -38,10 +40,12 @@ public class WorkflowEditorElement extends CreatedUpdatedAuditEntity {
     @Column(name = "element_order")
     private Integer elementOrder;
 
-    @Column(name = "geometry_json")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "geometry_json", columnDefinition = "jsonb")
     private String geometryJson = "{}";
 
-    @Column(name = "style_json")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "style_json", columnDefinition = "jsonb")
     private String styleJson = "{}";
 
     private String lockedYn = "N";

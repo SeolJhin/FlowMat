@@ -6,6 +6,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
 
 @Getter
@@ -23,7 +25,8 @@ public class WorkflowEditorDocument extends CreatedUpdatedAuditEntity {
     @Column(name = "schema_version")
     private Integer schemaVersion = 1;
 
-    @Column(name = "camera_json")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "camera_json", columnDefinition = "jsonb")
     private String cameraJson = "{\"x\":0,\"y\":0,\"zoom\":1}";
 
     @Column(name = "next_element_seq")
