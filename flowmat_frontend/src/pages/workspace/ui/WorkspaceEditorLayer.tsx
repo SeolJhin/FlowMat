@@ -15,18 +15,23 @@ import {
   cloneEditorElement,
   createElementId,
   createEmptyEditorDocument,
+  createLineElement,
   cleanupEmptyEditorGroups,
   deleteElements as deleteEditorElements,
   expandGroupSelection,
   findElementsInBox,
+  findNearestAnchor,
+  getAnchorPoint,
   getSelectedElementBounds,
   groupEditorElements,
   insertElement,
   mergeEditorDocumentsById,
   moveLineEndpoint,
   normalizeBox,
+  recomputeBoundLines,
   resizeBoxFromHandle,
   resizeElementWithinBox,
+  resizeRotatedElementFromHandle,
   rotateElement,
   selectElements,
   snapPoint,
@@ -36,15 +41,19 @@ import {
   ungroupEditorElements,
   updateElement,
   editorElementToPatchAnnotationInput,
+  type AnchorSide,
   type Box2,
   type EditorDocument,
   type EditorElement,
+  type ElementBinding,
   type ElementId,
   type LineEndpoint,
   type ResizeHandle,
   type Vec2,
 } from '../../../lib/flowmat-editor'
 import {
+  AnchorPointOverlay,
+  ArrowMarkerDefs,
   LineEndpointHandles,
   SelectionHandles,
   SelectionOutline,
@@ -62,6 +71,13 @@ import type { PatchCanvasAnnotationInput } from '../../../entities/canvas-annota
 const WORKSPACE_LAYER_EXTENT = 100000
 const WORKSPACE_GRID_SIZE = 8
 const WORKSPACE_EDITOR_HISTORY_LIMIT = 100
+const WORKSPACE_CONNECTOR_ANCHOR_THRESHOLD = 14
+
+// Stable placeholder used while the editor-document query is pending/undefined.
+// A fresh createEmptyEditorDocument() per render would give backendElementIds/editableIds
+// a new reference every render, keeping the selection-cleanup effect below permanently
+// re-armed and driving an update-depth loop into React Flow's StoreUpdater.
+const EMPTY_BACKEND_DOCUMENT: EditorDocument = createEmptyEditorDocument()
 
 export interface WorkspaceEditorSelectionSnapshot {
   selectedIds: readonly ElementId[]
@@ -126,6 +142,15 @@ type EditorInteraction =
       base: InteractionDocuments
       initialRotations: ReadonlyMap<ElementId, number>
     }
+  | {
+      type: 'draw-connector'
+      startElementId: ElementId
+      startAnchor: AnchorSide
+      startPoint: Vec2
+      current: Vec2
+      hoverElementId: ElementId | null
+      hoverAnchor: AnchorSide | null
+    }
 
 interface Props {
   workflowId: string
@@ -166,7 +191,7 @@ export function WorkspaceEditorLayer({
   }))
   const [isShiftPressed, setIsShiftPressed] = useState(false)
 
-  const baseBackendDocument = backendDocument ?? createEmptyEditorDocument()
+  const baseBackendDocument = backendDocument ?? EMPTY_BACKEND_DOCUMENT
   const annotationDocument = useMemo(() => annotationsToEditorDocument(annotations), [annotations])
   const editableDocument = draftBackendDocument ?? baseBackendDocument
   const editableAnnotationDocument = draftAnnotationDocument ?? annotationDocument
@@ -212,7 +237,7 @@ export function WorkspaceEditorLayer({
   const canRedoBackendDocument = backendHistory.future.length > 0
 
   useEffect(() => {
-    setSelectedIds((current) => current.filter((id) => editableIds.has(id)))
+    setSelectedIds((current) => filterStable(current, (id) => editableIds.has(id)))
   }, [editableIds])
 
   useEffect(() => {
@@ -386,6 +411,46 @@ export function WorkspaceEditorLayer({
     setDraftAnnotationDocument(null)
     await persistDocument(result.document)
   }, [editable, editableAnnotationDocument, editableDocument, onError, persistDocument, pushBackendHistorySnapshot, selectedIds])
+
+  const createConnectorElement = useCallback(async (
+    start: ElementBinding,
+    end: ElementBinding,
+  ) => {
+    if (!editable || start.elementId === end.elementId) return
+    const startElement = editableDocument.elements.find((element) => element.id === start.elementId)
+    const endElement = editableDocument.elements.find((element) => element.id === end.elementId)
+    if (!startElement || !endElement) return
+
+    const usedIds = new Set(editableDocument.elements.map((element) => element.id))
+    let nextSequence = Math.max(1, editableDocument.nextElementSeq)
+    while (usedIds.has(createElementId(nextSequence, 'shape'))) nextSequence += 1
+    const id = createElementId(nextSequence, 'shape')
+    const order = Math.max(0, ...editableDocument.elements.map((element) => element.order)) + 1
+
+    const connector = createLineElement({
+      id,
+      start: getAnchorPoint(startElement, start.anchor),
+      end: getAnchorPoint(endElement, end.anchor),
+      order,
+      style: {
+        stroke: '#7c3aed',
+        strokeWidth: 2,
+        strokeStyle: 'solid',
+        opacity: 1,
+        startArrow: 'none',
+        endArrow: 'arrow',
+      },
+      startBinding: start,
+      endBinding: end,
+    })
+
+    pushBackendHistorySnapshot(editableDocument, selectedIds)
+    const nextDocument = { ...insertElement(editableDocument, connector), nextElementSeq: nextSequence + 1 }
+    setSelectedIds([id])
+    setDraftBackendDocument(null)
+    setDraftAnnotationDocument(null)
+    await persistDocument(nextDocument)
+  }, [editable, editableDocument, persistDocument, pushBackendHistorySnapshot, selectedIds])
 
   const groupSelectedElements = useCallback(async () => {
     if (!editable || selectedIds.length < 2) return
@@ -646,6 +711,24 @@ export function WorkspaceEditorLayer({
     const snappedPoint = toSnappedCanvasPoint(event)
     const targetId = getElementIdFromTarget(event.target)
 
+    if (activeTool === 'editor-connector') {
+      const anchorMatch = findNearestAnchor(displayDocument.elements, point, WORKSPACE_CONNECTOR_ANCHOR_THRESHOLD)
+      if (!anchorMatch || !backendElementIds.has(anchorMatch.elementId)) return
+      event.preventDefault()
+      event.stopPropagation()
+      event.currentTarget.setPointerCapture(event.pointerId)
+      setInteraction({
+        type: 'draw-connector',
+        startElementId: anchorMatch.elementId,
+        startAnchor: anchorMatch.side,
+        startPoint: anchorMatch.point,
+        current: anchorMatch.point,
+        hoverElementId: null,
+        hoverAnchor: null,
+      })
+      return
+    }
+
     if (action.kind === 'line-endpoint') {
       if (!targetId || !editableIds.has(targetId)) return
       const target = displayDocument.elements.find((element) => element.id === targetId)
@@ -752,6 +835,22 @@ export function WorkspaceEditorLayer({
       return
     }
 
+    if (interaction.type === 'draw-connector') {
+      const hoverMatch = findNearestAnchor(
+        displayDocument.elements,
+        point,
+        WORKSPACE_CONNECTOR_ANCHOR_THRESHOLD,
+        interaction.startElementId,
+      )
+      setInteraction({
+        ...interaction,
+        current: hoverMatch ? hoverMatch.point : point,
+        hoverElementId: hoverMatch?.elementId ?? null,
+        hoverAnchor: hoverMatch?.side ?? null,
+      })
+      return
+    }
+
     if (interaction.type === 'move') {
       const dx = snappedPoint.x - interaction.start.x
       const dy = snappedPoint.y - interaction.start.y
@@ -762,10 +861,20 @@ export function WorkspaceEditorLayer({
     }
 
     if (interaction.type === 'resize') {
-      const nextBounds = resizeBoxFromHandle(interaction.baseBounds, interaction.handle, snappedPoint)
-      const result = transformLayerDocuments(interaction.base, (element) =>
-        resizeElementWithinBox(element, interaction.baseBounds, nextBounds),
-      )
+      const singleSelectedElement = interaction.base.selectedIds.length === 1
+        ? findElementInBase(interaction.base, interaction.base.selectedIds[0])
+        : undefined
+
+      const result = singleSelectedElement && singleSelectedElement.rotation !== 0
+        ? transformLayerDocuments(interaction.base, (element) =>
+            resizeRotatedElementFromHandle(element, interaction.baseBounds, interaction.handle, snappedPoint),
+          )
+        : (() => {
+            const nextBounds = resizeBoxFromHandle(interaction.baseBounds, interaction.handle, snappedPoint)
+            return transformLayerDocuments(interaction.base, (element) =>
+              resizeElementWithinBox(element, interaction.baseBounds, nextBounds),
+            )
+          })()
       setDraftBackendDocument(result.backendDocument)
       setDraftAnnotationDocument(result.annotationDocument)
       return
@@ -794,6 +903,17 @@ export function WorkspaceEditorLayer({
     event.stopPropagation()
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    if (interaction.type === 'draw-connector') {
+      const finished = interaction
+      setInteraction(null)
+      if (finished.hoverElementId && finished.hoverAnchor) {
+        void createConnectorElement(
+          { elementId: finished.startElementId, anchor: finished.startAnchor },
+          { elementId: finished.hoverElementId, anchor: finished.hoverAnchor },
+        )
+      }
+      return
     }
     const nextBackendDocument = draftBackendDocument
     const nextAnnotationDocument = draftAnnotationDocument
@@ -854,6 +974,9 @@ export function WorkspaceEditorLayer({
       onDoubleClick={handleDoubleClick}
       data-active-tool={activeTool}
     >
+      <defs>
+        <ArrowMarkerDefs />
+      </defs>
       {toSvgRenderNodes(displayDocument.elements).map((node) => (
         <SvgElementView
           key={node.id}
@@ -867,13 +990,30 @@ export function WorkspaceEditorLayer({
       {displayDocument.elements.map((element) => (
         selectedIds.includes(element.id) ? <SelectionOutline key={`${element.id}-selection`} element={element} /> : null
       ))}
-      {editable && selectionBounds && <SelectionHandles bounds={selectionBounds} />}
+      {editable && selectionBounds && (
+        <SelectionHandles
+          bounds={selectionBounds}
+          rotation={selectedElements.length === 1 ? selectedElements[0].rotation : 0}
+        />
+      )}
       {editable && displayDocument.elements.map((element) => (
         selectedIds.includes(element.id) && element.type === 'line' && element.rotation === 0
           ? <LineEndpointHandles key={`${element.id}-line-endpoints`} element={element} />
           : null
       ))}
       {marqueeBox && <MarqueeBox box={marqueeBox} />}
+      {editable && activeTool === 'editor-connector' && (
+        <AnchorPointOverlay
+          elements={displayDocument.elements.filter((element) => backendElementIds.has(element.id))}
+          activeElementId={interaction?.type === 'draw-connector' ? interaction.hoverElementId : null}
+          activeAnchor={interaction?.type === 'draw-connector' ? interaction.hoverAnchor : null}
+          draft={
+            interaction?.type === 'draw-connector'
+              ? { from: interaction.startPoint, to: interaction.current }
+              : null
+          }
+        />
+      )}
     </svg>
   )
 }
@@ -1045,6 +1185,25 @@ function createInteractionDocuments(
   }
 }
 
+function findElementInBase(base: InteractionDocuments, id: ElementId): EditorElement | undefined {
+  return (
+    base.backendDocument.elements.find((element) => element.id === id) ??
+    base.annotationDocument.elements.find((element) => element.id === id)
+  )
+}
+
+/**
+ * `list.filter(predicate)`, but returns `list` itself (same reference) when nothing was
+ * actually removed. `filter` always allocates a new array, so a plain
+ * `setState(current => current.filter(...))` never lets React bail out via `Object.is`
+ * even when the filtered content is identical — that's what turned this into an
+ * unbounded re-render loop when it ran against an unstable-per-render `editableIds` set.
+ */
+export function filterStable<T>(list: readonly T[], predicate: (item: T) => boolean): readonly T[] {
+  const filtered = list.filter(predicate)
+  return filtered.length === list.length ? list : filtered
+}
+
 function splitSelectedIds(
   backendDocument: EditorDocument,
   annotationDocument: EditorDocument,
@@ -1068,15 +1227,16 @@ function splitSelectedIds(
 function transformLayerDocuments(
   base: InteractionDocuments,
   transform: (element: EditorElement) => EditorElement,
-): { backendDocument: EditorDocument | null; annotationDocument: EditorDocument | null } {
+): { backendDocument: EditorDocument | null; annotationDocument: EditorDocument | null; backendIds: ElementId[] } {
   const split = splitSelectedIds(base.backendDocument, base.annotationDocument, base.selectedIds)
   return {
     backendDocument: split.backendIds.length > 0
-      ? transformSelected(base.backendDocument, split.backendIds, transform)
+      ? recomputeBoundLines(transformSelected(base.backendDocument, split.backendIds, transform), split.backendIds)
       : null,
     annotationDocument: split.annotationIds.length > 0
       ? transformSelected(base.annotationDocument, split.annotationIds, transform)
       : null,
+    backendIds: split.backendIds,
   }
 }
 

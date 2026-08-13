@@ -9,6 +9,7 @@ export type WorkflowEditorTool =
   | 'editor-ellipse'
   | 'editor-triangle'
   | 'editor-line'
+  | 'editor-connector'
   | 'editor-text'
 
 export type WorkflowPaletteTool =
@@ -22,6 +23,7 @@ const WORKFLOW_EDITOR_TOOLS: readonly WorkflowEditorTool[] = [
   'editor-ellipse',
   'editor-triangle',
   'editor-line',
+  'editor-connector',
   'editor-text',
 ]
 

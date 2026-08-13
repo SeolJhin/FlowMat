@@ -604,6 +604,26 @@ code {
   pointer-events: none;
 }
 
+.flowmat-editor-anchor-point {
+  fill: #ffffff;
+  stroke: #7c3aed;
+  stroke-width: 1.5;
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.flowmat-editor-anchor-point--active {
+  fill: #7c3aed;
+  opacity: 1;
+}
+
+.flowmat-editor-connector-draft {
+  stroke: #7c3aed;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+
 @media (max-width: 980px) {
   .editor-demo__toolbar {
     align-items: stretch;
