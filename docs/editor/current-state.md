@@ -1,5 +1,7 @@
 # FlowMat Editor Current State
 
+> 현재 이어서 작업할 내용: [FlowMat Editor Relay의 `BATON.md`](./relay/BATON.md)
+
 작성일: 2026-08-12
 
 ## 요약
