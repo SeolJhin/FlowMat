@@ -63,11 +63,20 @@ export interface PolygonElement extends BaseElement {
   style: ShapeStyle
 }
 
+export type AnchorSide = 'top' | 'right' | 'bottom' | 'left'
+
+export interface ElementBinding {
+  elementId: ElementId
+  anchor: AnchorSide
+}
+
 export interface LineElement extends BaseElement {
   type: 'line'
   start: Vec2
   end: Vec2
   style: LineStyle
+  startBinding?: ElementBinding | null
+  endBinding?: ElementBinding | null
 }
 
 export interface FreehandElement extends BaseElement {

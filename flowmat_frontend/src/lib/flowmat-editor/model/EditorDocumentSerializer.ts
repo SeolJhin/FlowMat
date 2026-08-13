@@ -2,7 +2,7 @@ import type { Camera } from './Camera'
 import { createCamera } from './Camera'
 import type { EditorDocument } from './EditorDocument'
 import { EDITOR_DOCUMENT_SCHEMA_VERSION } from './EditorDocument'
-import type { EditorElement, EditorElementType, LineStyle, ShapeStyle, TextStyle } from './EditorElement'
+import type { AnchorSide, ElementBinding, EditorElement, EditorElementType, LineStyle, ShapeStyle, TextStyle } from './EditorElement'
 import type { ElementId } from './ElementId'
 import { toElementId } from './ElementId'
 import type { Vec2 } from '../geometry/Vec2'
@@ -152,6 +152,8 @@ function readElement(value: unknown): EditorElement {
         start: readVec2(record, 'start'),
         end: readVec2(record, 'end'),
         style: readLineStyle(record, 'style'),
+        startBinding: readNullableBinding(record, 'startBinding'),
+        endBinding: readNullableBinding(record, 'endBinding'),
       }
     case 'freehand': {
       const points = readPoints(record, 'points')
@@ -256,6 +258,23 @@ function readNullableElementId(record: Record<string, unknown>, key: string): El
   const value = record[key]
   if (value == null) return null
   return toElementId(readStringValue(value, key))
+}
+
+function readNullableBinding(record: Record<string, unknown>, key: string): ElementBinding | null | undefined {
+  const value = record[key]
+  if (value === undefined) return undefined
+  if (value === null) return null
+  const bindingRecord = readRecordValue(value, key)
+  return {
+    elementId: toElementId(readString(bindingRecord, 'elementId')),
+    anchor: readAnchorSide(bindingRecord, 'anchor'),
+  }
+}
+
+function readAnchorSide(record: Record<string, unknown>, key: string): AnchorSide {
+  const value = readString(record, key)
+  if (value === 'top' || value === 'right' || value === 'bottom' || value === 'left') return value
+  throw new Error(`Unsupported anchor side: ${value}`)
 }
 
 function readNonNegativeNumber(record: Record<string, unknown>, key: string): number {

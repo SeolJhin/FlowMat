@@ -73,9 +73,23 @@ export function deleteElements(doc: EditorDocument, ids: readonly ElementId[]): 
   const idSet = new Set(ids)
   return {
     ...doc,
-    elements: doc.elements.filter((element) => !idSet.has(element.id)),
+    elements: doc.elements
+      .filter((element) => !idSet.has(element.id))
+      .map((element) => detachDanglingBindings(element, idSet)),
     selectedIds: doc.selectedIds.filter((id) => !idSet.has(id)),
   }
+}
+
+/**
+ * When an anchor shape is deleted, any connector line bound to it is detached
+ * (kept as a plain freeform line) rather than deleted along with it.
+ */
+function detachDanglingBindings(element: EditorElement, deletedIds: ReadonlySet<ElementId>): EditorElement {
+  if (element.type !== 'line') return element
+  const startBinding = element.startBinding && deletedIds.has(element.startBinding.elementId) ? null : element.startBinding
+  const endBinding = element.endBinding && deletedIds.has(element.endBinding.elementId) ? null : element.endBinding
+  if (startBinding === element.startBinding && endBinding === element.endBinding) return element
+  return { ...element, startBinding, endBinding }
 }
 
 export function selectElements(doc: EditorDocument, ids: readonly ElementId[]): EditorDocument {

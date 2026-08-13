@@ -1,6 +1,6 @@
 import { boxFromPoints } from '../geometry/Box2'
 import type { Vec2 } from '../geometry/Vec2'
-import type { LineElement, LineStyle } from '../model/EditorElement'
+import type { ElementBinding, LineElement, LineStyle } from '../model/EditorElement'
 import { DEFAULT_LINE_STYLE } from '../model/EditorElement'
 import type { ElementId } from '../model/ElementId'
 import { createBaseElement } from './elementDefaults'
@@ -16,6 +16,8 @@ export interface CreateLineElementInput {
   hidden?: boolean
   order?: number
   style?: Partial<LineStyle>
+  startBinding?: ElementBinding | null
+  endBinding?: ElementBinding | null
 }
 
 export function createLineElement(input: CreateLineElementInput): LineElement {
@@ -40,5 +42,7 @@ export function createLineElement(input: CreateLineElementInput): LineElement {
     start,
     end,
     style: { ...DEFAULT_LINE_STYLE, ...input.style },
+    startBinding: input.startBinding ?? null,
+    endBinding: input.endBinding ?? null,
   }
 }

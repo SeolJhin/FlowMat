@@ -89,6 +89,25 @@ describe('EditorDocument', () => {
     expect(nextDoc.selectedIds).toEqual([second.id])
   })
 
+  it('detaches connector bindings to a deleted element instead of deleting the line', () => {
+    const anchorA = createRectangleElement({ id: toElementId('rect-a'), x: 0, y: 0, width: 40, height: 40 })
+    const anchorB = createRectangleElement({ id: toElementId('rect-b'), x: 100, y: 0, width: 40, height: 40 })
+    const connector = createLineElement({
+      id: toElementId('line-1'),
+      start: { x: 40, y: 20 },
+      end: { x: 100, y: 20 },
+      startBinding: { elementId: anchorA.id, anchor: 'right' },
+      endBinding: { elementId: anchorB.id, anchor: 'left' },
+    })
+    const doc = insertElement(insertElement(insertElement(createEmptyEditorDocument(), anchorA), anchorB), connector)
+
+    const nextDoc = deleteElements(doc, [anchorA.id])
+    const remainingLine = nextDoc.elements.find((element) => element.id === connector.id)
+
+    expect(remainingLine).toBeDefined()
+    expect(remainingLine).toMatchObject({ startBinding: null, endBinding: { elementId: anchorB.id, anchor: 'left' } })
+  })
+
   it('clones elements with a new id and detached parent', () => {
     const rectangle = createRectangleElement({
       id: toElementId('rect-1'),
