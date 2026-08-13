@@ -56,7 +56,7 @@ import {
   type WorkflowEditorTool,
   type WorkflowPaletteTool,
 } from '../../../entities/workflow/model/nodeCatalog'
-import { Circle, Minus, Shapes, Square, Triangle, Type as TypeIcon } from 'lucide-react'
+import { Circle, Minus, Shapes, Square, Triangle, Type as TypeIcon, Waypoints } from 'lucide-react'
 import { Ribbon } from '../../../widgets/canvas-toolbar/ui/Ribbon'
 import {
   buildRibbonTabs,
@@ -115,6 +115,12 @@ const EDITOR_TOOL_DEFINITIONS: Array<{
   { tool: 'editor-ellipse', label: 'Ellipse', description: 'Create backend editor circles and ovals.', icon: Circle },
   { tool: 'editor-triangle', label: 'Triangle', description: 'Create backend editor polygon triangles.', icon: Triangle },
   { tool: 'editor-line', label: 'Line', description: 'Create backend editor lines.', icon: Minus },
+  {
+    tool: 'editor-connector',
+    label: 'Connector',
+    description: 'Drag between two shapes to draw a line that follows them.',
+    icon: Waypoints,
+  },
   { tool: 'editor-text', label: 'Text', description: 'Create backend editor text.', icon: TypeIcon },
 ]
 
@@ -149,6 +155,8 @@ function getWorkspaceToolShortcut(event: KeyboardEvent): WorkflowPaletteTool | n
       return 'editor-ellipse'
     case 'l':
       return 'editor-line'
+    case 'c':
+      return 'editor-connector'
     case 't':
       return 'editor-text'
     default:
@@ -266,6 +274,10 @@ function createWorkspaceEditorElement(
         }),
         nextElementSeq: nextSequence + 1,
       }
+    case 'editor-connector':
+      // Connectors are created by dragging between two shapes' anchor points inside
+      // WorkspaceEditorLayer's own pointer handlers, not by a single pane click.
+      throw new Error('Connector elements are created via drag-to-connect, not click placement.')
     case 'editor-text':
       return {
         element: createTextElement({
@@ -867,6 +879,9 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
 
   async function handleCreateEditorElement(tool: WorkflowEditorTool, position: Vec2) {
     if (!canEditAnnotations) return
+    // Connectors are drawn by dragging between two shapes inside WorkspaceEditorLayer;
+    // a plain pane click has no second anchor to bind to, so it's a no-op here.
+    if (tool === 'editor-connector') return
     setWorkspaceMessage(null)
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
     setSavedLabel('saving')
@@ -1376,6 +1391,94 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
       onClick: () => void handleReloadEditorDocument(),
       title: 'Reload editor document elements',
     },
+    'duplicate-selected': {
+      onClick: () => editorCommandApiRef.current?.duplicateSelected(),
+      disabled: !editorCommandApiRef.current || editorSelection.elements.length === 0,
+      title: 'Duplicate selected shapes',
+    },
+    'delete-selected': {
+      onClick: () => editorCommandApiRef.current?.deleteSelected(),
+      disabled: !editorCommandApiRef.current || editorSelection.elements.length === 0,
+      title: 'Delete selected shapes',
+    },
+    'group-selected': {
+      onClick: () => editorCommandApiRef.current?.groupSelected(),
+      disabled: !editorCommandApiRef.current || editorSelection.elements.length < 2,
+      title: 'Group selected shapes',
+    },
+    'ungroup-selected': {
+      onClick: () => editorCommandApiRef.current?.ungroupSelected(),
+      disabled: !editorCommandApiRef.current || editorSelection.elements.length === 0,
+      title: 'Ungroup selected shapes',
+    },
+    'bring-to-front': {
+      onClick: () => editorCommandApiRef.current?.bringSelectedToFront(),
+      disabled: !editorCommandApiRef.current || editorSelection.elements.length === 0,
+      title: 'Bring to front',
+    },
+    'send-to-back': {
+      onClick: () => editorCommandApiRef.current?.sendSelectedToBack(),
+      disabled: !editorCommandApiRef.current || editorSelection.elements.length === 0,
+      title: 'Send to back',
+    },
+    'align-left': {
+      onClick: () => void handleAlign('left'),
+      disabled: !canEditAnnotations,
+      title: 'Align left',
+    },
+    'align-center-x': {
+      onClick: () => void handleAlign('centerX'),
+      disabled: !canEditAnnotations,
+      title: 'Align center',
+    },
+    'align-right': {
+      onClick: () => void handleAlign('right'),
+      disabled: !canEditAnnotations,
+      title: 'Align right',
+    },
+    'align-top': {
+      onClick: () => void handleAlign('top'),
+      disabled: !canEditAnnotations,
+      title: 'Align top',
+    },
+    'align-center-y': {
+      onClick: () => void handleAlign('centerY'),
+      disabled: !canEditAnnotations,
+      title: 'Align middle',
+    },
+    'align-bottom': {
+      onClick: () => void handleAlign('bottom'),
+      disabled: !canEditAnnotations,
+      title: 'Align bottom',
+    },
+    'distribute-horizontal': {
+      onClick: () => void handleDistribute('horizontal'),
+      disabled: !canEditAnnotations,
+      title: 'Distribute horizontally',
+    },
+    'distribute-vertical': {
+      onClick: () => void handleDistribute('vertical'),
+      disabled: !canEditAnnotations,
+      title: 'Distribute vertically',
+    },
+    'annotation-group': {
+      onClick: () => void handleGroup(),
+      disabled: !canEditAnnotations,
+      title: 'Group selected annotations',
+    },
+    'annotation-ungroup': {
+      onClick: () => void handleUngroup(),
+      disabled: !canEditAnnotations,
+      title: 'Ungroup selected annotations',
+    },
+    'fit-view': {
+      onClick: () => fitViewRef.current(),
+      title: 'Fit view',
+    },
+    'select-all': {
+      onClick: () => selectAllRef.current(),
+      title: 'Select all',
+    },
   }
 
   const ribbonDynamicButtons: RibbonDynamicButtons = {
@@ -1482,29 +1585,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
             justifyContent: 'flex-end',
           }}
         >
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {/* Pointer + node-type tool buttons moved to Ribbon Home tab > Tools group (Step 2).
-                Annotation tool buttons below stay here until Step 3 (Annotate tab). */}
-            {ANNOTATION_TOOL_DEFINITIONS.map((definition) => (
-              <button
-                key={definition.tool}
-                type="button"
-                disabled={!canEditAnnotations}
-                title={canEditAnnotations ? undefined : 'Viewers cannot create annotations'}
-                onClick={() => setActiveTool(definition.tool)}
-                style={{
-                  border:
-                    activeTool === definition.tool ? '1px solid var(--accent)' : '1px solid var(--border)',
-                  background: activeTool === definition.tool ? 'var(--accent-bg)' : 'transparent',
-                  opacity: canEditAnnotations ? 1 : 0.5,
-                }}
-              >
-                {definition.label}
-              </button>
-            ))}
-          </div>
-          {/* Undo/Redo/Layout TB/Layout LR/Export JSON/Export PNG/Add Node moved to
-              Ribbon Home tab > Modify/Layout/Export/Tools groups (Step 2). */}
+          {/* Pointer/annotation tool buttons and Undo/Redo/Layout/Export moved to the Ribbon (Home/Annotate tabs). */}
             <span style={{ fontSize: '13px', opacity: 0.8 }}>
             Current tool: {getToolLabel(activeTool, paletteDefinitions)}.{' '}
             {activeTool === 'annotation-freehand'
@@ -1591,37 +1672,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
             >
               Pointer
             </button>
-            <div style={{ marginTop: '8px', display: 'grid', gap: '8px' }}>
-              <h3 style={{ margin: 0 }}>Editor Shapes</h3>
-              <p className="panel-placeholder" style={{ margin: 0 }}>
-                Rectangles, ellipses, triangles, lines, and text persist in the new editor document.
-              </p>
-              {EDITOR_TOOL_DEFINITIONS.map((definition) => (
-                <button
-                  key={definition.tool}
-                  type="button"
-                  disabled={!canEditAnnotations}
-                  onClick={() => setActiveTool(definition.tool)}
-                  style={{
-                    textAlign: 'left',
-                    padding: '12px 14px',
-                    borderRadius: '12px',
-                    border:
-                      activeTool === definition.tool
-                        ? '1px solid var(--accent)'
-                        : '1px solid var(--border)',
-                    background:
-                      activeTool === definition.tool ? 'var(--accent-bg)' : 'var(--surface)',
-                    display: 'grid',
-                    gap: '4px',
-                    opacity: canEditAnnotations ? 1 : 0.5,
-                  }}
-                >
-                  <strong>{definition.label}</strong>
-                  <span style={{ fontSize: '12px', opacity: 0.75 }}>{definition.description}</span>
-                </button>
-              ))}
-            </div>
+            {/* Editor Shapes tool buttons moved to Ribbon Annotate tab > Editor Shapes group. */}
             <div style={{ marginTop: '8px', display: 'grid', gap: '8px' }}>
               <h3 style={{ margin: 0 }}>Annotations</h3>
               <p className="panel-placeholder" style={{ margin: 0 }}>
@@ -1652,37 +1703,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
                   <span style={{ fontSize: '12px', opacity: 0.75 }}>{definition.description}</span>
                 </button>
               ))}
-              {canEditAnnotations && (
-                <div style={{ marginTop: '4px', display: 'grid', gap: '6px' }}>
-                  <span className="panel-placeholder" style={{ fontSize: '12px' }}>
-                    Select 2+ annotations on the canvas, then:
-                  </span>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
-                    <button type="button" title="Align left" onClick={() => void handleAlign('left')}>⟸</button>
-                    <button type="button" title="Align center (horizontal)" onClick={() => void handleAlign('centerX')}>↔</button>
-                    <button type="button" title="Align right" onClick={() => void handleAlign('right')}>⟹</button>
-                    <button type="button" title="Align top" onClick={() => void handleAlign('top')}>⟰</button>
-                    <button type="button" title="Align middle (vertical)" onClick={() => void handleAlign('centerY')}>↕</button>
-                    <button type="button" title="Align bottom" onClick={() => void handleAlign('bottom')}>⟱</button>
-                  </div>
-                  <div style={{ display: 'flex', gap: '4px' }}>
-                    <button type="button" title="Distribute horizontally (3+)" onClick={() => void handleDistribute('horizontal')}>
-                      Distribute H
-                    </button>
-                    <button type="button" title="Distribute vertically (3+)" onClick={() => void handleDistribute('vertical')}>
-                      Distribute V
-                    </button>
-                  </div>
-                  <div style={{ display: 'flex', gap: '4px' }}>
-                    <button type="button" title="Group selected annotations" onClick={() => void handleGroup()}>
-                      Group
-                    </button>
-                    <button type="button" title="Ungroup selected annotations" onClick={() => void handleUngroup()}>
-                      Ungroup
-                    </button>
-                  </div>
-                </div>
-              )}
+              {/* Align/Distribute/Group/Ungroup buttons moved to Ribbon Annotate tab > Align group. */}
             </div>
           </div>
         </aside>

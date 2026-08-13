@@ -1,14 +1,30 @@
 import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignHorizontalDistributeCenter,
   AlignHorizontalJustifyStart,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  AlignVerticalDistributeCenter,
   AlignVerticalJustifyStart,
+  BoxSelect,
+  BringToFront,
+  Copy,
   FileJson,
+  Group,
   Image,
+  Maximize2,
   MousePointer2,
   Plus,
   Redo2,
   RefreshCw,
   Save,
+  SendToBack,
+  Trash2,
   Undo2,
+  Ungroup,
 } from 'lucide-react'
 import type { RibbonButtonDefinition, RibbonGroupDefinition, RibbonTabDefinition } from '../ui/types'
 
@@ -87,9 +103,50 @@ export const ribbonConfig: RibbonTabSkeleton[] = [
           { id: 'reload-editor-document', icon: RefreshCw, label: 'Reload' },
         ],
       },
+      {
+        id: 'arrange',
+        label: 'Arrange',
+        buttons: [
+          { id: 'duplicate-selected', icon: Copy, label: 'Duplicate' },
+          { id: 'delete-selected', icon: Trash2, label: 'Delete' },
+          { id: 'group-selected', icon: Group, label: 'Group' },
+          { id: 'ungroup-selected', icon: Ungroup, label: 'Ungroup' },
+          { id: 'bring-to-front', icon: BringToFront, label: 'Front' },
+          { id: 'send-to-back', icon: SendToBack, label: 'Back' },
+        ],
+      },
+      {
+        id: 'align',
+        label: 'Align',
+        buttons: [
+          { id: 'align-left', icon: AlignStartVertical, label: 'Left' },
+          { id: 'align-center-x', icon: AlignCenterVertical, label: 'Center' },
+          { id: 'align-right', icon: AlignEndVertical, label: 'Right' },
+          { id: 'align-top', icon: AlignStartHorizontal, label: 'Top' },
+          { id: 'align-center-y', icon: AlignCenterHorizontal, label: 'Middle' },
+          { id: 'align-bottom', icon: AlignEndHorizontal, label: 'Bottom' },
+          { id: 'distribute-horizontal', icon: AlignHorizontalDistributeCenter, label: 'Dist. H' },
+          { id: 'distribute-vertical', icon: AlignVerticalDistributeCenter, label: 'Dist. V' },
+          { id: 'annotation-group', icon: Group, label: 'Group' },
+          { id: 'annotation-ungroup', icon: Ungroup, label: 'Ungroup' },
+        ],
+      },
     ],
   },
-  { id: 'view', label: 'View', groups: [] },
+  {
+    id: 'view',
+    label: 'View',
+    groups: [
+      {
+        id: 'navigation',
+        label: 'Navigation',
+        buttons: [
+          { id: 'fit-view', icon: Maximize2, label: 'Fit View' },
+          { id: 'select-all', icon: BoxSelect, label: 'Select All' },
+        ],
+      },
+    ],
+  },
   { id: 'collaborate', label: 'Collaborate', groups: [] },
 ]
 
