@@ -1,4 +1,4 @@
-﻿import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useItemsQuery } from '../../../entities/catalog/api/useItemsQuery'
 import { useCreateItemMutation } from '../../../entities/catalog/api/useCreateItemMutation'

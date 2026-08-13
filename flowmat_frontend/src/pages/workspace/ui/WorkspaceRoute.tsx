@@ -1,4 +1,4 @@
-﻿import { Suspense, lazy } from 'react'
+import { Suspense, lazy } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useWorkflowCanvasQuery } from '../../../entities/workflow/api/useWorkflowCanvasQuery'
 import { preloadWorkflowCanvasPage } from './workspacePreload'

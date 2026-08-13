@@ -1,4 +1,4 @@
-﻿import { Link, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 
 export function RulesRoute() {
   const { projectId = '' } = useParams<{ projectId: string }>()

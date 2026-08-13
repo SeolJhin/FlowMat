@@ -1,4 +1,4 @@
-﻿let inventoryRoutePromise: Promise<typeof import('../../pages/inventory/ui/InventoryRoute')> | null = null
+let inventoryRoutePromise: Promise<typeof import('../../pages/inventory/ui/InventoryRoute')> | null = null
 let runsRoutePromise: Promise<typeof import('../../pages/runs/ui/RunsRoute')> | null = null
 let runDetailRoutePromise: Promise<typeof import('../../pages/runs/ui/RunDetailRoute')> | null = null
 let templatesRoutePromise: Promise<typeof import('../../pages/templates/ui/TemplatesRoute')> | null = null

@@ -1,4 +1,4 @@
-﻿import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useApplyProcessTemplateMutation } from '../../../entities/workflow/api/useApplyProcessTemplateMutation'
 import { useProcessTemplatesQuery } from '../../../entities/workflow/api/useProcessTemplatesQuery'

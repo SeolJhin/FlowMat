@@ -1,4 +1,4 @@
-﻿import { Link, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 
 export function RunDetailRoute() {
   const { projectId = '', runId = '' } = useParams<{ projectId: string; runId: string }>()

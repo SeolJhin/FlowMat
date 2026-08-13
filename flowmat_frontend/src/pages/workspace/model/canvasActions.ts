@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Shared canvas action definitions inspired by Excalidraw's action model.
  * Each action combines a keyboard matcher, an availability predicate, and a handler.
  * The keyboard layer and toolbar UI consume the same action objects.
