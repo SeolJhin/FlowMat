@@ -4,7 +4,14 @@ import { createRectangleElement } from '../elements/RectangleElement'
 import { boxFromPoints, containsPointInBox, normalizeBox, unionBoxes } from './Box2'
 import { findTopmostElementIdAtPoint, hitTestElement } from './HitTest'
 import { invertMatrix, multiplyMatrix, rotationMatrix, transformPoint, translationMatrix } from './Matrix2D'
-import { moveLineEndpoint, resizeBoxFromHandle, resizeElementToBox, resizeElementWithinBox, rotateElement } from './Transform'
+import {
+  moveLineEndpoint,
+  resizeBoxFromHandle,
+  resizeElementToBox,
+  resizeElementWithinBox,
+  resizeRotatedElementFromHandle,
+  rotateElement,
+} from './Transform'
 import { nearlyEqualVec2, vec2 } from './Vec2'
 import { canvasToScreenPoint, createCamera, screenToCanvasPoint, zoomCameraAtScreenPoint } from '../model/Camera'
 import { toElementId } from '../model/ElementId'
@@ -157,5 +164,27 @@ describe('Transform', () => {
 
     expect(rotateElement(rectangle, -15).rotation).toBe(345)
     expect(rotateElement(rectangle, 375).rotation).toBe(15)
+  })
+
+  it('resizing at rotation 0 matches the plain axis-aligned resize path', () => {
+    const rectangle = createRectangleElement({ id: toElementId('rect-1'), x: 10, y: 20, width: 100, height: 80 })
+    const baseBounds = { x: 10, y: 20, width: 100, height: 80 }
+
+    const plain = resizeElementToBox(rectangle, resizeBoxFromHandle(baseBounds, 'se', vec2(140, 130)))
+    const rotated = resizeRotatedElementFromHandle(rectangle, baseBounds, 'se', vec2(140, 130))
+
+    expect(rotated).toMatchObject({ x: plain.x, y: plain.y, width: plain.width, height: plain.height })
+  })
+
+  it('keeps the opposite corner pinned in world space when resizing a rotated element', () => {
+    // A 100x100 square rotated 90deg about its center (50,50): dragging its "se" handle
+    // outward keeps the opposite ("nw") corner fixed at its rotated world position (100,0),
+    // not at its unrotated local position (0,0) — this is the rhwp-style anchor-pinning fix.
+    const rectangle = createRectangleElement({ id: toElementId('rect-1'), x: 0, y: 0, width: 100, height: 100, rotation: 90 })
+    const baseBounds = { x: 0, y: 0, width: 100, height: 100 }
+
+    const resized = resizeRotatedElementFromHandle(rectangle, baseBounds, 'se', vec2(-50, 150))
+
+    expect(resized).toMatchObject({ x: -50, y: 0, width: 150, height: 150, rotation: 90 })
   })
 })

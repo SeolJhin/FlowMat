@@ -1,14 +1,18 @@
 import type { PointerEvent } from 'react'
 import { boxCenter } from '../geometry/Box2'
 import { getElementBounds } from '../geometry/Bounds'
+import { getAnchorPoints } from '../geometry/AnchorPoints'
 import { screenToCanvasPoint } from '../model/Camera'
 import type { EditorDocument } from '../model/EditorDocument'
-import type { EditorElement, LineStyle, ShapeStyle } from '../model/EditorElement'
+import type { AnchorSide, EditorElement, LineStyle, ShapeStyle } from '../model/EditorElement'
+import type { ElementId } from '../model/ElementId'
 import type { Vec2 } from '../geometry/Vec2'
 import type { Box2 } from '../geometry/Box2'
 import { getSelectedElementBounds } from '../selection/SelectionManager'
 import {
+  CONNECTOR_ARROW_MARKER_ID,
   freehandPointsToPath,
+  getLineMarkerAttrs,
   getShapeStrokeDashArray,
   pointsToSvgPoints,
   toSvgRenderNodes,
@@ -43,6 +47,8 @@ export function SvgEditorSurface({
   const selectedIds = new Set(document.selectedIds)
   const elements = previewElement ? [...document.elements, previewElement] : document.elements
   const selectionBounds = getSelectedElementBounds(document)
+  const selectedElements = document.elements.filter((element) => selectedIds.has(element.id))
+  const selectionRotation = selectedElements.length === 1 ? selectedElements[0].rotation : 0
 
   function toEditorPointerEvent(event: PointerEvent<SVGSVGElement>): SvgEditorPointerEvent {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -72,6 +78,7 @@ export function SvgEditorSurface({
         <pattern id="flowmat-editor-grid" width="32" height="32" patternUnits="userSpaceOnUse">
           <path d="M 32 0 L 0 0 0 32" fill="none" stroke="rgba(17,24,39,0.08)" strokeWidth="1" />
         </pattern>
+        <ArrowMarkerDefs />
       </defs>
       <rect width="100%" height="100%" fill="var(--surface)" />
       <g transform={`translate(${document.camera.x} ${document.camera.y}) scale(${document.camera.zoom})`}>
@@ -88,7 +95,7 @@ export function SvgEditorSurface({
         {document.elements.map((element) => (
           selectedIds.has(element.id) ? <SelectionOutline key={`${element.id}-selection`} element={element} /> : null
         ))}
-        {selectionBounds && <SelectionHandles bounds={selectionBounds} />}
+        {selectionBounds && <SelectionHandles bounds={selectionBounds} rotation={selectionRotation} />}
         {document.elements.map((element) => (
           selectedIds.has(element.id) && element.type === 'line' && element.rotation === 0
             ? <LineEndpointHandles key={`${element.id}-line-endpoints`} element={element} />
@@ -100,7 +107,7 @@ export function SvgEditorSurface({
   )
 }
 
-export function SelectionHandles({ bounds }: { bounds: Box2 }) {
+export function SelectionHandles({ bounds, rotation = 0 }: { bounds: Box2; rotation?: number }) {
   const handles = [
     ['nw', bounds.x, bounds.y],
     ['n', bounds.x + bounds.width / 2, bounds.y],
@@ -113,9 +120,13 @@ export function SelectionHandles({ bounds }: { bounds: Box2 }) {
   ] as const
   const rotateX = bounds.x + bounds.width / 2
   const rotateY = bounds.y - 34
+  const center = boxCenter(bounds)
 
   return (
-    <g className="flowmat-editor-selection-handles">
+    <g
+      className="flowmat-editor-selection-handles"
+      transform={rotation === 0 ? undefined : `rotate(${rotation} ${center.x} ${center.y})`}
+    >
       <line
         x1={bounds.x + bounds.width / 2}
         y1={bounds.y}
@@ -146,6 +157,55 @@ export function SelectionHandles({ bounds }: { bounds: Box2 }) {
           vectorEffect="non-scaling-stroke"
         />
       ))}
+    </g>
+  )
+}
+
+export interface AnchorPointOverlayDraft {
+  from: Vec2
+  to: Vec2
+}
+
+export function AnchorPointOverlay({
+  elements,
+  activeElementId,
+  activeAnchor,
+  draft,
+}: {
+  elements: readonly EditorElement[]
+  activeElementId?: ElementId | null
+  activeAnchor?: AnchorSide | null
+  draft?: AnchorPointOverlayDraft | null
+}) {
+  return (
+    <g className="flowmat-editor-anchor-overlay">
+      {elements
+        .filter((element) => !element.hidden)
+        .flatMap((element) =>
+          getAnchorPoints(element).map(({ side, point }) => {
+            const active = element.id === activeElementId && side === activeAnchor
+            return (
+              <circle
+                key={`${element.id}-${side}`}
+                cx={point.x}
+                cy={point.y}
+                r={active ? 6 : 3.5}
+                className={`flowmat-editor-anchor-point${active ? ' flowmat-editor-anchor-point--active' : ''}`}
+                vectorEffect="non-scaling-stroke"
+              />
+            )
+          }),
+        )}
+      {draft && (
+        <line
+          x1={draft.from.x}
+          y1={draft.from.y}
+          x2={draft.to.x}
+          y2={draft.to.y}
+          className="flowmat-editor-connector-draft"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
     </g>
   )
 }
@@ -315,5 +375,23 @@ function lineStyleAttrs(style: LineStyle) {
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
     vectorEffect: 'non-scaling-stroke' as const,
+    ...getLineMarkerAttrs(style),
   }
+}
+
+/** Shared arrowhead marker definition — render once per <svg> root, reference via CONNECTOR_ARROW_MARKER_ID. */
+export function ArrowMarkerDefs() {
+  return (
+    <marker
+      id={CONNECTOR_ARROW_MARKER_ID}
+      viewBox="0 0 10 10"
+      refX="9"
+      refY="5"
+      markerWidth="6"
+      markerHeight="6"
+      orient="auto-start-reverse"
+    >
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" />
+    </marker>
+  )
 }

@@ -3,7 +3,7 @@ import { createLineElement } from '../elements/LineElement'
 import type { EditorElement } from '../model/EditorElement'
 import type { LineElement } from '../model/EditorElement'
 import { getElementBounds } from './Bounds'
-import { normalizeBox, type Box2 } from './Box2'
+import { boxCenter, normalizeBox, type Box2 } from './Box2'
 
 export function translateElement<T extends EditorElement>(element: T, delta: Vec2): T {
   return {
@@ -89,6 +89,64 @@ export function resizeElementWithinBox<T extends EditorElement>(element: T, base
   })
 }
 
+/**
+ * Resize a single rotated element by handle-drag, keeping the corner/edge opposite
+ * the dragged handle visually pinned in world space (rhwp's `calcResizedBboxRotated`
+ * technique). `resizeElementWithinBox`'s plain axis-aligned math is only correct for
+ * rotation === 0 — a rotated shape's on-screen handles are rotated too (see
+ * `SelectionHandles`), so the drag point has to be read in the shape's local,
+ * unrotated frame before the existing resize math applies, and the resulting box
+ * has to be re-anchored back into world space afterward.
+ */
+export function resizeRotatedElementFromHandle<T extends EditorElement>(
+  element: T,
+  baseBounds: Box2,
+  handle: ResizeHandle,
+  point: Vec2,
+  minSize = 8,
+): T {
+  const rotation = element.rotation
+  const center = boxCenter(baseBounds)
+  const localPoint = rotateVector(subtractVec(point, center), -rotation)
+  const localPointAbsolute = { x: center.x + localPoint.x, y: center.y + localPoint.y }
+  const nextBox = resizeBoxFromHandle(baseBounds, handle, localPointAbsolute, minSize)
+
+  const desiredAnchor = worldAnchorPoint(baseBounds, handle, center, rotation)
+  const naiveCenter = boxCenter(nextBox)
+  const naiveAnchorOffset = rotateVector(anchorOffsetFromCenter(nextBox, handle), rotation)
+  const naiveAnchor = { x: naiveCenter.x + naiveAnchorOffset.x, y: naiveCenter.y + naiveAnchorOffset.y }
+
+  const correctedBox: Box2 = {
+    ...nextBox,
+    x: nextBox.x + (desiredAnchor.x - naiveAnchor.x),
+    y: nextBox.y + (desiredAnchor.y - naiveAnchor.y),
+  }
+  return resizeElementToBox(element, correctedBox)
+}
+
+function worldAnchorPoint(box: Box2, handle: ResizeHandle, center: Vec2, rotation: number): Vec2 {
+  const offset = rotateVector(anchorOffsetFromCenter(box, handle), rotation)
+  return { x: center.x + offset.x, y: center.y + offset.y }
+}
+
+/** The box-local point (relative to its own center) that a handle drag keeps fixed. */
+function anchorOffsetFromCenter(box: Box2, handle: ResizeHandle): Vec2 {
+  const x = handle.includes('w') ? box.width : 0
+  const y = handle.includes('n') ? box.height : 0
+  return { x: x - box.width / 2, y: y - box.height / 2 }
+}
+
+function subtractVec(a: Vec2, b: Vec2): Vec2 {
+  return { x: a.x - b.x, y: a.y - b.y }
+}
+
+function rotateVector(v: Vec2, degrees: number): Vec2 {
+  const radians = (degrees * Math.PI) / 180
+  const cos = Math.cos(radians)
+  const sin = Math.sin(radians)
+  return { x: v.x * cos - v.y * sin, y: v.x * sin + v.y * cos }
+}
+
 export function rotateElement<T extends EditorElement>(element: T, rotation: number): T {
   return {
     ...element,
@@ -121,6 +179,10 @@ export function moveLineEndpoint(element: LineElement, endpoint: LineEndpoint, p
     hidden: element.hidden,
     order: element.order,
     style: element.style,
+    // Dragging one endpoint by hand detaches only that side from its anchor shape;
+    // the other side keeps following its binding on the next recompute.
+    startBinding: endpoint === 'start' ? null : element.startBinding,
+    endBinding: endpoint === 'end' ? null : element.endBinding,
   })
 }
 

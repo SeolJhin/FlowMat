@@ -45,6 +45,17 @@ export function getShapeStrokeDashArray(style: Pick<ShapeStyle | LineStyle, 'str
   return undefined
 }
 
+export const CONNECTOR_ARROW_MARKER_ID = 'flowmat-editor-arrow'
+
+export function getLineMarkerAttrs(
+  style: Pick<LineStyle, 'startArrow' | 'endArrow'>,
+): { markerStart?: string; markerEnd?: string } {
+  return {
+    markerStart: style.startArrow === 'arrow' ? `url(#${CONNECTOR_ARROW_MARKER_ID})` : undefined,
+    markerEnd: style.endArrow === 'arrow' ? `url(#${CONNECTOR_ARROW_MARKER_ID})` : undefined,
+  }
+}
+
 export function formatNumber(value: number): string {
   if (Object.is(value, -0)) return '0'
   return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')
