@@ -4,6 +4,8 @@
 관련 계획서(승인됨): `C:\Users\rjw04\.claude\plans\async-yawning-dijkstra.md`
 관련 선행 문서: `docs/editor/current-state.md` (2026-08-12 기준 editor engine v1 상태)
 
+> **참고**: 이 문서는 이번 세션 초반에 임시로 쓴 진행 기록이다. 팀에는 별도의 정식 교대 인계 체계(`docs/editor/relay/`)가 있다는 것을 세션 후반에 발견했다. 이후 작업(Select All 크래시 수정, Align/Distribute 신규 엔진 연결, 백엔드 jsonb 전수 감사 등)은 정식 형식으로 [`relay/history/2026-08/2026-08-14-1514-seoly-stability-and-align.md`](./relay/history/2026-08/2026-08-14-1514-seoly-stability-and-align.md)에 기록했고, 최신 상태는 [`relay/BATON.md`](./relay/BATON.md)를 따라간다. 이 문서는 그 이전 구간(커넥터/회전리사이즈/화살표/툴바 구현과 첫 크래시 수정)의 기록으로 남겨둔다.
+
 ## 전체 목표
 
 rhwp(Rust/WASM HWP 엔진)의 도형 그리기 UX 중 FlowMat에 없던 것만 선별 이식:
@@ -83,47 +85,62 @@ rhwp(Rust/WASM HWP 엔진)의 도형 그리기 UX 중 FlowMat에 없던 것만 �
 
 이로써 이번 세션의 핵심 목표(rhwp 커넥터 라인 기능의 이식 + 저장/재로드 영속화)가 엔드투엔드로 검증 완료됨. (참고: 오래된 `shape-3`는 adapter 수정 전에 저장된 데이터라 바인딩이 `null`로 굳어있어 여전히 안 따라옴 — 예상된 정상 동작이며 정리용 테스트 데이터라 무해함.)
 
+## 2026-08-14 (계속) — 회전 리사이즈/화살표/리본 버튼 라이브 검증 결과
+
+이 세션 안에서 이어서 진행함. 백엔드가 STS(Eclipse) 환경에서 실행되는데, `bin/main`(STS 자체 컴파일 캐시)이 `editor` 패키지 전체를 누락한 채로 stale 상태였던 게 밝혀져 STS에서 **Project → Clean**으로 재빌드한 뒤 진행함. (Gradle의 `build/` 산출물엔 문제없었음 — STS와 Gradle이 각자 다른 출력 디렉터리를 쓰는 구조라 발생한 문제.)
+
+### 확인 완료
+
+- **회전 인식 리사이즈**: 도형을 90° 회전(`rotate(90 80 48)`) → `se` 핸들 드래그로 리사이즈 → 반대쪽 `nw` 핸들이 화면상 정확히 같은 좌표(639,486 → 639,486)에 고정된 채 유지됨. `resizeRotatedElementFromHandle` 라이브 확인 완료.
+- **화살표 렌더링**: 커넥터 라인 3개(`shape-3/5/6`) 전부 `marker-end="url(#flowmat-editor-arrow)"` 정상 참조, `<marker id="flowmat-editor-arrow">` 정의도 정상 존재. 스크린샷으로 실제 삼각형 화살표가 그려지는 것도 시각 확인.
+- **Arrange 그룹**: Duplicate(`shape-7` 생성 확인) / Delete(정상 제거) / Bring to Front(`order` 필드가 최댓값으로 변경 확인) / Send to Back(`order`가 1로 변경 확인) 전부 정상 동작.
+- **View 탭 Fit View**: `react-flow__viewport`의 transform이 실제로 변경됨 — 정상 동작.
+
+### 새로 발견한 버그 (2건)
+
+1. **Align/Distribute 리본 버튼이 새 backend editor element에는 전혀 동작 안 함** (Bug, 수정 안 함)
+   - `WorkflowCanvasPage.tsx:1287`의 `handleAlign()`이 `getSelectedAnnotations()`(레거시 annotation 전용)만 읽음. `shape-1`/`shape-2`(새 editor element)를 선택하고 "Align top"을 눌러도 `selected.length < 2`로 조용히 무시됨(PUT조차 안 나감).
+   - Arrange 그룹(Duplicate/Group/Front/Back 등)은 `editorCommandApiRef.current?.X()`를 쓰는데, `WorkspaceEditorCommandApi` 인터페이스(`WorkspaceEditorLayer.tsx:99`)에는 애초에 `alignSelected`/`distributeSelected` 메서드가 없음 — 배선 실수가 아니라 **새 editor 엔진에 정렬/분배 기능 자체가 아직 구현 안 됨**.
+   - 영향: Align 6방향 + Distribute 2방향, 총 8개 버튼이 새 도형에는 전부 무동작. annotation-group/ungroup(레거시 주석 전용, 의도된 범위)은 정상.
+   - 수정하려면: `WorkspaceEditorCommandApi`에 `alignSelected(direction)`/`distributeSelected(axis)` 추가 구현 필요 — 이번 세션 범위 밖으로 남겨둠.
+
+2. **"Select All" 리본 버튼(및 Ctrl/Cmd+A)이 워크플로 노드가 많을 때 앱 전체를 크래시시킴** — **해결됨** ✅
+   - 근본 원인을 `console.count`/`console.log` 임시 진단 로그로 확정함: `CanvasViewport.tsx`가 `useWorkspaceStore()`를 **셀렉터 없이** 호출(`const { selectNode, ..., setMultiSelect } = useWorkspaceStore()`) — Zustand는 셀렉터 없는 구독을 "스토어 전체 구독"으로 취급해서, `setMultiSelect()`가 스토어의 **어떤** 필드를 바꾸든(심지어 같은 값으로 다시 써도) 매번 새 상태 객체를 생성해 전체 재구독 컴포넌트를 리렌더시킴.
+   - 진단 로그로 확인된 실제 루프: `onSelectionChange`(21개 노드 선택 이벤트)가 60회 이상 반복 호출되는데, 그때마다 selection count는 항상 21로 동일 — 즉 "선택 로직"이 반복되는 게 아니라, **리렌더 자체가 반복**되고 있었음. `onSelectionChange`가 JSX 안에서 인라인 화살표 함수로 선언되어 있어서, 부모가 리렌더될 때마다 새 함수 참조를 받고, `@xyflow/react`가 그걸 다시 구독하면서 현재 선택 상태로 콜백을 재호출 → `setMultiSelect()` 재호출 → 스토어 전체 재구독 컴포넌트 리렌더 → 무한 루프.
+   - **수정**: `useWorkspaceStore()`를 셀렉터 없이 호출하던 3곳을 전부 필드별 셀렉터(`useWorkspaceStore((s) => s.X)`)로 변경:
+     - `CanvasViewport.tsx` (React Flow에 `nodes`/`onSelectionChange` 등을 직접 공급하는 컴포넌트 — 원인의 핵심)
+     - `WorkflowCanvasPage.tsx` (부모 페이지 — 얘도 전체 구독이라 `inspectorMode` 같은 무관한 필드 변경에도 리렌더되어 루프를 증폭시킬 수 있었음)
+     - `CanvasNode.tsx` (워크플로 노드 1개당 1번씩 렌더되는 컴포넌트 — 이 워크플로엔 21개 있어서 전체 구독이면 스토어 변경 1번에 21번 리렌더되는 증폭 효과가 있었음)
+   - **라이브 재검증 완료**: 21개 노드 전부 정상 선택됨(`selectedNodes: 21, totalNodes: 21`), 콘솔 에러 0건, 연속 두 번 클릭해도 안정적. `tsc`/`lint`/`test`(87 tests) 전부 통과.
+   - 참고: 오늘 초반에 고친 크래시(`WorkspaceEditorLayer.tsx`)와 겉으로 드러난 에러 시그니처(`@xyflow/react` `StoreUpdater` 내부, 라인 6292)는 같았지만, 근본 원인은 서로 다른 별개의 버그였음 — 하나는 React `useState`의 `Object.is` 바일아웃 실패, 다른 하나는 Zustand의 셀렉터 없는 전체 구독. 둘 다 "매 렌더 새 참조 생성 → React Flow의 controlled prop 동기화 증폭 → 무한 루프"라는 같은 상위 패턴을 공유함.
+
+### 미확인 (자동화 도구의 클릭 안정성 문제로 라이브 확인 못함, 코드 리뷰로는 정상)
+
+- **Group/Ungroup selected shapes** (Arrange 그룹): `editorCommandApiRef.current?.groupSelected()`/`ungroupSelected()` 패턴으로, 이미 확인된 Duplicate/Front/Back과 동일한 방식이라 정상 동작할 것으로 추정되나 이번 세션에서 실제 클릭까지는 확인 못 함(이번에도 "기존 도형 클릭 선택"이 자동화 도구에서 간헐적으로 반응 없었음 — 사람이 하면 되는 것으로 이미 한 번 확인된 패턴).
+
 ## 남은 작업 (다음 세션 TODO)
 
-이번 세션은 사용자 판단으로 여기서 마무리함(토큰 소진). 아래는 다음 세션에서 이어서 할 일 — 코드는 이미 다 작성되어 있고 빌드/테스트도 통과한 상태라, 전부 **라이브 브라우저 확인만 남은 상태**임.
+### ~~1. Align/Distribute를 새 editor 엔진에도 연결~~ — 완료 ✅
 
-### 1. 회전된 도형 리사이즈 라이브 테스트
-- 아무 도형이나 회전시킨다 (회전 핸들 드래그)
-- 리사이즈 핸들이 회전을 따라 움직이는지 확인 (`SelectionHandles`의 `rotation` prop 배선, `SvgEditorSurface.tsx`)
-- 리사이즈 핸들을 드래그했을 때 반대쪽 모서리가 월드 좌표 기준으로 고정되어 있는지 확인 (`resizeRotatedElementFromHandle`, `geometry/Transform.ts`) — rhwp의 `calcResizedBboxRotated` 이식 부분
-- 이미 유닛 테스트(`Geometry.test.ts` +2)로는 검증됐지만 실제 화면에서 시각적으로 자연스러운지는 미확인
+`WorkspaceEditorCommandApi`에 `alignSelected(direction)`/`distributeSelected(axis)` 추가 구현:
+- 기존 레거시 주석(annotation)용 순수 함수(`entities/canvas-annotation/model/annotationLayout.ts`의 `computeSelectionBounds`/`computeAlignedPosition`/`computeDistributedPositions`)를 그대로 재사용 — 로직 중복 없이 `EditorElement`를 `LayoutBox`로 변환만 해서 넘김.
+- `WorkspaceEditorLayer.tsx`에 `alignSelected`/`distributeSelected` 콜백 추가 (기존 `reorderSelectedElementsInLayer` 등과 동일한 패턴: history snapshot push → `transformSelected`로 x/y 갱신 → `persistLayerChanges`).
+- `WorkflowCanvasPage.tsx`의 `handleAlign`/`handleDistribute`가 `editorSelection.elements.length >= 2`(align) / `>= 3`(distribute)일 때는 새 엔진으로, 아니면 기존 레거시 주석 경로로 라우팅하도록 수정 — Undo/Redo가 이미 쓰던 `isEditorCommandContext` 라우팅과 같은 발상.
+- 리본 버튼 8개(Align×6, Distribute×2)의 `disabled` 조건도 `canEditAnnotations` 단독 체크에서 "새 도형 선택 2개/3개 이상 OR 주석 편집 권한"으로 수정 — 새 도형만 선택했을 때 버튼이 괜히 비활성화되지 않도록.
+- **라이브 검증 완료**: 도형 2개(y=158, y=274) 선택 → Align Top → 둘 다 y=158로 정확히 이동, PUT 페이로드에도 정상 반영. 도형 3개(불균등 간격) 선택 → Distribute Horizontally → 간격이 29px/28px로 균등해짐(첫/마지막 도형 위치는 그대로 유지).
+- `tsc`/`lint`/`test`(87) 전부 통과.
 
-### 2. 화살표 렌더링 확인
-- 커넥터 도구로 선을 그리면 기본 스타일이 `endArrow: 'arrow'`로 생성됨 (`WorkspaceEditorLayer.tsx`의 `createConnectorElement`)
-- 실제로 선 끝에 삼각형 화살표 머리가 그려지는지 스크린샷/DOM으로 확인 (`SvgRenderer.ts`의 `CONNECTOR_ARROW_MARKER_ID`, `SvgEditorSurface.tsx`의 `<ArrowMarkerDefs>`)
-- 도형을 회전/이동해도 화살표 방향이 선 각도를 따라가는지 확인
+### 2. Group/Ungroup 라이브 재확인
+자동화 도구 대신 사람이 직접 두 도형 선택 후 Group/Ungroup 버튼 클릭해서 확인.
 
-### 3. 리본 신규 버튼 전수 라이브 테스트
-Annotate 탭에서 도형 1~2개 선택한 상태로 아래 버튼들을 하나씩 눌러 기존 사이드바 버튼과 동일하게 동작하는지 확인:
-- Arrange 그룹: Duplicate, Delete, Group, Ungroup, Front(맨 앞으로), Back(맨 뒤로)
-- Align 그룹: Left, Center, Right, Top, Middle, Bottom, Dist. H(수평 분배), Dist. V(수직 분배), Group, Ungroup
-- View 탭: Fit View, Select All
-- 참고: 코드는 기존에 이미 구현된 함수를 리본에 배선만 한 것(`WorkflowCanvasPage.tsx`의 `ribbonHandlers`)이라 새 로직은 없음 — 배선 누락/오탈자 여부만 확인하면 됨
-
-### 4. 최종 검증 스위트 재실행
-위 1~3 항목을 실제로 눌러보다가 코드를 조금이라도 고쳤다면:
-```
-cd flowmat_frontend
-npm run build
-npx tsc --noEmit -p tsconfig.json
-npm run lint
-npm run test
-```
-아무것도 안 고쳤다면 이미 이번 세션에 87 tests 전부 통과 확인된 상태라 생략 가능.
-
-### 5. 테스트 데이터 정리 (선택)
+### 3. 테스트 데이터 정리 (선택)
 이번 세션에 라이브 테스트용으로 `wf_demo_main` 워크플로에 만든 도형들을 지울지 결정:
 - `shape-1`, `shape-2` (사각형 2개), `shape-4` (타원 1개, 테스트 중 실수로 생성됨)
 - `shape-3` (구 커넥터 — adapter 수정 전에 저장되어 `startBinding`/`endBinding`이 `null`로 굳어있음, 안 따라오는 게 정상이니 혼란 방지 차원에서 지우는 게 좋음)
 - `shape-5` (신 커넥터 — 바인딩 정상 작동 확인됨, 데모용으로 남겨둬도 되고 지워도 됨)
-- Annotate 탭에서 전체 선택(Ctrl/Cmd+A 또는 Select All 버튼) → Delete로 한 번에 정리 가능
+- Annotate 탭에서 전체 선택(Ctrl/Cmd+A 또는 Select All 버튼, 이제 안전하게 사용 가능) → Delete로 한 번에 정리 가능
 
-### 6. (선택, 급하지 않음) `docs/editor/current-state.md` 갱신
+### 4. (선택, 급하지 않음) `docs/editor/current-state.md` 갱신
 마스터 상태 문서(2026-08-12 작성)에 이번 세션 작업(커넥터/회전리사이즈/화살표/리본 완성 + 버그 수정 3건)을 반영하는 섹션 추가. 지금 이 파일(`connector-line-progress-2026-08-14.md`)이 임시 세션 로그 역할이라, 최종적으로는 `current-state.md`에 요약 병합하는 게 정리에 좋음.
 
 ## 추가로 확인된 리스크 (다음 세션에서 참고)

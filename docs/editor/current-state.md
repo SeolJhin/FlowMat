@@ -259,3 +259,25 @@
 - workspace editor element 조작을 `SvgEditorSurface` 기반으로 전환
 - annotation save/reload/realtime parity regression 추가
 - editor document 변경에 대한 STOMP/refetch sync 정책 확정
+
+## 2026-08-14 구현 진행 상태
+
+### 완료
+
+- 도형 앵커 기반 커넥터(`LineElement.startBinding`/`endBinding`)를 core에 추가했다. 회전을 고려한 앵커 계산, 가장 가까운 앵커 탐색, 도형 이동·리사이즈·회전 후 바인딩된 선의 자동 재계산(`ConnectorSync.recomputeBoundLines`)을 포함한다.
+- workspace에 커넥터 그리기 인터랙션(`editor-connector` 도구)을 추가했다. 앵커 도형 삭제 시 커넥터는 삭제하지 않고 해당 끝의 바인딩만 해제한다.
+- 커넥터 바인딩은 로컬 serializer와 backend adapter 양쪽에서 저장·복원을 왕복 보존한다.
+- 회전된 단일 도형의 리사이즈(`resizeRotatedElementFromHandle`, rhwp의 `calcResizedBboxRotated` 기법 이식)와 회전된 selection handle을 라이브로 검증했다.
+- 커넥터 화살표 marker(SVG `<marker>`)를 추가하고 라이브로 검증했다.
+- Ribbon에 Arrange(Duplicate/Delete/Group/Ungroup/Front/Back), Align/Distribute, View(Fit View/Select All) 명령을 연결했다. Align/Distribute는 legacy annotation과 새 backend editor element 양쪽에서 동작한다 — 선택된 엘리먼트 종류에 따라 `WorkflowCanvasPage.tsx`의 `handleAlign`/`handleDistribute`가 자동으로 경로를 고른다(`WorkspaceEditorCommandApi.alignSelected`/`distributeSelected` 또는 legacy annotation batch mutation).
+- editor document 조회가 pending인 상태에서 발생하던 무한 업데이트 루프, 그리고 "Select All"에서 발생하던 별개의 무한 업데이트 루프(Zustand 스토어 전체 구독 문제)를 모두 수정했다. 두 버그 모두 React state/store가 매 렌더 새 참조를 만들어 `@xyflow/react`의 `StoreUpdater` 재구독을 증폭시키는 동일한 상위 패턴이었다.
+- 백엔드 jsonb 컬럼 매핑(Hibernate `@JdbcTypeCode` 누락) 문제를 마이그레이션 전체 기준으로 전수 점검하고, 발견된 필드 전부(`workflow_editor_document.camera_json`, `workflow_editor_element.geometry_json`/`style_json`, `canvas_annotation.points_json`/`style_json`, `flow_rule.action_config`, `run_state_snapshot.snapshot_data`)를 수정했다.
+
+### 알려진 제약
+
+- 커넥터는 backend editor element(신규 도형 엔진)끼리만 연결할 수 있다. legacy annotation 도형(`CanvasAnnotationType`)에는 연결할 수 없다 — 서로 다른 persistence 모델을 한 커넥터가 참조하는 복잡성을 피하기 위한 의도된 제약이다.
+- STOMP를 통한 커넥터 바인딩의 다중 세션 실시간 동기화는 코드 경로(그래프 변경 시 `invalidateEditorDocument()` 무조건 호출)만 확인했고 라이브 2세션 테스트는 아직 없다.
+
+### 세부 기록
+
+교대별 상세 조사·검증·결정 근거는 [`relay/BATON.md`](./relay/BATON.md)와 `relay/history/`를 참고한다.
