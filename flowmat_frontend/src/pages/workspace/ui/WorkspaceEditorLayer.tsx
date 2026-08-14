@@ -67,6 +67,14 @@ import {
 import type { CanvasAnnotationViewModel } from '../../../entities/workflow/model/types'
 import type { WorkflowPaletteTool } from '../../../entities/workflow/model/nodeCatalog'
 import type { PatchCanvasAnnotationInput } from '../../../entities/canvas-annotation/api/canvasAnnotationApi'
+import {
+  computeAlignedPosition,
+  computeDistributedPositions,
+  computeSelectionBounds,
+  type AlignDirection,
+  type DistributeAxis,
+  type LayoutBox,
+} from '../../../entities/canvas-annotation/model/annotationLayout'
 
 const WORKSPACE_LAYER_EXTENT = 100000
 const WORKSPACE_GRID_SIZE = 8
@@ -105,6 +113,8 @@ export interface WorkspaceEditorCommandApi {
   ungroupSelected(): void
   bringSelectedToFront(): void
   sendSelectedToBack(): void
+  alignSelected(direction: AlignDirection): void
+  distributeSelected(axis: DistributeAxis): void
   updateSelectedStyle(patch: WorkspaceEditorStylePatch): void
   undo(): void
   redo(): void
@@ -534,6 +544,49 @@ export function WorkspaceEditorLayer({
     })
   }, [annotations, editable, editableAnnotationDocument, editableDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds])
 
+  const alignSelected = useCallback((direction: AlignDirection) => {
+    if (!editable) return
+    const split = splitSelectedIds(editableDocument, editableAnnotationDocument, selectedIds)
+    if (split.backendIds.length < 2) return
+    const elementById = new Map(editableDocument.elements.map((element) => [element.id, element]))
+    const boxes: LayoutBox[] = split.backendIds
+      .map((id) => elementById.get(id))
+      .filter((element): element is EditorElement => element != null)
+      .map((element) => ({ id: element.id, x: element.x, y: element.y, width: element.width, height: element.height }))
+    const bounds = computeSelectionBounds(boxes)
+    const targets = new Map(boxes.map((box) => [box.id, computeAlignedPosition(box, bounds, direction)]))
+
+    pushBackendHistorySnapshot(editableDocument, selectedIds)
+    const nextBackendDocument = transformSelected(editableDocument, split.backendIds, (element) => {
+      const target = targets.get(element.id)
+      return target ? { ...element, x: target.x, y: target.y } : element
+    })
+    setDraftBackendDocument(null)
+    setDraftAnnotationDocument(null)
+    void persistLayerChanges({ backendDocument: nextBackendDocument })
+  }, [editable, editableAnnotationDocument, editableDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds])
+
+  const distributeSelected = useCallback((axis: DistributeAxis) => {
+    if (!editable) return
+    const split = splitSelectedIds(editableDocument, editableAnnotationDocument, selectedIds)
+    if (split.backendIds.length < 3) return
+    const elementById = new Map(editableDocument.elements.map((element) => [element.id, element]))
+    const boxes: LayoutBox[] = split.backendIds
+      .map((id) => elementById.get(id))
+      .filter((element): element is EditorElement => element != null)
+      .map((element) => ({ id: element.id, x: element.x, y: element.y, width: element.width, height: element.height }))
+    const targets = new Map(computeDistributedPositions(boxes, axis).map((position) => [position.id, position]))
+
+    pushBackendHistorySnapshot(editableDocument, selectedIds)
+    const nextBackendDocument = transformSelected(editableDocument, split.backendIds, (element) => {
+      const target = targets.get(element.id)
+      return target ? { ...element, x: target.x, y: target.y } : element
+    })
+    setDraftBackendDocument(null)
+    setDraftAnnotationDocument(null)
+    void persistLayerChanges({ backendDocument: nextBackendDocument })
+  }, [editable, editableAnnotationDocument, editableDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds])
+
   const updateSelectedStyle = useCallback(async (patch: WorkspaceEditorStylePatch) => {
     if (!editable || selectedIds.length === 0) return
     const split = splitSelectedIds(editableDocument, editableAnnotationDocument, selectedIds)
@@ -657,6 +710,12 @@ export function WorkspaceEditorLayer({
       sendSelectedToBack: () => {
         void reorderSelectedElementsInLayer('back')
       },
+      alignSelected: (direction) => {
+        alignSelected(direction)
+      },
+      distributeSelected: (axis) => {
+        distributeSelected(axis)
+      },
       updateSelectedStyle: (patch) => {
         void updateSelectedStyle(patch)
       },
@@ -677,9 +736,11 @@ export function WorkspaceEditorLayer({
     })
     return () => onCommandReady(null)
   }, [
+    alignSelected,
     canRedoBackendDocument,
     canUndoBackendDocument,
     deleteSelectedElements,
+    distributeSelected,
     duplicateSelectedElements,
     displayDocument,
     editable,
