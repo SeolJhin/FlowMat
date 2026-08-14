@@ -157,16 +157,14 @@ type CanvasNodeComponentProps = Omit<NodeProps, 'data'> & {
 }
 
 export function CanvasNode({ data: node, selected }: CanvasNodeComponentProps) {
-  const {
-    inlineEditingNodeId,
-    selectPort,
-    startInlineEdit,
-    stopInlineEdit,
-    commitRename,
-    activeColorPickerNodeId,
-    openColorPicker,
-    closeColorPicker,
-  } = useWorkspaceStore()
+  const inlineEditingNodeId = useWorkspaceStore((s) => s.inlineEditingNodeId)
+  const selectPort = useWorkspaceStore((s) => s.selectPort)
+  const startInlineEdit = useWorkspaceStore((s) => s.startInlineEdit)
+  const stopInlineEdit = useWorkspaceStore((s) => s.stopInlineEdit)
+  const commitRename = useWorkspaceStore((s) => s.commitRename)
+  const activeColorPickerNodeId = useWorkspaceStore((s) => s.activeColorPickerNodeId)
+  const openColorPicker = useWorkspaceStore((s) => s.openColorPicker)
+  const closeColorPicker = useWorkspaceStore((s) => s.closeColorPicker)
   const requestDeleteNode = useCanvasInteractionStore((s) => s.requestDeleteNode)
   const requestColorChange = useCanvasInteractionStore((s) => s.requestColorChange)
   const requestDuplicateNode = useCanvasInteractionStore((s) => s.requestDuplicateNode)

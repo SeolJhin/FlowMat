@@ -505,21 +505,19 @@ function toHexColor(value: string | undefined, fallback: string) {
 }
 
 export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
-  const {
-    selectedProcessId,
-    selectedConnectionId,
-    selectedPortId,
-    inspectorMode,
-    selectNode,
-    selectEdge,
-    clearSelection,
-    pendingRename,
-    clearPendingRename,
-    inlineEditingNodeId,
-    inlineEditingEdgeId,
-    stopInlineEditEdge,
-    panelWidths,
-  } = useWorkspaceStore()
+  const selectedProcessId = useWorkspaceStore((s) => s.selectedProcessId)
+  const selectedConnectionId = useWorkspaceStore((s) => s.selectedConnectionId)
+  const selectedPortId = useWorkspaceStore((s) => s.selectedPortId)
+  const inspectorMode = useWorkspaceStore((s) => s.inspectorMode)
+  const selectNode = useWorkspaceStore((s) => s.selectNode)
+  const selectEdge = useWorkspaceStore((s) => s.selectEdge)
+  const clearSelection = useWorkspaceStore((s) => s.clearSelection)
+  const pendingRename = useWorkspaceStore((s) => s.pendingRename)
+  const clearPendingRename = useWorkspaceStore((s) => s.clearPendingRename)
+  const inlineEditingNodeId = useWorkspaceStore((s) => s.inlineEditingNodeId)
+  const inlineEditingEdgeId = useWorkspaceStore((s) => s.inlineEditingEdgeId)
+  const stopInlineEditEdge = useWorkspaceStore((s) => s.stopInlineEditEdge)
+  const panelWidths = useWorkspaceStore((s) => s.panelWidths)
 
   const panelWidthRef = useRef(panelWidths)
   panelWidthRef.current = panelWidths
@@ -1285,6 +1283,10 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   }
 
   async function handleAlign(direction: AlignDirection) {
+    if (editorSelection.elements.length >= 2) {
+      editorCommandApiRef.current?.alignSelected(direction)
+      return
+    }
     if (!canEditAnnotations) return
     const selected = getSelectedAnnotations()
     if (selected.length < 2) return
@@ -1297,6 +1299,10 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   }
 
   async function handleDistribute(axis: DistributeAxis) {
+    if (editorSelection.elements.length >= 3) {
+      editorCommandApiRef.current?.distributeSelected(axis)
+      return
+    }
     if (!canEditAnnotations) return
     const selected = getSelectedAnnotations()
     if (selected.length < 3) return
@@ -1335,6 +1341,9 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
       await insertNodeOnEdge(nodePicker.edgeId, tool, nodePicker.flowPosition)
     }
   }
+
+  const canAlignSelection = editorSelection.elements.length >= 2 || canEditAnnotations
+  const canDistributeSelection = editorSelection.elements.length >= 3 || canEditAnnotations
 
   // Ribbon step 2: Home tab wired to the same handlers the old topbar buttons used.
   const ribbonHandlers: RibbonButtonHandlers = {
@@ -1423,42 +1432,42 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
     },
     'align-left': {
       onClick: () => void handleAlign('left'),
-      disabled: !canEditAnnotations,
+      disabled: !canAlignSelection,
       title: 'Align left',
     },
     'align-center-x': {
       onClick: () => void handleAlign('centerX'),
-      disabled: !canEditAnnotations,
+      disabled: !canAlignSelection,
       title: 'Align center',
     },
     'align-right': {
       onClick: () => void handleAlign('right'),
-      disabled: !canEditAnnotations,
+      disabled: !canAlignSelection,
       title: 'Align right',
     },
     'align-top': {
       onClick: () => void handleAlign('top'),
-      disabled: !canEditAnnotations,
+      disabled: !canAlignSelection,
       title: 'Align top',
     },
     'align-center-y': {
       onClick: () => void handleAlign('centerY'),
-      disabled: !canEditAnnotations,
+      disabled: !canAlignSelection,
       title: 'Align middle',
     },
     'align-bottom': {
       onClick: () => void handleAlign('bottom'),
-      disabled: !canEditAnnotations,
+      disabled: !canAlignSelection,
       title: 'Align bottom',
     },
     'distribute-horizontal': {
       onClick: () => void handleDistribute('horizontal'),
-      disabled: !canEditAnnotations,
+      disabled: !canDistributeSelection,
       title: 'Distribute horizontally',
     },
     'distribute-vertical': {
       onClick: () => void handleDistribute('vertical'),
-      disabled: !canEditAnnotations,
+      disabled: !canDistributeSelection,
       title: 'Distribute vertically',
     },
     'annotation-group': {

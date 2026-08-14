@@ -513,8 +513,11 @@ export function CanvasViewport({
   const storageKey = `flowmat-viewport-${workflowId}`
   const savedViewport = useMemo(() => loadSavedViewport(storageKey), [storageKey])
   const { resolvedTheme } = useTheme()
-  const { selectNode, selectEdge, startInlineEdit, startInlineEditEdge, setMultiSelect } =
-    useWorkspaceStore()
+  const selectNode = useWorkspaceStore((s) => s.selectNode)
+  const selectEdge = useWorkspaceStore((s) => s.selectEdge)
+  const startInlineEdit = useWorkspaceStore((s) => s.startInlineEdit)
+  const startInlineEditEdge = useWorkspaceStore((s) => s.startInlineEditEdge)
+  const setMultiSelect = useWorkspaceStore((s) => s.setMultiSelect)
 
   const applyRemoteNodeMove = useCallback((message: NodeMoveMessage) => {
     setLocalNodes((nds) =>
@@ -547,7 +550,10 @@ export function CanvasViewport({
     if (reactFlowInstance) {
       onFitViewReady?.(() => reactFlowInstance.fitView({ padding: 0.15, duration: 300 }))
       onSelectAllReady?.(() => {
-        setLocalNodes((nds) => nds.map((n) => ({ ...n, selected: true })))
+        setLocalNodes((nds) => {
+          if (nds.every((n) => n.selected)) return nds
+          return nds.map((n) => (n.selected ? n : { ...n, selected: true }))
+        })
       })
       onDeleteReady?.({
         deleteSelection: async () => {
