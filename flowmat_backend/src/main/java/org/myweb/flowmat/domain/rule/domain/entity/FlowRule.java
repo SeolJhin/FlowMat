@@ -1,10 +1,13 @@
 package org.myweb.flowmat.domain.rule.domain.entity;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
 
 @Getter
@@ -24,6 +27,9 @@ public class FlowRule extends CreatedUpdatedAuditEntity {
     private String conditionType;
     private String conditionExpression;
     private String actionType;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "action_config", columnDefinition = "jsonb")
     private String actionConfig;
     private Integer priority;
     private String enabledYn;
