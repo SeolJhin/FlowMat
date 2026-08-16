@@ -49,6 +49,16 @@ server:
   servlet:
     context-path: /api
 
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+    display-request-duration: true
+  show-actuator: false
+
 slack:
   webhook-url: ${SLACK_WEBHOOK_URL:}
 
