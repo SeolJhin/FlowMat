@@ -57,7 +57,7 @@ jobs:
       run: ./gradlew dependencyCheckAnalyze
 
     - name: Upload SBOM report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v7
       with:
         name: dependency-check-report
         path: build/reports/dependency-check-report.html
