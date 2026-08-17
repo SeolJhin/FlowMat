@@ -93,8 +93,9 @@ nekopunch의 개인 harness(`my-harness` MCP, `canvas-node-graph-patterns` /
 ```
 [Home]         — 기존 workspace-topbar 버튼 대부분 이전 (Tools/Modify/Layout/Export)
 [Annotate]     — 레거시 annotation(Shape/Text/Freehand) + 신규 flowmat-editor 도구(Rectangle 등) 공존, Align/Group/Arrange/Grid — 상세는 3절 (2026-08-16 갱신)
-[View]         — 자리만 마련 (그룹 없어도 됨, 추후 확장)
-[Collaborate]  — Presence 아바타, 워크플로우 전환 select, 저장 상태
+[View]         — Navigation 그룹(Fit View/Select All) — Seoly가 a7560f2에서 이미 채움
+                  (2026-08-18 Step 5 확인 시점 기준, 9절 로그 참고)
+[Collaborate]  — Presence 아바타, 워크플로우 전환 select, 저장 상태 — Step 4에서 이전 완료
 ```
 
 각 탭의 상세 그룹/버튼 매핑은 아래 2절, 3절 참고.
@@ -322,7 +323,8 @@ Step 1: 리본 뼈대 (탭 4개 전환만 되는 빈 리본, widgets/canvas-tool
 Step 2: Home 탭 — 기존 workspace-topbar 버튼 이전 + 아이콘 적용
 Step 3: Annotate 탭 — WorkspaceEditorCommandApi(align/group/arrange 등) + 레거시 annotation 핸들러 연결 (3절 표 기준, 2026-08-16 갱신)
 Step 4: Collaborate 탭 — Presence/워크플로우 전환 이전
-Step 5: View 탭 — 자리만 유지, 필요시 이후 스프린트에서 채움
+Step 5: View 탭 — 원안은 "자리만 유지"였으나 실제로는 Seoly가 a7560f2에서 이미 채워둠
+  (Fit View/Select All). 2026-08-18 확인 결과 검증만 진행 — 9절 로그 참고
 Step 6: 기존 workspace-topbar의 버튼 영역 완전 제거, 타이틀 바만 남기고 정리
 ```
 
@@ -460,4 +462,42 @@ nekopunch) 이 로그에 기록이 안 남아 있었음. Step 3 착수 전 git l
     라우트/파일은 삭제해 diff에 남지 않음(`git status --short` 재확인). 실제
     `remoteCursors`/`savedLabel`/workflow 전환 클릭 동작 자체는 이번에도 백엔드 없이는
     검증 불가 — Step 3과 마찬가지로 다음에 백엔드를 띄울 수 있는 세션에서 재확인 권장.
+
+2026-08-18 — Step 5: View 탭
+결론: (a) — 이미 완전히 채워져 있었음, 검증만 진행. 코드 변경 없음, 문서만 갱신
+(1절/7절). 커밋할 코드 diff 자체가 없음.
+
+상세:
+- 착수 전 확인한 실제 상태:
+  - `ribbonConfig.ts`의 `view` 탭에 `navigation` 그룹이 이미 존재, `fit-view`
+    (`Maximize2`)/`select-all`(`BoxSelect`) 버튼 2개가 이미 정의되어 있었음.
+  - `WorkflowCanvasPage.tsx`의 `ribbonHandlers`에 `fit-view`/`select-all` 핸들러가
+    이미 연결되어 있었음(`fitViewRef.current()` / `selectAllRef.current()`).
+    두 ref는 `CanvasViewport`의 `onFitViewReady`/`onSelectAllReady` 콜백으로
+    채워지고, 키보드 단축키(`CANVAS_ACTIONS`, `onFitView` 등)와도 같은 ref를
+    공유해서 쓰고 있음 — 리본 버튼과 키보드 단축키가 같은 진입점을 재사용하는
+    구조라 중복이 아니라 의도된 설계로 판단.
+  - Seoly의 `a7560f2`("wire arrange/align/navigation commands into ribbon",
+    2026-08-14)가 View 탭까지 이미 채워둔 것으로 확인 — "사용 전에" 안내가
+    예상한 그대로. Step 3 때와 같은 패턴(문서가 실제 코드보다 낡음)이 반복됨.
+  - 중복 렌더링 여부 확인: `CanvasViewport.tsx`, `WorkspaceEditorLayer.tsx` 등을
+    검색했으나 Fit View/Select All을 별도로 렌더링하는 플로팅 버튼은 없었음
+    (콜백만 노출, 버튼 자체는 리본에만 존재) — Step 3의 Draw 그룹 중복 문제
+    같은 사례는 없음.
+- (a)를 선택한 근거: 그룹 구조/핸들러 연결이 전부 이미 존재하고 정상 동작하므로,
+  "지켜야 할 것" 항목("이미 동작하는 걸 건드리지 않는다")에 따라 코드는 그대로
+  두고 검증 및 문서 갱신만 진행. 리팩토링·구조 변경 없음.
+- 이번 세션에서 실제로 한 것: 코드 변경 없음. 1절("View — 자리만 마련" → 이미
+  채워짐으로 갱신), 7절(Step 5 설명 갱신)만 수정.
+- 검증:
+  - `npm run build` 성공(코드 변경 없으므로 baseline 확인 목적).
+  - `tsc --noEmit`: `src/test/*` 27개 에러만 남음, 이전 Step들과 동일 — 무관.
+  - 로컬 Docker 엔진 이번에도 다운(`docker info` 실패). Step 1~4와 동일하게 임시
+    라우트(`/dev/ribbon-preview`)로 View 탭을 렌더링 — `fit-view`/`select-all`
+    버튼에 mock 핸들러(alert)를 연결해 클릭 시 실제로 호출되는지 확인(브라우저
+    콘솔에 "Page dialog suppressed (alert): fit-view clicked" / "select-all
+    clicked" 로그로 확인). Collaborate 탭으로 전환해 Step 4의 `content` 확장
+    구조와 View 탭의 버튼 기반 그룹이 같은 리본 안에서 충돌 없이 공존하는 것도
+    확인. 검증 후 임시 라우트/파일 삭제, `git status --short`로 diff에 남지
+    않았음을 재확인.
 ```
