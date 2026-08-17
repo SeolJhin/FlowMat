@@ -409,4 +409,55 @@ nekopunch) 이 로그에 기록이 안 남아 있었음. Step 3 착수 전 git l
     editorSelection 기반 분기)은 실제 백엔드 없이는 클릭 테스트가 불가능해
     코드 리뷰로만 확인함 — 다음에 백엔드를 띄울 수 있는 세션에서 실제 클릭
     검증을 한 번 더 하는 것을 권장.
+
+2026-08-18 — Step 4: Collaborate 탭
+결론: Presence/Status/Workflow 3개 그룹으로 완료 (4절 매핑 그대로). workflow-switcher는
+"사용 전에" 안내가 제기한 범위 상충 문제에 대해 (b)안 — Collaborate 탭으로 이전 — 을
+선택. 커밋은 하지 않고 diff만 전달.
+
+상세:
+- 범위 판단(workflow-switcher, 최상단 타이틀 바 vs Collaborate 탭): (b) 선택.
+  근거 — 0절 "최상단 타이틀 바" 행의 실제 문구는 "워크플로우 이름/상태/Home 링크는
+  리본과 별개로 그대로 유지"로, workflow-switcher를 명시적으로 포함하지 않는다.
+  실제 코드(`WorkflowCanvasPage.tsx`)에서도 `<select className="workflow-switcher">`는
+  이름/상태(`workspace-topbar__project`/`workspace-topbar__status`)와 달리 워크플로우
+  "전환"이라는 별도 동작을 트리거하는 컨트롤이라 성격이 다르고, 4절 표에도 이미
+  Collaborate 탭 Workflow 그룹으로 명시되어 있었음. (a)안(타이틀 바에 예외로 잔류)을
+  택하면 문서 4절을 다시 고쳐야 하고 "왜 이 select만 예외인지"를 새로 정당화해야 하는
+  반면, (b)안은 기존 4절 그대로 두고 0절 문구의 실제 범위(이름/상태/Home 링크)만
+  따르면 되므로 더 단순한 해석. 레이아웃상으로도 select는 `workspace-topbar`의 첫 번째
+  flex 컨테이너 안에서 조건부(`workflows.length > 1`)로만 나타나는 독립된 블록이라
+  분리가 쉬웠음.
+- 이번 세션에서 실제로 채운 것:
+  1. `RibbonGroupDefinition`(types.ts)에 `content?: ReactNode` 필드 추가 — 클릭 버튼이
+     아니라 상태를 보여주는 그룹(아바타 목록, 저장 상태 텍스트, select)을 위한 확장.
+     5-1절 원칙 유지: `ribbonConfig.ts`에는 여전히 그룹의 "구조"(id/label/빈 buttons
+     배열)만 정의하고, 실제 콘텐츠는 `buildRibbonTabs(handlers, dynamicButtons,
+     groupContent)`의 새 세 번째 인자로 페이지에서 주입 — 기존 `dynamicButtons`(그룹에
+     버튼을 추가 주입)와 동일한 패턴을 콘텐츠 주입에도 재사용한 것.
+  2. `RibbonGroup.tsx`: `group.content`가 있으면 버튼 행 대신 그 콘텐츠를 렌더링하도록
+     분기 추가. 버튼 기반 그룹의 동작/마크업은 그대로 유지.
+  3. `index.css`: `.ribbon-group__content` 규칙 추가(`.ribbon-group__buttons`와 동일한
+     flex 레이아웃) — 버튼이 아닌 콘텐츠에 "buttons" 클래스명을 재사용하면 헷갈리므로
+     별도 클래스로 분리.
+  4. `ribbonConfig.ts`의 `collaborate` 탭에 `presence`/`status`/`workflow` 3개 그룹
+     추가(전부 `buttons: []`, 콘텐츠는 페이지에서 주입).
+  5. `WorkflowCanvasPage.tsx`: `remoteCursors`/`savedLabel`/workflow-switcher의 기존
+     JSX를 그대로(로직 수정 없이) `ribbonGroupContent` 객체로 옮기고
+     `buildRibbonTabs(ribbonHandlers, ribbonDynamicButtons, ribbonGroupContent)`로 연결.
+     `workspace-topbar`에 남아 있던 원래 렌더링 위치는 Step 2/3과 동일하게 한 줄
+     주석으로 대체(완전 제거는 Step 6).
+- 검증:
+  - `npm run build` 성공.
+  - `tsc --noEmit`: 이번에 건드린 5개 파일 관련 에러 없음. 남은 27개 에러는 전부
+    `src/test/*`(Step 3 로그와 동일 — vitest 설정 미비, 이번 작업과 무관).
+  - 로컬 Docker 엔진이 이번에도 떠 있지 않아(`docker info` 실패) 실제 백엔드 연동
+    화면 확인은 불가. Step 1~3과 동일한 방식으로 임시 라우트(`/dev/ribbon-preview`)를
+    만들어 `Ribbon` + `buildRibbonTabs`를 실제 groupContent(아바타 3개 mock, "Saved"
+    상태, 2개 옵션 select)로 렌더링해 DOM 조회로 확인 — Presence 그룹에 아바타 3개,
+    Status 그룹에 "Saved" 텍스트, Workflow 그룹에 select(옵션 2개)가 의도대로
+    나타났고, Home 탭으로 전환해도 기존 버튼들이 정상 렌더링됨을 확인. 검증 후 임시
+    라우트/파일은 삭제해 diff에 남지 않음(`git status --short` 재확인). 실제
+    `remoteCursors`/`savedLabel`/workflow 전환 클릭 동작 자체는 이번에도 백엔드 없이는
+    검증 불가 — Step 3과 마찬가지로 다음에 백엔드를 띄울 수 있는 세션에서 재확인 권장.
 ```

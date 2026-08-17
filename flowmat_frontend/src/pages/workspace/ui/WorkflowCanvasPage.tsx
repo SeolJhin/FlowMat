@@ -62,6 +62,7 @@ import {
   buildRibbonTabs,
   type RibbonButtonHandlers,
   type RibbonDynamicButtons,
+  type RibbonGroupContent,
 } from '../../../widgets/canvas-toolbar/config/ribbonConfig'
 import {
   createElementId,
@@ -1534,7 +1535,48 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
     ],
   }
 
-  const ribbonTabs = buildRibbonTabs(ribbonHandlers, ribbonDynamicButtons)
+  // Collaborate tab (step 4, migration plan §4): same state/logic as before, only the
+  // render location moves off the title bar and into the Collaborate tab's groups.
+  const ribbonGroupContent: RibbonGroupContent = {
+    presence: remoteCursors.size > 0 && (
+      <div className="presence-avatars" title={`${remoteCursors.size} collaborators online`}>
+        {[...remoteCursors.keys()]
+          .filter((uid) => uid !== syncUserId)
+          .slice(0, 5)
+          .map((uid) => (
+            <span key={uid} className="presence-avatar" title={uid}>
+              {uid.slice(0, 2).toUpperCase()}
+            </span>
+          ))}
+        {remoteCursors.size > 5 && (
+          <span className="presence-avatar presence-avatar--overflow">+{remoteCursors.size - 5}</span>
+        )}
+      </div>
+    ),
+    status: savedLabel && (
+      <span className={`save-status save-status--${savedLabel}`}>
+        {savedLabel === 'saving' ? 'Saving...' : 'Saved'}
+      </span>
+    ),
+    workflow: workflows.length > 1 && (
+      <select
+        className="workflow-switcher"
+        value={canvas.workflow.workflowId}
+        onChange={(e) => {
+          navigate(`/projects/${canvas.workflow.projectId}/workflows/${e.target.value}`)
+        }}
+        title="Switch workflow"
+      >
+        {workflows.map((wf) => (
+          <option key={wf.workflowId} value={wf.workflowId}>
+            {wf.workflowName}
+          </option>
+        ))}
+      </select>
+    ),
+  }
+
+  const ribbonTabs = buildRibbonTabs(ribbonHandlers, ribbonDynamicButtons, ribbonGroupContent)
 
   return (
     <div className="workspace-layout">
@@ -1573,43 +1615,10 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
               {canvas.workflow.workflowStatus} | {canvas.workflow.workflowType}
             </span>
           </div>
-          {workflows.length > 1 && (
-            <select
-              className="workflow-switcher"
-              value={canvas.workflow.workflowId}
-              onChange={(e) => {
-                navigate(`/projects/${canvas.workflow.projectId}/workflows/${e.target.value}`)
-              }}
-              title="Switch workflow"
-            >
-              {workflows.map((wf) => (
-                <option key={wf.workflowId} value={wf.workflowId}>
-                  {wf.workflowName}
-                </option>
-              ))}
-            </select>
-          )}
+          {/* Workflow switcher select moved to Ribbon Collaborate tab > Workflow group (step 4). */}
         </div>
-        {savedLabel && (
-          <span className={`save-status save-status--${savedLabel}`}>
-            {savedLabel === 'saving' ? 'Saving...' : 'Saved'}
-          </span>
-        )}
-        {remoteCursors.size > 0 && (
-          <div className="presence-avatars" title={`${remoteCursors.size} collaborators online`}>
-            {[...remoteCursors.keys()]
-              .filter((uid) => uid !== syncUserId)
-              .slice(0, 5)
-              .map((uid) => (
-                <span key={uid} className="presence-avatar" title={uid}>
-                  {uid.slice(0, 2).toUpperCase()}
-                </span>
-              ))}
-            {remoteCursors.size > 5 && (
-              <span className="presence-avatar presence-avatar--overflow">+{remoteCursors.size - 5}</span>
-            )}
-          </div>
-        )}
+        {/* Save status label moved to Ribbon Collaborate tab > Status group (step 4). */}
+        {/* Presence avatars moved to Ribbon Collaborate tab > Presence group (step 4). */}
         <div
           style={{
             display: 'flex',
