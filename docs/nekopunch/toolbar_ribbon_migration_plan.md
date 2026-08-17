@@ -15,22 +15,14 @@
 | # | 논의 필요 항목 | 이유 | 상태 |
 |---|---|---|---|
 | 1 | `widgets/` 레이어를 이 저장소에 처음 도입하는 것 자체 | 실제 코드에 지금까지 없던 FSD 레이어를 nekopunch가 단독으로 신설하는 것 — 팀 전체 컨벤션에 영향을 줄 수 있음. 0-1절에서 "계획 문서 참조하면 된다"는 답은 받았으나, `widgets/` 신설 자체를 명시적으로 확인한 것은 아님 | 미완료 |
-| 2 | Annotate 탭 작업 시 기존 인라인 로직(`WorkflowCanvasPage.tsx`/`CanvasViewport.tsx`)을 리본 쪽으로 옮기는 범위 | 이 파일들은 seolly도 계속 작업 중인 영역(annotation 기능 담당). 리본 작업이 같은 파일을 동시에 건드리면 병합 충돌 위험 큼 | 미완료 |
-| 3 | Annotate 탭에서 정말 "실제 기능까지 연결"할지, 이번 스프린트는 "뼈대만"으로 그칠지 | 3절 의존관계 문단에서 백엔드는 준비됐다고 판단했지만, 이건 nekopunch의 harness 검증 결과일 뿐 — annotation 기능 자체의 최종 완성도는 담당자(seolly)가 더 잘 앎 | 미완료 |
+| 2 | Annotate 탭 작업 시 기존 인라인 로직(`WorkflowCanvasPage.tsx`/`CanvasViewport.tsx`)을 리본 쪽으로 옮기는 범위 | 이 파일들은 seolly도 계속 작업 중인 영역(annotation 기능 담당). 리본 작업이 같은 파일을 동시에 건드리면 병합 충돌 위험 큼 | 미완료 — 9절 Step 3 로그 참고 (2026-08-18) |
+| 3 | Annotate 탭에서 정말 "실제 기능까지 연결"할지, 이번 스프린트는 "뼈대만"으로 그칠지 | 3절 의존관계 문단에서 백엔드는 준비됐다고 판단했지만, 이건 nekopunch의 harness 검증 결과일 뿐 — annotation 기능 자체의 최종 완성도는 담당자(seolly)가 더 잘 앎 | 미완료 — 9절 Step 3 로그 참고 (2026-08-18) |
 | 4 | `nekopunch` 브랜치를 리본 작업에도 계속 재사용할지, 새 브랜치를 팔지 | 0절에 "재사용 또는 컨벤션 확인 후 결정"이라고만 되어 있고 실제 확인은 안 됨 | 미완료 |
 | 5 | Step 6(기존 topbar 완전 제거)을 실행해도 되는 시점 | 다른 팀원이 기존 topbar의 버튼을 참조하는 코드를 작업 중일 수 있음 — 제거 전 전체 팀에 공지 필요 | 미완료 |
+| 6 | `handleGroup`/`handleUngroup`이 신규 editor 엔진 경로(`editorCommandApiRef`)를 지원하지 않는 이유 | 의도적으로 아직 안 만든 건지, 놓친 건지 확인 필요 — 리본에서 Group 버튼을 누르면 editor 엘리먼트 선택 시 아무 반응이 없을 수 있음 (3-1절 참고) | 미완료 — 9절 Step 3 로그 참고 (2026-08-18, 전제 자체가 낡은 정보였음) |
+| 7 | Grid snap 토글 UI를 새로 만드는 것 | `WORKSPACE_EDITOR_GRID_SIZE`는 상수로 고정되어 있고 사용자가 켜고 끄는 UI가 없음 — 이걸 리본에 추가하는 게 이번 스프린트 범위인지, 아니면 팀원이 이미 계획 중인지 확인 필요 (3-2절 참고) | 미완료 — 9절 Step 3 로그 참고 (2026-08-18) |
 
 논의가 끝나면 이 표의 "상태"를 "완료(날짜)"로 갱신하고, 결론을 해당 절(0절, 3절 등)에도 반영한다.
-
-> **2026-08-11 — 항목 1, 4 임시 진행 메모 (상태는 "미완료" 유지)**
-> nekopunch가 seolly와 즉시 연락이 어려운 상황이라, 아래 조건으로 Step 1을 임시 진행했다:
-> - 항목 1(`widgets/` 신설): 진행함 — 0-1절에 이미 "다른 팀원 코드가 이 폴더를 참조하지
->   않으므로 충돌 위험 없음"으로 리스크가 낮게 평가되어 있었음을 근거로 함.
-> - 항목 4(브랜치): 진행함 — 브랜치가 `main` 하나로 통합되어 있어 선택지가 없으므로
->   사실상 이미 답이 정해져 있었음을 근거로 함.
-> - 두 항목 모두 정식 논의가 끝난 것은 아니므로 위 표의 "상태"는 의도적으로 "미완료"로
->   유지한다. **seolly에게 사후 공유 필요.**
-> - 상세 로그는 9절 참고.
 
 ### 논의 로그
 
@@ -100,7 +92,7 @@ nekopunch의 개인 harness(`my-harness` MCP, `canvas-node-graph-patterns` /
 
 ```
 [Home]         — 기존 workspace-topbar 버튼 대부분 이전 (Tools/Modify/Layout/Export)
-[Annotate]     — 계획 문서의 기능 목록 참고, 실제 인라인 로직 재배치 (Shape/Text/Freehand/정렬/그룹/그리드 스냅) — 상세는 3절
+[Annotate]     — 레거시 annotation(Shape/Text/Freehand) + 신규 flowmat-editor 도구(Rectangle 등) 공존, Align/Group/Arrange/Grid — 상세는 3절 (2026-08-16 갱신)
 [View]         — 자리만 마련 (그룹 없어도 됨, 추후 확장)
 [Collaborate]  — Presence 아바타, 워크플로우 전환 select, 저장 상태
 ```
@@ -129,47 +121,99 @@ nekopunch의 개인 harness(`my-harness` MCP, `canvas-node-graph-patterns` /
 
 ---
 
-## 3. Annotate 탭 — 매핑 (⚠️ 0-1절 먼저 읽을 것)
+## 3. Annotate 탭 — 매핑 (2026-08-16 기준 재작성 — 이전 버전은 낡은 정보였음)
 
-`docs/seolly/flowmat_annotation_execution_plan.md` §4.2는 아래 컴포넌트 구조를 계획했지만,
-**0-1절에서 확인했듯 이 컴포넌트들은 실제 코드에 존재하지 않는다** — Align/Group/Grid/Toolbar
-로직 전부가 `WorkflowCanvasPage.tsx`/`CanvasViewport.tsx`에 인라인되어 있고,
-annotation 렌더링은 `pages/workspace/ui/CanvasAnnotationNode.tsx` 단일 컴포넌트가 담당한다.
+### 3-0. 이 절이 다시 쓰여진 이유
 
-따라서 아래 표는 "팀원 컴포넌트를 가져다 쓴다"가 아니라
-**"이 기능을 리본 뼈대 안에서 새로 구현하되, 실제 인라인 로직을 그대로 재사용/이전한다"**는
-뜻으로 읽는다. Step 3 시작 전 아래를 다시 한번 실제 파일에서 확인할 것
-(문서 작성 시점과 실행 시점 사이에 코드가 또 바뀌었을 수 있음):
-`WorkflowCanvasPage.tsx`, `CanvasViewport.tsx`, `entities/canvas-annotation/model/annotationLayout.ts`.
+2026-08-10 작성 당시엔 "annotation 로직 전부가 인라인, 계획된 컴포넌트는 존재하지 않는다"가
+사실이었다. 하지만 그 사이 팀원이 아래를 새로 구축했다 (2026-08-16 프로젝트 zip 재확인):
 
-| 그룹 | 계획에 있던 이름(참고용, 존재하지 않음) | 실제로 가져올 것 | 비고 |
+- **`flowmat_frontend/src/lib/flowmat-editor/`** — 완전히 새로운 자체 벡터 그래픽 엔진.
+  Rectangle/Ellipse/Line/Text/Group 엘리먼트, HitTest, SnapManager, HistoryManager,
+  SVG 렌더러(`SvgRenderer.ts`), Editor 코어(`Editor.ts`, `EditorStore.ts`)까지 자체 구현.
+- **`WorkspaceEditorLayer.tsx`** (1486줄, 신규) — 이 엔진을 캔버스에 연결하는 레이어.
+  `onCommandReady`로 `WorkspaceEditorCommandApi`를 상위(`WorkflowCanvasPage.tsx`)에 노출:
+  ```ts
+  groupSelected() / ungroupSelected()
+  alignSelected(direction) / distributeSelected(axis)
+  deleteSelected() / duplicateSelected()
+  bringSelectedToFront() / sendSelectedToBack()
+  undo() / redo() / canUndo() / canRedo()
+  ```
+- 도구가 두 갈래로 분리됨:
+    - `ANNOTATION_TOOL_DEFINITIONS` — 기존 협업용 주석(Shape/Text/Freehand), REST 배치 기반
+    - `EDITOR_TOOL_DEFINITIONS` — 신규 editor 엔진 도구(Rectangle/Ellipse/Triangle/Line/
+      Connector/Text), 이미 lucide-react 아이콘까지 매핑되어 있음
+      (`Square`/`Circle`/`Triangle`/`Minus`/`Waypoints`/`TypeIcon`)
+
+**0-1절의 "annotation은 전부 인라인, widgets 레이어 없음"이라는 진단 자체는 여전히 유효하다**
+(리본 관련 `widgets/`는 이번에도 없었음, editor 관련 코드는 `lib/`에 있음 — FSD 레이어가
+아니라 자체 판단으로 만든 `lib/` 하위 모듈). 다만 "가져다 옮길 로직이 흩어져 있다"는 전제는
+더 이상 맞지 않는다 — `WorkspaceEditorCommandApi`가 이미 깔끔한 인터페이스로 정리되어 있다.
+
+### 3-1. 실제 구조 — 두 시스템이 공존
+
+`WorkflowCanvasPage.tsx`의 `handleAlign`/`handleDistribute`가 실제로 어떻게 짜여 있는지 보면
+이 공존 구조가 명확하다 (2026-08-16 기준 실제 코드):
+
+```ts
+async function handleAlign(direction: AlignDirection) {
+  if (editorSelection.elements.length >= 2) {
+    editorCommandApiRef.current?.alignSelected(direction)   // 신규 editor 엔진 경로
+    return
+  }
+  if (!canEditAnnotations) return
+  const selected = getSelectedAnnotations()
+  if (selected.length < 2) return
+  // ... computeAlignedPosition + batchAnnotationMutation  // 레거시 annotation 경로
+}
+```
+
+즉 **선택된 게 editor 엘리먼트인지 레거시 annotation인지에 따라 자동으로 분기**된다.
+`handleGroup`/`handleUngroup`은 아직 레거시 annotation 경로만 있고
+(`editorCommandApiRef.current?.groupSelected()`로의 분기가 없음 — Step 3 작업 시 이 부분이
+두 경로 다 필요한지 재확인할 것).
+
+### 3-2. 그룹/버튼 매핑 (최신)
+
+| 그룹 | 버튼 | 아이콘(lucide-react) | 연결 대상 |
 |---|---|---|---|
-| Draw | `ToolButton`(cursor/shape/text) | `WorkflowCanvasPage.tsx`의 annotation 도구 선택 로직 | `ANNOTATION_TOOL_DEFINITIONS` 매핑이 실제로 있는지 확인 |
-| Align | `AlignmentButtonGroup` | `WorkflowCanvasPage.tsx`/`CanvasViewport.tsx`의 정렬 로직 + `annotationLayout.ts`의 `computeAlignedPosition` | 좌/중/우/상/중/하 6방향. 순수 계산은 이미 `annotationLayout.ts`에 분리되어 있으므로 그대로 재사용 |
-| Group | (계획에만 있던 `GroupButton`) | `WorkflowCanvasPage.tsx` 내 group_id 부여 로직 | 실제 존재 여부부터 확인 |
-| Grid | (계획에만 있던 `GridSnapControl`) | `CanvasViewport.tsx`의 `snapToGrid` 관련 로직 | frontend_workspace_status 문서에 `snapToGrid` 언급 있음 — 실제 위치 재확인 |
+| Draw (annotation) | Shape / Text / Freehand | 기존 아이콘 없음 — `Shapes`/`TypeIcon`/`Pencil` 등 신규 지정 | `ANNOTATION_TOOL_DEFINITIONS` (레거시 경로 유지) |
+| Draw (editor) | Rectangle / Ellipse / Triangle / Line / Connector / Text | `Square`/`Circle`/`Triangle`/`Minus`/`Waypoints`/`TypeIcon` (이미 `EDITOR_TOOL_DEFINITIONS`에 매핑됨, 그대로 재사용) | `EDITOR_TOOL_DEFINITIONS` |
+| Align | 좌/중/우/상/중/하 정렬, 분산(distribute) | `AlignHorizontalJustifyStart` 등 lucide 정렬 아이콘 세트 | `handleAlign(direction)` / `handleDistribute(axis)` — 이미 두 경로 분기 내장, 그대로 호출만 하면 됨 |
+| Group | Group / Ungroup | `Group`/`Ungroup` (lucide-react) | `handleGroup()` / `handleUngroup()` — 현재 레거시 경로만 있음, 3-1절 참고 |
+| Arrange | Bring to Front / Send to Back / Duplicate | `BringToFront`/`SendToBack`/`Copy` | `editorCommandApiRef.current?.bringSelectedToFront()` 등 — editor 엔진 전용, `editorSelection.elements.length` 로 활성화 여부 판단 |
+| Grid | Grid Snap 표시/토글 | `Grid3x3` | `WORKSPACE_EDITOR_GRID_SIZE`(=8) 상수 사용 중, 토글 UI는 없음 — 이번에 새로 만들어야 함 |
 
-권한 체크(`canEditAnnotations`, `useWorkflowPermission`)는 기존 로직 그대로 유지 —
-viewer는 버튼 비활성 처리.
+권한 체크(`canEditAnnotations`)는 기존 로직 그대로 유지 — viewer는 버튼 비활성 처리.
+editor 엔진 관련 버튼(Arrange 그룹 등)의 활성/비활성은 `editorSelection.elements.length`와
+`editorCommandApiRef.current`의 존재 여부로 판단한다 (1405줄 `duplicateSelected` 버튼의
+`disabled` 조건이 이미 이 패턴을 쓰고 있으므로 그대로 참고).
 
-**리본으로 이 로직을 옮길 때 지켜야 할 것** (0-1절 근거):
-- `annotationLayout.ts` 같은 순수 함수는 그대로 재사용 — 새로 만들지 않는다.
-- 상호작용/오케스트레이션 로직(버튼 클릭 → 상태 변경)은 지금처럼 페이지 컴포넌트 근처에
-  두는 게 이 저장소의 실제 패턴과 맞다. 리본 컴포넌트(`RibbonButton` 등)는 순수 UI 껍데기로만
-  쓰고, `onClick` 핸들러 본체는 `WorkflowCanvasPage.tsx`에서 그대로 가져와 연결한다
-  (5-1절의 "핸들러는 상위에서 주입" 원칙과 자연스럽게 맞음).
-- annotation 커스텀 상태 통합(`useNodesState` 미사용, 원격 패치·충돌 지연 처리)을
-  건드리지 않는다 — 리본은 이 상태를 호출하는 쪽이지, 상태 관리 방식 자체를 바꾸는 작업이 아니다.
+### 3-3. 리본으로 옮길 때 지켜야 할 것
 
-**의존 관계**: nekopunch의 harness 검증(2026-08-09, `collaboration-infra`/`sql-queries` 스킬)에
-따르면 annotation 데이터 모델과 동기화는 이미 구현되어 있다 —
-`CanvasAnnotationReconcileService.java`(version/versionNonce 기반 동시편집 병합),
-`CanvasAnnotation.java` 엔티티, `V11__canvas_annotation.sql` 마이그레이션 존재 확인됨.
-즉 백엔드/데이터 쪽은 준비되어 있으므로 Step 3는 뼈대만이 아니라 실제 기능 연결까지
-진행 가능하다. 다만 `features/canvas-align/`, `features/canvas-group/` 같은 **프론트 쪽
-분리된 폴더는 존재하지 않으므로**(0-1절 참고), 그 경로를 찾지 말고 위 표의
-"실제로 가져올 것" 열을 따른다. Step 3 진행 직전에 한 번 더 최신 상태를 재확인할 것 —
-이 문서 작성 이후 코드가 바뀌었을 수 있다.
+- `handleAlign`/`handleDistribute`/`handleGroup`/`handleUngroup`/`handleNodePick` 등
+  **기존 핸들러 함수 내부 로직은 수정하지 않는다** — 리본 버튼의 `onClick`이 이 함수들을
+  그대로 호출하도록 연결만 한다 (Step 2에서 지킨 원칙과 동일).
+- `editorCommandApiRef`, `editorSelection` 등 editor 엔진 관련 상태/ref는 절대 새로 만들지
+  않는다 — `WorkflowCanvasPage.tsx`에 이미 있는 것을 그대로 참조한다.
+- Grid snap 토글 UI(3-2절 Grid 그룹)는 실제로 없는 걸 새로 만드는 유일한 항목이다 —
+  `WORKSPACE_EDITOR_GRID_SIZE` 상수를 `useState`로 바꿔서 리본 토글과 연결할지, 다른 방식으로
+  할지는 Step 3 진행 시 판단. 이건 팀원 논의 항목(최상단 표 참고)에 새로 추가해야 할 수 있음.
+- `flowmat-editor` 자체(`lib/flowmat-editor/` 하위)는 절대 건드리지 않는다 — 리본 작업은
+  이 엔진을 "호출하는 쪽"이지 엔진 자체를 수정하는 작업이 아니다.
+
+### 3-4. 의존 관계 (갱신)
+
+annotation 데이터 모델(백엔드)은 여전히 준비되어 있다고 판단됨
+(`CanvasAnnotationReconcileService.java`, `CanvasAnnotation.java`, `V11__canvas_annotation.sql`
+— 2026-08-09 harness 검증, 이번 재확인에서 뒤집을 근거 없음). 프론트의 editor 엔진도
+`WorkspaceEditorCommandApi`로 이미 준비되어 있으므로, **Step 3는 뼈대가 아니라 실제 기능
+연결까지 곧바로 진행 가능** — 오히려 이전 버전 문서가 예상한 것보다 작업이 쉬워졌다
+(옮길 로직이 흩어져 있지 않고 인터페이스로 정리되어 있으므로).
+
+Step 3 진행 직전에 한 번 더 최신 상태를 재확인할 것 — 이 절 작성 이후 코드가 또 바뀌었을
+가능성을 항상 열어둔다 (0-1절 → 3절, 이번이 두 번째 개정이다).
 
 ---
 
@@ -276,7 +320,7 @@ types.ts             — RibbonTabDefinition / RibbonGroupDefinition / RibbonBut
 ```
 Step 1: 리본 뼈대 (탭 4개 전환만 되는 빈 리본, widgets/canvas-toolbar/에 생성)
 Step 2: Home 탭 — 기존 workspace-topbar 버튼 이전 + 아이콘 적용
-Step 3: Annotate 탭 — 실제 인라인 로직 재배치 (3절 표 기준, 계획상 컴포넌트명은 존재하지 않으므로 무시)
+Step 3: Annotate 탭 — WorkspaceEditorCommandApi(align/group/arrange 등) + 레거시 annotation 핸들러 연결 (3절 표 기준, 2026-08-16 갱신)
 Step 4: Collaborate 탭 — Presence/워크플로우 전환 이전
 Step 5: View 탭 — 자리만 유지, 필요시 이후 스프린트에서 채움
 Step 6: 기존 workspace-topbar의 버튼 영역 완전 제거, 타이틀 바만 남기고 정리
@@ -301,81 +345,68 @@ Step 6은 1~5가 전부 검증된 뒤에만 진행한다 (기존 기능 삭제�
 각 Step 완료 시 아래에 한 줄씩 추가한다 (날짜, Step, 요약, 커밋 여부).
 
 ```
-2026-08-11 — Step 1: 리본 뼈대 완료 (미커밋, diff만 확인 대기)
+[참고] Step 1/2는 커밋으로는 이미 완료되어 있었으나(5dda142 "add ribbon toolbar
+step 1", 3fd50a6 "move topbar buttons to ribbon home tab (step 2)", 둘 다
+nekopunch) 이 로그에 기록이 안 남아 있었음. Step 3 착수 전 git log로 확인.
 
-요약: widgets/canvas-toolbar/에 리본 공통 컴포넌트(Ribbon/RibbonTab/RibbonGroup/
-RibbonButton/types)와 ribbonConfig.ts(구조 전용, buildRibbonTabs(handlers)로 핸들러
-주입)를 생성. WorkflowCanvasPage.tsx의 기존 <header className="workspace-topbar">는
-그대로 두고, 그 아래에 <Ribbon>을 추가로 렌더링(기존 topbar 버튼은 이번 Step에서 이전
-안 함, 나란히 유지). Home/Annotate/View/Collaborate 4개 탭은 구조만 있고 그룹/버튼은
-비워둠(Step 2~4에서 채움). activeRibbonTabId는 WorkflowCanvasPage 로컬 useState.
+2026-08-18 — Step 3: Annotate 탭
+결론: Draw/Align/Group/Arrange/Grid 그룹 구성으로 완료. 커밋은 하지 않고 diff만 전달.
 
-생성 파일:
-- flowmat_frontend/src/widgets/canvas-toolbar/ui/types.ts
-- flowmat_frontend/src/widgets/canvas-toolbar/ui/Ribbon.tsx
-- flowmat_frontend/src/widgets/canvas-toolbar/ui/RibbonTab.tsx
-- flowmat_frontend/src/widgets/canvas-toolbar/ui/RibbonGroup.tsx
-- flowmat_frontend/src/widgets/canvas-toolbar/ui/RibbonButton.tsx
-- flowmat_frontend/src/widgets/canvas-toolbar/config/ribbonConfig.ts
-- .claude/launch.json (vite dev 서버 프리뷰 실행용, 매 Step 시각 확인에 재사용)
-
-수정 파일:
-- flowmat_frontend/src/pages/workspace/ui/WorkflowCanvasPage.tsx (Ribbon import + 렌더 + activeRibbonTabId state 추가, 기존 로직/타이틀바 미변경)
-- flowmat_frontend/src/index.css (.ribbon* 클래스 추가, 기존 CSS 변수(--bg/--border/--text/--text-h/--accent/--accent-bg/--surface) 재사용해 라이트/다크 자동 대응)
-
-검증:
-- `npm run build` 성공 확인.
-- 실제 화면 확인: 로컬 백엔드가 기동되지 않아(docker daemon 미실행 → 로그인 502) 실제
-  워크스페이스 화면(로그인 후 캔버스)까지는 못 열어봄. 대신 app/router/index.tsx에
-  임시 프리뷰 라우트(`/__ribbon-preview`)를 추가해 동일한 <Ribbon tabs={buildRibbonTabs()}>
-  를 독립적으로 렌더링, 브라우저에서 탭 4개(Home/Annotate/View/Collaborate) 표시 및
-  클릭 시 active 클래스/aria-selected 전환을 DOM에서 직접 확인 완료. 확인 후 임시
-  라우트와 디버그 컴포넌트는 삭제하고 다시 빌드해 원상태 확인함(현재 diff에 남아있지
-  않음). 다음 Step부터는 백엔드(docker compose + Spring Boot)를 먼저 띄우고 실제
-  워크스페이스 화면에서 확인할 것 — 이번엔 시간상 대체 검증으로 넘어감.
-- 팀원 연락 불가로 항목 1(widgets/ 신설), 4(브랜치)를 임시 진행함 — 위 "논의 로그"
-  섹션의 2026-08-11 메모 참고. seolly에게 사후 공유 필요.
-
-2026-08-12 — Step 2: Home 탭 완료 (미커밋, diff만 확인 대기)
-
-요약: ribbonConfig.ts의 Home 탭에 Tools/Modify/Layout/Export 4개 그룹과 정적 버튼
-(select-pointer, add-node, undo, redo, layout-tb, layout-lr, export-json, export-png)을
-채움. 아이콘은 문서 2절 표대로 lucide-react에서 매핑(MousePointer2/Plus/Undo2/Redo2/
-AlignVerticalJustifyStart/AlignHorizontalJustifyStart/FileJson/Image). buildRibbonTabs를
-확장해 handlers에 title도 주입 가능하게 하고(disabled와 마찬가지로 런타임에 바뀌는 값이라
-5-1절의 "구조는 config, 핸들러/데이터는 상위 주입" 원칙에 맞춰 처리), 두 번째 인자로
-dynamicButtons(그룹id -> 완성된 RibbonButtonDefinition[])를 추가 — paletteDefinitions
-기반 노드 타입별 도구 버튼처럼 개수가 미리 정해지지 않는 버튼을 Tools 그룹 끝에 이어붙이는
-용도. 아이콘 필드가 실제 WorkflowNodeDefinition에는 없음을 nodeCatalog.ts에서 확인했으므로
-문서 2절의 "아이콘 필드 있으면 사용, 없으면 Shapes" 규칙에 따라 전부 Shapes 아이콘 사용.
-
-WorkflowCanvasPage.tsx는 기존 undo()/redo()/applyLayout()/exportJson()/addNode()/
-setActiveTool() 등 핸들러 로직을 전혀 수정하지 않고, 그대로 참조하는 ribbonHandlers/
-ribbonDynamicButtons 객체만 새로 구성해 buildRibbonTabs(handlers, dynamicButtons)에 주입.
-기존 workspace-topbar는 완전히 제거하지 않고(Step 6 예정), 이번에 리본으로 옮긴 버튼들
-(Pointer/노드 타입별 도구/Undo/Redo/Layout TB/Layout LR/Export JSON/Export PNG/Add Node)만
-JSX 주석으로 숨김 처리. Annotate 탭 영역(ANNOTATION_TOOL_DEFINITIONS 버튼)과 "Current tool: ..."
-상태 텍스트는 Step 3 범위이므로 이번 Step에서 건드리지 않고 그대로 topbar에 유지.
-
-수정 파일:
-- flowmat_frontend/src/widgets/canvas-toolbar/config/ribbonConfig.ts (Home 탭 groups/buttons
-  채움, RibbonButtonHandlers에 title 추가, buildRibbonTabs에 dynamicButtons 2번째 인자 추가)
-- flowmat_frontend/src/pages/workspace/ui/WorkflowCanvasPage.tsx (ribbonHandlers/
-  ribbonDynamicButtons 구성 후 buildRibbonTabs에 주입하도록 변경, 기존 topbar에서
-  리본으로 옮긴 버튼 블록을 주석 처리, 기존 핸들러 함수 내부 로직은 무수정)
-
-검증:
-- `npm run build` 성공, `npx tsc --noEmit` 통과(에러 없음).
-- 로컬 백엔드 미기동으로 실제 워크스페이스 화면 대신, Step 1과 동일하게 임시 프리뷰 라우트
-  (`/__ribbon-preview`)에 mock 상태(activeTool/pastLen/nodeCount)를 가진 디버그 컴포넌트를
-  붙여 Ribbon만 독립 렌더링 후 확인: Home 탭 4개 그룹(Tools/Modify/Layout/Export)과 버튼
-  10개(Pointer/Add Node/동적 노드타입 2개(Process/Equipment)/Undo/Redo/Layout TB/Layout LR/
-  Export JSON/Export PNG)가 모두 렌더링됨. 클릭 시 activeTool 상태 변화 및 active 클래스
-  전환(javascript_tool로 `.ribbon-button--active` 클래스 확인), Undo 클릭 시 pastLen 감소와
-  title 텍스트 변경("Undo: step N" → pastLen 0일 때 disabled=true, title="Nothing to undo")을
-  DOM에서 직접 확인. Annotate 탭 전환 시 그룹이 비어있음(Step 3 전) 확인. 확인 후 임시 라우트와
-  디버그 컴포넌트는 삭제하고 다시 `npm run build` + `npx tsc --noEmit`으로 원상태 재확인함
-  (현재 diff에 남아있지 않음, git status로 확인).
-- 실제 워크스페이스 화면(로그인 후 캔버스)에서의 회귀 확인은 이번에도 로컬 백엔드 부재로
-  못함 — Step 3 이전에 백엔드(docker compose + Spring Boot)를 먼저 띄우고 확인 필요.
+상세:
+- 착수 전 실제 코드를 재확인한 결과, 3절 표가 예상한 것보다 이미 많이 진행되어
+  있었음 — a7560f2 "feat(toolbar): wire arrange/align/navigation commands into
+  ribbon" (Seoly, 2026-08-14), b851fa1 "feat(editor): support align/distribute on
+  backend editor elements" (Seoly, 2026-08-14), 49bd86d "fix(workspace): stop
+  Select All from crashing on large node counts" (Seoly, 2026-08-14) — 세 커밋 모두
+  이미 이 브랜치에 병합되어 있었음. 즉 Align/Arrange 계열 버튼은 이미 리본에
+  연결되어 동작 중이었고, nekopunch/Seoly가 같은 파일(WorkflowCanvasPage.tsx,
+  ribbonConfig.ts)을 순차적으로 커밋하는 방식으로 이미 협업 중이었음 — 항목 2가
+  우려한 "동시 작업 충돌"은 실제로는 발생하지 않았음 (순차 커밋, 병합 충돌 없음).
+  항목 3(뼈대 vs 실제 연결)도 이미 실제 연결 쪽으로 진행되어 있었음 — 3-4절 결론과
+  일치. 다만 이건 "논의 완료"가 아니라 코드 재확인으로 얻은 정황 증거일 뿐이므로
+  위 표의 상태는 미완료로 유지함 — 팀원과 명시적으로 확인한 것은 아님.
+- 이번 세션에서 실제로 채운 것:
+  1. Draw 그룹: ANNOTATION_TOOL_DEFINITIONS(Shape/Text/Freehand, 아이콘 없었음 →
+     Shapes/TypeIcon/Pencil로 신규 지정, 3-2절이 제안한 조합 그대로 사용)를
+     EDITOR_TOOL_DEFINITIONS(Rectangle 등, 기존 아이콘 매핑 재사용)와 합쳐
+     하나의 동적 그룹으로 리본에 연결. 기존에 좌측 패널(Node Palette)에어
+     인라인으로 남아 있던 Shape/Text/Freehand 버튼은 제거하고 주석으로 대체
+     (Editor Shapes/Align/Group 버튼은 이전 세션에서 이미 제거되어 있었음).
+  2. Align 그룹: 기존 handleAlign/handleDistribute 연결을 그대로 유지, 6방향
+     정렬 + 분산 2종만 남기고 Group/Ungroup은 아래 3번 그룹으로 분리.
+  3. Group 그룹(신규): 항목 6 재확인 결과 전제가 낡아 있었음 — 3-1절은
+     "handleGroup/handleUngroup이 editor 엔진 경로를 지원하지 않는다"고 했지만,
+     실제로는 WorkspaceEditorCommandApi.groupSelected/ungroupSelected가 이미
+     구현되어 있었고 Arrange 그룹의 별도 버튼(group-selected/ungroup-selected)에
+     이미 연결되어 동작 중이었음(Seoly, a7560f2). "사용 전에" 안내가 제시한
+     폴백(이번 Step엔 만들지 않고 editor 선택 시 disabled 처리)을 그대로 따르면
+     이미 동작하던 기능을 되돌리는 셈이라 판단, 대신 Group/Ungroup 버튼을 하나로
+     합치고 onClick에서 editor 선택 개수로 분기하도록 재구성함 (undo/redo 버튼이
+     이미 쓰던 것과 동일한 패턴 — ribbonHandlers의 onClick에서 분기, handleGroup/
+     handleUngroup 함수 내부는 손대지 않음). disabled 조건은 handleAlign과 동일하게
+     `editorSelection.elements.length >= 2 || canEditAnnotations` 패턴 재사용.
+     → 팀원 논의 없이 임시로 내린 판단이므로 위 표 항목 6은 미완료로 유지.
+  4. Arrange 그룹: Duplicate/Delete/Front/Back만 남기고 Group/Ungroup은 제거
+     (3번으로 이동).
+  5. Grid 그룹(신규): 항목 7 안내대로 RibbonGroup만 추가하고 버튼은 넣지 않음 —
+     WORKSPACE_EDITOR_GRID_SIZE는 여전히 고정 상수, 토글 UI 없음. 팀원 논의 후
+     별도 Step으로 분리 예정 — 위 표 항목 7은 미완료로 유지.
+  - CanvasViewport.tsx 등 다른 위치에 Align/Group을 중복 제공하는 플로팅 툴바가
+    있는지 확인했으나 없었음 (grep 결과 없음) — 추가로 주석 처리할 UI 없음.
+- 검증:
+  - `npm run build` 성공.
+  - `tsc --noEmit`: 이번에 건드린 두 파일(WorkflowCanvasPage.tsx, ribbonConfig.ts)
+    관련 에러 없음. 남은 에러는 전부 src/test/* (커밋 0a0e19f "test"에서 추가된
+    vitest 설정 미비) — 이번 작업과 무관, 기존 이슈로 판단하고 무시.
+  - 실제 로컬 서버로 확인을 시도했으나 백엔드(Spring Boot + Postgres/Redis)가
+    필요했고, 로컬 Docker Desktop 엔진이 떠 있지 않아(`docker compose up` 실패:
+    dockerDesktopLinuxEngine pipe 연결 불가) 백엔드/DB를 띄우지 못함. 대신
+    Step 1/2 때처럼 임시 라우트(`/dev/ribbon-preview`, 실제 ribbonConfig.ts +
+    Ribbon 컴포넌트를 그대로 렌더링하되 핸들러만 mock)로 렌더링을 확인 —
+    Draw(9)/Editor Document(2)/Align(8)/Group(2)/Arrange(4)/Grid(0, 라벨만)
+    버튼 구성이 의도대로 렌더링됨을 DOM 조회로 확인. 검증 후 임시 라우트/파일은
+    삭제하여 diff에 남지 않음. 핸들러 분기 로직(WorkflowCanvasPage.tsx 안의
+    editorSelection 기반 분기)은 실제 백엔드 없이는 클릭 테스트가 불가능해
+    코드 리뷰로만 확인함 — 다음에 백엔드를 띄울 수 있는 세션에서 실제 클릭
+    검증을 한 번 더 하는 것을 권장.
 ```

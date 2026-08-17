@@ -46,7 +46,9 @@ export interface RibbonTabSkeleton {
 }
 
 // Step 2: Home tab groups/buttons filled in per migration plan §2.
-// Annotate/Collaborate groups get filled in during Step 3/4 (see plan §3-4).
+// Step 3: Annotate tab groups/buttons filled in per migration plan §3-2 (Draw/Editor
+// Document/Align/Group/Arrange groups; Grid is a skeleton — see §9 Step 3 log).
+// Collaborate group gets filled in during Step 4.
 export const ribbonConfig: RibbonTabSkeleton[] = [
   {
     id: 'home',
@@ -91,8 +93,10 @@ export const ribbonConfig: RibbonTabSkeleton[] = [
     label: 'Annotate',
     groups: [
       {
-        id: 'editor-shapes',
-        label: 'Editor Shapes',
+        // Buttons are all dynamic (ANNOTATION_TOOL_DEFINITIONS + EDITOR_TOOL_DEFINITIONS),
+        // injected via ribbonDynamicButtons.draw — see migration plan §3-2.
+        id: 'draw',
+        label: 'Draw',
         buttons: [],
       },
       {
@@ -101,18 +105,6 @@ export const ribbonConfig: RibbonTabSkeleton[] = [
         buttons: [
           { id: 'save-editor-document', icon: Save, label: 'Save Editor' },
           { id: 'reload-editor-document', icon: RefreshCw, label: 'Reload' },
-        ],
-      },
-      {
-        id: 'arrange',
-        label: 'Arrange',
-        buttons: [
-          { id: 'duplicate-selected', icon: Copy, label: 'Duplicate' },
-          { id: 'delete-selected', icon: Trash2, label: 'Delete' },
-          { id: 'group-selected', icon: Group, label: 'Group' },
-          { id: 'ungroup-selected', icon: Ungroup, label: 'Ungroup' },
-          { id: 'bring-to-front', icon: BringToFront, label: 'Front' },
-          { id: 'send-to-back', icon: SendToBack, label: 'Back' },
         ],
       },
       {
@@ -127,9 +119,33 @@ export const ribbonConfig: RibbonTabSkeleton[] = [
           { id: 'align-bottom', icon: AlignEndHorizontal, label: 'Bottom' },
           { id: 'distribute-horizontal', icon: AlignHorizontalDistributeCenter, label: 'Dist. H' },
           { id: 'distribute-vertical', icon: AlignVerticalDistributeCenter, label: 'Dist. V' },
-          { id: 'annotation-group', icon: Group, label: 'Group' },
-          { id: 'annotation-ungroup', icon: Ungroup, label: 'Ungroup' },
         ],
+      },
+      {
+        id: 'group',
+        label: 'Group',
+        buttons: [
+          { id: 'group', icon: Group, label: 'Group' },
+          { id: 'ungroup', icon: Ungroup, label: 'Ungroup' },
+        ],
+      },
+      {
+        id: 'arrange',
+        label: 'Arrange',
+        buttons: [
+          { id: 'duplicate-selected', icon: Copy, label: 'Duplicate' },
+          { id: 'delete-selected', icon: Trash2, label: 'Delete' },
+          { id: 'bring-to-front', icon: BringToFront, label: 'Front' },
+          { id: 'send-to-back', icon: SendToBack, label: 'Back' },
+        ],
+      },
+      {
+        // Skeleton only — no grid snap toggle UI yet. See migration plan §⚠️ item 7 /
+        // §9 Step 3 log: WORKSPACE_EDITOR_GRID_SIZE is still a fixed constant, no
+        // on/off state exists to wire a button to. Left for a follow-up step.
+        id: 'grid',
+        label: 'Grid',
+        buttons: [],
       },
     ],
   },

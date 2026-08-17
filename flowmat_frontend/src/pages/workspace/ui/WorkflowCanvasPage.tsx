@@ -56,7 +56,7 @@ import {
   type WorkflowEditorTool,
   type WorkflowPaletteTool,
 } from '../../../entities/workflow/model/nodeCatalog'
-import { Circle, Minus, Shapes, Square, Triangle, Type as TypeIcon, Waypoints } from 'lucide-react'
+import { Circle, Minus, Pencil, Shapes, Square, Triangle, Type as TypeIcon, Waypoints } from 'lucide-react'
 import { Ribbon } from '../../../widgets/canvas-toolbar/ui/Ribbon'
 import {
   buildRibbonTabs,
@@ -99,10 +99,16 @@ const ANNOTATION_TOOL_DEFINITIONS: Array<{
   tool: Extract<WorkflowPaletteTool, 'annotation-shape' | 'annotation-text' | 'annotation-freehand'>
   label: string
   description: string
+  icon: typeof Square
 }> = [
-  { tool: 'annotation-shape', label: 'Shape', description: 'Place shape annotations on the canvas.' },
-  { tool: 'annotation-text', label: 'Text', description: 'Drop standalone notes on the canvas.' },
-  { tool: 'annotation-freehand', label: 'Freehand', description: 'Sketch directly with live collaborator previews.' },
+  { tool: 'annotation-shape', label: 'Shape', description: 'Place shape annotations on the canvas.', icon: Shapes },
+  { tool: 'annotation-text', label: 'Text', description: 'Drop standalone notes on the canvas.', icon: TypeIcon },
+  {
+    tool: 'annotation-freehand',
+    label: 'Freehand',
+    description: 'Sketch directly with live collaborator previews.',
+    icon: Pencil,
+  },
 ]
 
 const EDITOR_TOOL_DEFINITIONS: Array<{
@@ -1344,6 +1350,12 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
 
   const canAlignSelection = editorSelection.elements.length >= 2 || canEditAnnotations
   const canDistributeSelection = editorSelection.elements.length >= 3 || canEditAnnotations
+  // Mirrors handleAlign/handleDistribute's own editor-vs-legacy branch, but done here
+  // instead of inside handleGroup/handleUngroup — those two are left untouched per the
+  // migration plan. WorkspaceEditorCommandApi.groupSelected/ungroupSelected already ship
+  // (see WorkspaceEditorLayer.tsx), so this reuses that instead of disabling the button.
+  const canGroupSelection = editorSelection.elements.length >= 2 || canEditAnnotations
+  const canUngroupSelection = editorSelection.elements.length > 0 || canEditAnnotations
 
   // Ribbon step 2: Home tab wired to the same handlers the old topbar buttons used.
   const ribbonHandlers: RibbonButtonHandlers = {
@@ -1410,16 +1422,6 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
       disabled: !editorCommandApiRef.current || editorSelection.elements.length === 0,
       title: 'Delete selected shapes',
     },
-    'group-selected': {
-      onClick: () => editorCommandApiRef.current?.groupSelected(),
-      disabled: !editorCommandApiRef.current || editorSelection.elements.length < 2,
-      title: 'Group selected shapes',
-    },
-    'ungroup-selected': {
-      onClick: () => editorCommandApiRef.current?.ungroupSelected(),
-      disabled: !editorCommandApiRef.current || editorSelection.elements.length === 0,
-      title: 'Ungroup selected shapes',
-    },
     'bring-to-front': {
       onClick: () => editorCommandApiRef.current?.bringSelectedToFront(),
       disabled: !editorCommandApiRef.current || editorSelection.elements.length === 0,
@@ -1470,15 +1472,27 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
       disabled: !canDistributeSelection,
       title: 'Distribute vertically',
     },
-    'annotation-group': {
-      onClick: () => void handleGroup(),
-      disabled: !canEditAnnotations,
-      title: 'Group selected annotations',
+    group: {
+      onClick: () => {
+        if (editorSelection.elements.length >= 2) {
+          editorCommandApiRef.current?.groupSelected()
+          return
+        }
+        void handleGroup()
+      },
+      disabled: !canGroupSelection,
+      title: 'Group selected shapes',
     },
-    'annotation-ungroup': {
-      onClick: () => void handleUngroup(),
-      disabled: !canEditAnnotations,
-      title: 'Ungroup selected annotations',
+    ungroup: {
+      onClick: () => {
+        if (editorSelection.elements.length > 0) {
+          editorCommandApiRef.current?.ungroupSelected()
+          return
+        }
+        void handleUngroup()
+      },
+      disabled: !canUngroupSelection,
+      title: 'Ungroup selected shapes',
     },
     'fit-view': {
       onClick: () => fitViewRef.current(),
@@ -1498,15 +1512,26 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
       onClick: () => setActiveTool(definition.tool),
       active: activeTool === definition.tool,
     })),
-    'editor-shapes': EDITOR_TOOL_DEFINITIONS.map((definition) => ({
-      id: `tool-${definition.tool}`,
-      icon: definition.icon,
-      label: definition.label,
-      onClick: () => setActiveTool(definition.tool),
-      active: activeTool === definition.tool,
-      disabled: !canEditAnnotations,
-      title: canEditAnnotations ? definition.description : 'Viewers cannot create editor elements',
-    })),
+    draw: [
+      ...ANNOTATION_TOOL_DEFINITIONS.map((definition) => ({
+        id: `tool-${definition.tool}`,
+        icon: definition.icon,
+        label: definition.label,
+        onClick: () => setActiveTool(definition.tool),
+        active: activeTool === definition.tool,
+        disabled: !canEditAnnotations,
+        title: canEditAnnotations ? definition.description : 'Viewers cannot create annotations',
+      })),
+      ...EDITOR_TOOL_DEFINITIONS.map((definition) => ({
+        id: `tool-${definition.tool}`,
+        icon: definition.icon,
+        label: definition.label,
+        onClick: () => setActiveTool(definition.tool),
+        active: activeTool === definition.tool,
+        disabled: !canEditAnnotations,
+        title: canEditAnnotations ? definition.description : 'Viewers cannot create editor elements',
+      })),
+    ],
   }
 
   const ribbonTabs = buildRibbonTabs(ribbonHandlers, ribbonDynamicButtons)
@@ -1681,39 +1706,8 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
             >
               Pointer
             </button>
-            {/* Editor Shapes tool buttons moved to Ribbon Annotate tab > Editor Shapes group. */}
-            <div style={{ marginTop: '8px', display: 'grid', gap: '8px' }}>
-              <h3 style={{ margin: 0 }}>Annotations</h3>
-              <p className="panel-placeholder" style={{ margin: 0 }}>
-                Shapes and notes persist as a separate canvas layer. Freehand relays live while drawing.
-              </p>
-              {ANNOTATION_TOOL_DEFINITIONS.map((definition) => (
-                <button
-                  key={definition.tool}
-                  type="button"
-                  disabled={!canEditAnnotations}
-                  onClick={() => setActiveTool(definition.tool)}
-                  style={{
-                    textAlign: 'left',
-                    padding: '12px 14px',
-                    borderRadius: '12px',
-                    border:
-                      activeTool === definition.tool
-                        ? '1px solid var(--accent)'
-                        : '1px solid var(--border)',
-                    background:
-                      activeTool === definition.tool ? 'var(--accent-bg)' : 'var(--surface)',
-                    display: 'grid',
-                    gap: '4px',
-                    opacity: canEditAnnotations ? 1 : 0.5,
-                  }}
-                >
-                  <strong>{definition.label}</strong>
-                  <span style={{ fontSize: '12px', opacity: 0.75 }}>{definition.description}</span>
-                </button>
-              ))}
-              {/* Align/Distribute/Group/Ungroup buttons moved to Ribbon Annotate tab > Align group. */}
-            </div>
+            {/* Editor Shapes / Shape / Text / Freehand tool buttons moved to Ribbon Annotate tab > Draw group. */}
+            {/* Align/Distribute buttons moved to Ribbon Annotate tab > Align group; Group/Ungroup moved to > Group group. */}
           </div>
         </aside>
 
