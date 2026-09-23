@@ -19,6 +19,8 @@ public record InventoryTransactionResponse(
     String referenceId,
     String note,
     String createdBy,
-    OffsetDateTime createdAt
+    OffsetDateTime createdAt,
+    String lotId,
+    String requestId
 ) {
 }

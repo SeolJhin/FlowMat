@@ -65,32 +65,31 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
             accessor.setUser(authentication);
         }
 
-        boolean workflowFrame =
-            accessor.getDestination() != null
-                && (
-                    accessor.getDestination().startsWith("/topic/workflow/")
-                        || accessor.getDestination().startsWith("/app/workflow/")
-                );
-        if ((StompCommand.SEND.equals(accessor.getCommand()) || StompCommand.SUBSCRIBE.equals(accessor.getCommand()))
-            && workflowFrame) {
+        if (StompCommand.SEND.equals(accessor.getCommand()) || StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
             if (accessor.getUser() == null) {
                 throw new BusinessException(ErrorCode.UNAUTHORIZED, "Unauthenticated STOMP frame.");
             }
-            Matcher matcher = WORKFLOW_DESTINATION.matcher(accessor.getDestination());
-            if (matcher.matches()) {
-                String workflowId = matcher.group(1);
-                String userId;
-                if (accessor.getUser() instanceof UsernamePasswordAuthenticationToken auth
-                    && auth.getPrincipal() instanceof AuthUser authUser) {
-                    userId = authUser.getUserId();
-                } else {
-                    userId = accessor.getUser().getName();
-                }
-                if (StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
-                    projectAccessService.requireWorkflowReadAccess(workflowId, userId);
-                } else {
-                    projectAccessService.requireWorkflowWriteAccess(workflowId, userId);
-                }
+            String destination = accessor.getDestination();
+            boolean allowedPrefix = StompCommand.SUBSCRIBE.equals(accessor.getCommand())
+                ? destination != null && destination.startsWith("/topic/")
+                : destination != null && destination.startsWith("/app/");
+            Matcher matcher = destination == null ? null : WORKFLOW_DESTINATION.matcher(destination);
+            if (!allowedPrefix || matcher == null || !matcher.matches()
+                || matcher.group(1).contains("*") || matcher.group(1).contains("?")) {
+                throw new BusinessException(ErrorCode.FORBIDDEN, "STOMP destination is not allowed.");
+            }
+            String workflowId = matcher.group(1);
+            String userId;
+            if (accessor.getUser() instanceof UsernamePasswordAuthenticationToken auth
+                && auth.getPrincipal() instanceof AuthUser authUser) {
+                userId = authUser.getUserId();
+            } else {
+                userId = accessor.getUser().getName();
+            }
+            if (StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
+                projectAccessService.requireWorkflowReadAccess(workflowId, userId);
+            } else {
+                projectAccessService.requireWorkflowWriteAccess(workflowId, userId);
             }
         }
 

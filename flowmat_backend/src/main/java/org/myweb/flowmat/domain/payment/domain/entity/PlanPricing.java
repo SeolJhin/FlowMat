@@ -12,6 +12,8 @@ import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
 import org.myweb.flowmat.global.common.BaseTimeEntity;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Getter
 @Setter
@@ -43,10 +45,12 @@ public class PlanPricing extends BaseTimeEntity {
     private BigDecimal totalPrice;
 
     // ISO 4217 통화 코드
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "currency", nullable = false, length = 3)
     private String currency = "KRW";
 
     // Y / N
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "is_active", nullable = false, length = 1)
     private String isActive = "Y";
 }

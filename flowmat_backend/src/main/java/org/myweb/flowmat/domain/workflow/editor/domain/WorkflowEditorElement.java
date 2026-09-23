@@ -48,7 +48,9 @@ public class WorkflowEditorElement extends CreatedUpdatedAuditEntity {
     @Column(name = "style_json", columnDefinition = "jsonb")
     private String styleJson = "{}";
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     private String lockedYn = "N";
+    @JdbcTypeCode(SqlTypes.CHAR)
     private String hiddenYn = "N";
 
     @Column(name = "version")

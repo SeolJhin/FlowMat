@@ -6,6 +6,7 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.project.api.dto.request.ProjectInviteAcceptRequest;
 import org.myweb.flowmat.domain.project.api.dto.request.ProjectInviteRequest;
+import org.myweb.flowmat.domain.project.api.dto.response.ProjectInvitePreviewResponse;
 import org.myweb.flowmat.domain.project.api.dto.response.ProjectInviteResponse;
 import org.myweb.flowmat.domain.project.api.dto.response.ProjectMemberResponse;
 import org.myweb.flowmat.domain.project.domain.entity.Project;
@@ -106,6 +107,32 @@ public class ProjectInviteServiceImpl implements ProjectInviteService {
     }
 
     @Override
+    public ProjectInvitePreviewResponse previewInvite(String inviteToken) {
+        if (inviteToken == null || inviteToken.isBlank()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Invite token is required.");
+        }
+        ProjectInvite invite = projectInviteRepository.findByInviteToken(inviteToken.trim())
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Invite token was not found."));
+        Project project = projectRepository.findByProjectIdAndDeletedYn(invite.getProjectId(), NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "The invited project no longer exists."));
+        String inviterName = userRepository.findByUserId(invite.getInvitedBy())
+            .map(User::getUserName)
+            .orElse(null);
+        User currentUser = resolveCurrentUser();
+
+        return new ProjectInvitePreviewResponse(
+            project.getProjectName(),
+            invite.getProjectRole(),
+            inviterName,
+            maskEmail(invite.getInvitedEmail()),
+            invite.getInviteStatus(),
+            invite.getExpiredAt(),
+            invite.getExpiredAt() != null && invite.getExpiredAt().isBefore(OffsetDateTime.now()),
+            currentUser.getUserEmail() != null && currentUser.getUserEmail().equalsIgnoreCase(invite.getInvitedEmail())
+        );
+    }
+
+    @Override
     @Transactional
     public ProjectMemberResponse acceptInvite(ProjectInviteAcceptRequest request) {
         ProjectInvite invite = projectInviteRepository.findByInviteToken(request.inviteToken().trim())
@@ -194,6 +221,20 @@ public class ProjectInviteServiceImpl implements ProjectInviteService {
             member.getMemberStatus(),
             member.getJoinedAt()
         );
+    }
+
+    /** "guest@flowmat.local" -> "gu***@flowmat.local"; short local parts keep only their first character. */
+    static String maskEmail(String email) {
+        if (email == null) {
+            return null;
+        }
+        int at = email.indexOf('@');
+        if (at <= 0) {
+            return "***";
+        }
+        String local = email.substring(0, at);
+        String visible = local.length() > 2 ? local.substring(0, 2) : local.substring(0, 1);
+        return visible + "***" + email.substring(at);
     }
 
     static String normalizeAssignableRole(String role) {

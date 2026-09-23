@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAcceptInviteMutation } from '../../../entities/project/api/useAcceptInviteMutation'
+import { useInvitePreviewQuery } from '../../../entities/project/api/useInvitePreviewQuery'
 import { tokenStorage } from '../../../entities/auth/api/useLoginMutation'
+import { errorMessage as toErrorMessage } from '../../../shared/lib/errorMessage'
+import { inviteBlockedReason } from '../model/inviteBlockedReason'
 
 type Phase = 'idle' | 'accepting' | 'success' | 'error' | 'no-token' | 'not-logged-in'
 
@@ -11,6 +14,8 @@ export function InviteAcceptRoute() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const acceptMutation = useAcceptInviteMutation()
+  const previewQuery = useInvitePreviewQuery(token, phase === 'idle' || phase === 'accepting')
+  const preview = previewQuery.data
 
   useEffect(() => {
     if (!token) {
@@ -31,7 +36,8 @@ export function InviteAcceptRoute() {
       await acceptMutation.mutateAsync(token)
       setPhase('success')
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to accept invitation.')
+      // Failures arrive as UiError objects, not Error instances.
+      setErrorMessage(toErrorMessage(err, 'Failed to accept invitation.'))
       setPhase('error')
     }
   }
@@ -104,18 +110,41 @@ export function InviteAcceptRoute() {
     )
   }
 
+  const blockedReason = inviteBlockedReason(preview)
+  const canAccept = Boolean(preview) && !blockedReason && phase !== 'accepting'
+
   return (
     <div style={containerStyle}>
       <div style={cardStyle}>
         <h2>Project Invitation</h2>
-        <p style={{ color: 'var(--text)', opacity: 0.7 }}>
-          You have been invited to join a FlowMat project. Click below to accept.
-        </p>
+        {previewQuery.isLoading && <p style={{ opacity: 0.7 }}>Loading invitation…</p>}
+        {previewQuery.isError && (
+          <p style={{ color: '#dc2626', fontSize: 14 }}>
+            {toErrorMessage(previewQuery.error, 'This invitation could not be found.')}
+          </p>
+        )}
+        {preview && (
+          <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 12px', textAlign: 'left', margin: 0, fontSize: 14 }}>
+            <dt style={{ opacity: 0.6 }}>Project</dt>
+            <dd style={{ margin: 0, fontWeight: 600 }}>{preview.projectName}</dd>
+            <dt style={{ opacity: 0.6 }}>Role</dt>
+            <dd style={{ margin: 0 }}>{preview.projectRole}</dd>
+            <dt style={{ opacity: 0.6 }}>Invited by</dt>
+            <dd style={{ margin: 0 }}>{preview.inviterName ?? 'Unknown'}</dd>
+            {preview.expiredAt && (
+              <>
+                <dt style={{ opacity: 0.6 }}>Expires</dt>
+                <dd style={{ margin: 0 }}>{new Date(preview.expiredAt).toLocaleString()}</dd>
+              </>
+            )}
+          </dl>
+        )}
+        {blockedReason && <p style={{ color: '#b45309', fontSize: 13, margin: 0 }}>{blockedReason}</p>}
         <button
           type="button"
           onClick={() => void handleAccept()}
-          disabled={phase === 'accepting'}
-          style={{ padding: '10px 20px', borderRadius: 8, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 15 }}
+          disabled={!canAccept}
+          style={{ padding: '10px 20px', borderRadius: 8, background: 'var(--accent)', color: '#fff', border: 'none', cursor: canAccept ? 'pointer' : 'not-allowed', opacity: canAccept ? 1 : 0.5, fontSize: 15 }}
         >
           {phase === 'accepting' ? 'Accepting…' : 'Accept Invitation'}
         </button>

@@ -27,6 +27,14 @@ public class PermissionService {
     private final UserRoleRepository userRoleRepository;
     private final RolePermissionRepository rolePermissionRepository;
 
+    public String requireCurrentUserId() {
+        String userId = resolveCurrentUserId();
+        if (userId == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        return userId;
+    }
+
     public void require(SystemPermission permission) {
         if (!hasPermission(permission)) {
             throw new BusinessException(ErrorCode.FORBIDDEN,

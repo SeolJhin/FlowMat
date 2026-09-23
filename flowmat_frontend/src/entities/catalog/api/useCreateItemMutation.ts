@@ -9,6 +9,7 @@ export interface CreateItemInput {
   itemName: string
   itemType?: string
   resourceCategory?: string
+  unitId?: string
   itemStatus?: string
 }
 

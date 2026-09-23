@@ -1,0 +1,360 @@
+import { useMemo, useState, type FormEvent } from 'react'
+import {
+  useSaveWorkOrderMutation,
+  useWorkOrderTransitionMutation,
+  useWorkOrdersQuery,
+  type WorkOrderTransition,
+} from '../../../entities/production/api/useWorkOrders'
+import { errorMessage } from '../../../shared/lib/errorMessage'
+import { formatQty } from '../../../shared/lib/formatQty'
+import type { ItemDto, WorkflowDto, WorkOrderDto } from '../../../shared/types/api'
+import { availableWorkOrderActions, isWorkOrderEditable, workOrderProgress } from '../model/workOrderActions'
+
+const PRIORITIES = ['low', 'normal', 'high', 'urgent']
+
+const STATUS_COLORS: Record<string, { fg: string; bg: string }> = {
+  draft: { fg: '#475569', bg: '#e2e8f0' },
+  approved: { fg: '#1d4ed8', bg: '#dbeafe' },
+  in_progress: { fg: '#92400e', bg: '#fef3c7' },
+  completed: { fg: '#047857', bg: '#d1fae5' },
+  cancelled: { fg: '#b91c1c', bg: '#fee2e2' },
+}
+
+const ACTION_LABELS: Record<WorkOrderTransition, string> = {
+  approve: 'Approve',
+  cancel: 'Cancel',
+  complete: 'Complete',
+}
+
+const ACTION_CONFIRM: Record<WorkOrderTransition, string> = {
+  approve: 'Approve this work order? It can no longer be edited, and runs can be started against it.',
+  cancel: 'Cancel this work order? This cannot be undone.',
+  complete: 'Mark this work order as completed?',
+}
+
+const cell = { padding: '8px 6px' } as const
+
+interface OrderForm {
+  workOrderTitle: string
+  workflowId: string
+  targetItemId: string
+  targetQuantity: string
+  priority: string
+  plannedStartAt: string
+  plannedEndAt: string
+  instruction: string
+}
+
+const EMPTY_FORM: OrderForm = {
+  workOrderTitle: '',
+  workflowId: '',
+  targetItemId: '',
+  targetQuantity: '',
+  priority: 'normal',
+  plannedStartAt: '',
+  plannedEndAt: '',
+  instruction: '',
+}
+
+/** "2026-10-01T09:00" (datetime-local, local time) <-> ISO instant for the API. */
+function toIso(local: string): string | undefined {
+  return local ? new Date(local).toISOString() : undefined
+}
+
+function toLocalInput(iso: string | null): string {
+  if (!iso) return ''
+  const date = new Date(iso)
+  const offsetMs = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16)
+}
+
+function formatDate(iso: string | null): string {
+  return iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : '-'
+}
+
+export function WorkOrdersPanel({
+  projectId,
+  workflows,
+  items,
+}: {
+  projectId: string
+  workflows: WorkflowDto[]
+  items: ItemDto[]
+}) {
+  const ordersQuery = useWorkOrdersQuery(projectId)
+  const saveMutation = useSaveWorkOrderMutation(projectId)
+  const transitionMutation = useWorkOrderTransitionMutation(projectId)
+
+  const [editing, setEditing] = useState<WorkOrderDto | null>(null)
+  const [form, setForm] = useState<OrderForm>(EMPTY_FORM)
+
+  const orders = ordersQuery.data ?? []
+  const itemLabel = useMemo(() => new Map(items.map((item) => [item.itemId, `${item.itemCode} · ${item.itemName}`])), [items])
+  const workflowLabel = useMemo(() => new Map(workflows.map((wf) => [wf.workflowId, wf.workflowName])), [workflows])
+
+  function resetForm() {
+    setEditing(null)
+    setForm(EMPTY_FORM)
+    saveMutation.reset()
+  }
+
+  function startEdit(order: WorkOrderDto) {
+    setEditing(order)
+    setForm({
+      workOrderTitle: order.workOrderTitle,
+      workflowId: order.workflowId ?? '',
+      targetItemId: order.targetItemId ?? '',
+      targetQuantity: order.targetQuantity !== null ? String(order.targetQuantity) : '',
+      priority: order.priority,
+      plannedStartAt: toLocalInput(order.plannedStartAt),
+      plannedEndAt: toLocalInput(order.plannedEndAt),
+      instruction: order.instruction ?? '',
+    })
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    try {
+      await saveMutation.mutateAsync({
+        workOrderId: editing?.workOrderId,
+        workOrderTitle: form.workOrderTitle.trim(),
+        workflowId: form.workflowId || undefined,
+        targetItemId: form.targetItemId || undefined,
+        targetQuantity: form.targetQuantity === '' ? undefined : Number(form.targetQuantity),
+        priority: form.priority,
+        plannedStartAt: toIso(form.plannedStartAt),
+        plannedEndAt: toIso(form.plannedEndAt),
+        instruction: form.instruction.trim() || undefined,
+      })
+      resetForm()
+    } catch {
+      // Surfaced through saveMutation.error below the form.
+    }
+  }
+
+  function runAction(order: WorkOrderDto, action: WorkOrderTransition) {
+    if (!window.confirm(`${order.workOrderNumber}: ${ACTION_CONFIRM[action]}`)) return
+    transitionMutation.mutate(
+      { workOrderId: order.workOrderId, action },
+      {
+        onSuccess: () => {
+          if (editing?.workOrderId === order.workOrderId) resetForm()
+        },
+      },
+    )
+  }
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>
+      <section>
+        {ordersQuery.isLoading && <p>Loading work orders...</p>}
+        {ordersQuery.isError && (
+          <p style={{ color: '#dc2626' }}>{errorMessage(ordersQuery.error, 'Failed to load work orders.')}</p>
+        )}
+        {!ordersQuery.isLoading && orders.length === 0 && (
+          <p className="inspector-hint">
+            No work orders yet. Create a draft, have the project owner approve it, then start runs against it.
+          </p>
+        )}
+        {orders.length > 0 && (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left' }}>
+                <th style={cell}>Order</th>
+                <th style={cell}>Status</th>
+                <th style={cell}>Target</th>
+                <th style={cell}>Progress</th>
+                <th style={cell}>Planned</th>
+                <th style={cell}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((order) => {
+                const colors = STATUS_COLORS[order.workOrderStatus] ?? STATUS_COLORS.draft
+                const progress = workOrderProgress(order)
+                return (
+                  <tr
+                    key={order.workOrderId}
+                    style={{
+                      borderBottom: '1px solid var(--border)',
+                      background: editing?.workOrderId === order.workOrderId ? 'var(--accent-bg)' : undefined,
+                    }}
+                  >
+                    <td style={cell}>
+                      <div><code>{order.workOrderNumber}</code></div>
+                      <div>{order.workOrderTitle}</div>
+                      <div style={{ fontSize: 11, opacity: 0.6 }}>
+                        {order.priority !== 'normal' && <strong>{order.priority} · </strong>}
+                        {order.workflowId ? workflowLabel.get(order.workflowId) ?? order.workflowId : 'any workflow'}
+                      </div>
+                    </td>
+                    <td style={cell}>
+                      <span
+                        style={{
+                          padding: '2px 8px',
+                          borderRadius: 999,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: colors.fg,
+                          background: colors.bg,
+                        }}
+                      >
+                        {order.workOrderStatus.replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td style={{ ...cell, opacity: 0.8 }}>
+                      <div>{order.targetItemId ? itemLabel.get(order.targetItemId) ?? order.targetItemId : '-'}</div>
+                      <div style={{ fontSize: 11, opacity: 0.7 }}>{formatQty(order.targetQuantity)}</div>
+                    </td>
+                    <td style={{ ...cell, minWidth: 110 }}>
+                      <div style={{ fontSize: 12 }}>
+                        {formatQty(order.producedQuantity)} produced · {order.runCount} run(s)
+                      </div>
+                      {progress !== null && (
+                        <div style={{ height: 6, borderRadius: 3, background: 'var(--border)', marginTop: 4 }}>
+                          <div
+                            style={{
+                              width: `${progress}%`,
+                              height: '100%',
+                              borderRadius: 3,
+                              background: progress >= 100 ? '#047857' : 'var(--accent)',
+                            }}
+                          />
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ ...cell, fontSize: 11, opacity: 0.7, whiteSpace: 'nowrap' }}>
+                      <div>{formatDate(order.plannedStartAt)}</div>
+                      <div>→ {formatDate(order.plannedEndAt)}</div>
+                    </td>
+                    <td style={{ ...cell, whiteSpace: 'nowrap' }}>
+                      {isWorkOrderEditable(order.workOrderStatus) && (
+                        <button type="button" onClick={() => startEdit(order)} style={{ marginRight: 4, fontSize: 12 }}>
+                          Edit
+                        </button>
+                      )}
+                      {availableWorkOrderActions(order.workOrderStatus).map((action) => (
+                        <button
+                          key={action}
+                          type="button"
+                          onClick={() => runAction(order, action)}
+                          disabled={transitionMutation.isPending}
+                          style={{
+                            marginRight: 4,
+                            fontSize: 12,
+                            ...(action === 'cancel'
+                              ? { color: '#dc2626', border: '1px solid #fca5a5', background: '#fef2f2' }
+                              : {}),
+                          }}
+                        >
+                          {ACTION_LABELS[action]}
+                        </button>
+                      ))}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
+        {transitionMutation.isError && (
+          <p style={{ color: '#dc2626', fontSize: 12 }}>
+            {errorMessage(transitionMutation.error, 'Failed to update work order.')}
+          </p>
+        )}
+      </section>
+
+      <section style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 18 }}>
+        <h3 style={{ marginTop: 0 }}>{editing ? `Edit ${editing.workOrderNumber}` : 'New Work Order'}</h3>
+        <form onSubmit={(e) => void handleSubmit(e)} style={{ display: 'grid', gap: 10 }}>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span>Title *</span>
+            <input
+              value={form.workOrderTitle}
+              onChange={(e) => setForm((f) => ({ ...f, workOrderTitle: e.target.value }))}
+              placeholder="e.g. October batch — widget A"
+              required
+            />
+          </label>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span>Workflow</span>
+            <select value={form.workflowId} onChange={(e) => setForm((f) => ({ ...f, workflowId: e.target.value }))}>
+              <option value="">Any workflow</option>
+              {workflows.map((wf) => <option key={wf.workflowId} value={wf.workflowId}>{wf.workflowName}</option>)}
+            </select>
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 8 }}>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span>Target item</span>
+              <select value={form.targetItemId} onChange={(e) => setForm((f) => ({ ...f, targetItemId: e.target.value }))}>
+                <option value="">None</option>
+                {items.map((item) => <option key={item.itemId} value={item.itemId}>{item.itemCode} · {item.itemName}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span>Quantity</span>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={form.targetQuantity}
+                onChange={(e) => setForm((f) => ({ ...f, targetQuantity: e.target.value }))}
+              />
+            </label>
+          </div>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span>Priority</span>
+            <select value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))}>
+              {PRIORITIES.map((priority) => <option key={priority} value={priority}>{priority}</option>)}
+            </select>
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span>Planned start</span>
+              <input
+                type="datetime-local"
+                value={form.plannedStartAt}
+                onChange={(e) => setForm((f) => ({ ...f, plannedStartAt: e.target.value }))}
+              />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span>Planned end</span>
+              <input
+                type="datetime-local"
+                value={form.plannedEndAt}
+                onChange={(e) => setForm((f) => ({ ...f, plannedEndAt: e.target.value }))}
+              />
+            </label>
+          </div>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span>Instruction</span>
+            <textarea
+              rows={3}
+              value={form.instruction}
+              onChange={(e) => setForm((f) => ({ ...f, instruction: e.target.value }))}
+            />
+          </label>
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button type="submit" disabled={saveMutation.isPending}>
+              {saveMutation.isPending ? 'Saving...' : editing ? 'Save draft' : 'Create draft'}
+            </button>
+            {editing && (
+              <button type="button" onClick={resetForm} style={{ background: 'transparent' }}>
+                Cancel
+              </button>
+            )}
+          </div>
+          {saveMutation.isError && (
+            <p style={{ color: '#dc2626', fontSize: 12, margin: 0 }}>
+              {errorMessage(saveMutation.error, 'Failed to save work order.')}
+            </p>
+          )}
+          <span style={{ fontSize: 11, opacity: 0.6 }}>
+            Drafts are editable. The project owner approves; the first run started against an approved order puts it in
+            progress.
+          </span>
+        </form>
+      </section>
+    </div>
+  )
+}

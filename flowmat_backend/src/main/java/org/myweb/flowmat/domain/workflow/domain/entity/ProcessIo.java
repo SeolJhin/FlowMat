@@ -7,6 +7,8 @@ import java.math.BigDecimal;
 import lombok.Getter;
 import lombok.Setter;
 import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Getter
 @Setter
@@ -26,6 +28,8 @@ public class ProcessIo extends CreatedUpdatedAuditEntity {
     private String unit;
     private String formula;
     private String colorScheme;
+    @JdbcTypeCode(SqlTypes.CHAR)
     private String requiredYn;
+    @JdbcTypeCode(SqlTypes.CHAR)
     private String allowShortageYn;
 }

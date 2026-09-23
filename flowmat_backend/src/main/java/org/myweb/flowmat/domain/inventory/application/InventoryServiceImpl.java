@@ -4,7 +4,9 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.inventory.domain.enums.InventoryTransactionType;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.api.dto.request.InventoryAdjustRequest;
@@ -14,7 +16,11 @@ import org.myweb.flowmat.domain.rule.application.RuleEvaluationContext;
 import org.myweb.flowmat.domain.rule.application.RuleTarget;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
-import org.myweb.flowmat.domain.project.repository.ProjectRepository;
+import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
+import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
+import org.myweb.flowmat.domain.inventory.domain.enums.LotStatus;
+import java.util.stream.Collectors;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
@@ -30,24 +36,28 @@ public class InventoryServiceImpl implements InventoryService {
     private static final String DELETED = "Y";
 
     private final InventoryRepository inventoryRepository;
-    private final ProjectRepository projectRepository;
+    private final ProjectAccessService projectAccessService;
     private final ItemRepository itemRepository;
-    private final InventoryTransactionService inventoryTransactionService;
+    private final InventoryCommandService inventoryCommandService;
     private final FlowRuleEngineService flowRuleEngineService;
     private final IdGenerator idGenerator;
+    private final LotService lotService;
+    private final LotMasterRepository lotMasterRepository;
 
     @Override
     public List<InventoryResponse> listInventories(String projectId) {
-        ensureProjectExists(projectId);
-        return inventoryRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(projectId, NOT_DELETED).stream()
-            .map(InventoryServiceImpl::toResponse)
-            .toList();
+        projectAccessService.requireProjectReadAccess(projectId);
+        List<Inventory> rows = inventoryRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(projectId, NOT_DELETED);
+        Map<String, String> lotNos = lotMasterRepository.findAllById(
+                rows.stream().map(Inventory::getLotId).filter(Objects::nonNull).distinct().toList())
+            .stream().collect(Collectors.toMap(LotMaster::getLotId, LotMaster::getLotNo));
+        return rows.stream().map(row -> toResponse(row, lotNos.get(row.getLotId()))).toList();
     }
 
     @Override
     @Transactional
     public InventoryResponse createInventory(InventoryAdjustRequest request) {
-        ensureProjectExists(request.projectId());
+        projectAccessService.requireProjectWriteAccess(request.projectId());
         Item item = findActiveItem(request.itemId());
         validateSameProject(request.projectId(), item.getProjectId());
         evaluateRules(
@@ -63,42 +73,65 @@ public class InventoryServiceImpl implements InventoryService {
             )
         );
 
+        // LOT-tracked items hold stock per LOT; everything else never names one.
+        String lotId = trimToNull(request.lotId());
+        if ("Y".equals(item.getLotManageYn())) {
+            if (lotId == null) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST,
+                    item.getItemCode() + " is LOT-tracked; choose a LOT for this stock record.");
+            }
+            lotService.requireLotForStock(lotId, item.getProjectId(), item.getItemId());
+        } else if (lotId != null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                item.getItemCode() + " is not LOT-tracked; its stock records cannot name a LOT.");
+        }
+
         Inventory inventory = new Inventory();
         inventory.setInventoryId(idGenerator.generate());
         inventory.setProjectId(request.projectId().trim());
         inventory.setItemId(item.getItemId());
-        inventory.setQuantity(request.quantity());
-        inventory.setReservedQuantity(defaultIfNull(request.reservedQuantity(), BigDecimal.ZERO));
-        inventory.setAvailableQuantity(
-            defaultIfNull(request.availableQuantity(), request.quantity().subtract(defaultIfNull(request.reservedQuantity(), BigDecimal.ZERO)))
-        );
+        inventory.setLotId(lotId);
+        applyQuantities(inventory, request);
         inventory.setLocation(trimToNull(request.location()));
         inventory.setInventoryStatus(defaultIfBlank(request.inventoryStatus(), "available"));
+        applyThresholds(inventory, request);
         inventory.setDeletedYn(NOT_DELETED);
-        Inventory savedInventory = inventoryRepository.save(inventory);
-        inventoryTransactionService.recordSystemTransaction(
+        Inventory savedInventory = inventoryRepository.saveAndFlush(inventory);
+        inventoryCommandService.record(
             savedInventory,
-            "create",
+            InventoryTransactionType.RECEIPT,
             savedInventory.getQuantity(),
             savedInventory.getReservedQuantity(),
-            savedInventory.getAvailableQuantity(),
             "inventory",
             savedInventory.getInventoryId(),
-            "Inventory created",
-            null
+            "Stock record created",
+            null,
+            projectAccessService.requireCurrentUserId()
         );
+        if (lotId != null) {
+            inventoryCommandService.syncLotStatus(lotId);
+        }
         return toResponse(savedInventory);
     }
 
     @Override
     public InventoryResponse getInventory(String inventoryId) {
-        return toResponse(findActiveInventory(inventoryId));
+        Inventory inventory = findActiveInventory(inventoryId);
+        projectAccessService.requireProjectReadAccess(inventory.getProjectId());
+        return toResponse(inventory);
     }
 
     @Override
     @Transactional
     public InventoryResponse updateInventory(String inventoryId, InventoryAdjustRequest request) {
         Inventory inventory = findActiveInventory(inventoryId);
+        projectAccessService.requireProjectWriteAccess(inventory.getProjectId());
+        // The adjustment replaces absolute quantities, so it must be based on what is stored now.
+        if (request.expectedVersion() != null && !request.expectedVersion().equals(inventory.getVersion())) {
+            throw new BusinessException(ErrorCode.CONFLICT,
+                "This stock record changed since you opened it (now " + inventory.getQuantity().stripTrailingZeros().toPlainString()
+                    + " on hand). Reload and try again.");
+        }
         Item item = findActiveItem(request.itemId());
         validateSameProject(inventory.getProjectId(), request.projectId());
         validateSameProject(inventory.getProjectId(), item.getProjectId());
@@ -119,35 +152,80 @@ public class InventoryServiceImpl implements InventoryService {
 
         BigDecimal quantityBefore = inventory.getQuantity();
         BigDecimal reservedBefore = inventory.getReservedQuantity();
-        BigDecimal availableBefore = inventory.getAvailableQuantity();
 
-        inventory.setItemId(item.getItemId());
-        inventory.setQuantity(request.quantity());
-        inventory.setReservedQuantity(defaultIfNull(request.reservedQuantity(), BigDecimal.ZERO));
-        inventory.setAvailableQuantity(
-            defaultIfNull(request.availableQuantity(), request.quantity().subtract(defaultIfNull(request.reservedQuantity(), BigDecimal.ZERO)))
-        );
+        if (!item.getItemId().equals(inventory.getItemId())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "A stock record keeps its item. Issue this stock and receive the other item instead.");
+        }
+        if (request.lotId() != null && !request.lotId().isBlank() && !request.lotId().trim().equals(inventory.getLotId())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "A stock record keeps its LOT. Reverse or issue this stock and receive it into the other LOT.");
+        }
+        if (inventory.getLotId() != null) {
+            lotMasterRepository.findById(inventory.getLotId())
+                .filter(lot -> LotStatus.CLOSED.code().equals(lot.getLotStatus()))
+                .ifPresent(lot -> {
+                    throw new BusinessException(ErrorCode.BAD_REQUEST, "LOT " + lot.getLotNo() + " is closed.");
+                });
+        }
+        applyQuantities(inventory, request);
         inventory.setLocation(trimToNull(request.location()));
-        inventory.setInventoryStatus(defaultIfBlank(request.inventoryStatus(), inventory.getInventoryStatus()));
-        Inventory savedInventory = inventoryRepository.save(inventory);
-        inventoryTransactionService.recordSystemTransaction(
-            savedInventory,
-            "adjust",
-            savedInventory.getQuantity().subtract(quantityBefore),
-            savedInventory.getReservedQuantity().subtract(reservedBefore),
-            savedInventory.getAvailableQuantity().subtract(availableBefore),
-            "inventory",
-            savedInventory.getInventoryId(),
-            "Inventory adjusted",
-            null
-        );
+        String status = defaultIfBlank(request.inventoryStatus(), inventory.getInventoryStatus());
+        if (!Objects.equals(status, inventory.getInventoryStatus())
+            && (InventoryCommandService.QUARANTINED.equals(status)
+                || InventoryCommandService.QUARANTINED.equals(inventory.getInventoryStatus()))) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "Use a quarantine or unquarantine transaction to change quarantine status.");
+        }
+        inventory.setInventoryStatus(status);
+        applyThresholds(inventory, request);
+        Inventory savedInventory = inventoryRepository.saveAndFlush(inventory);
+
+        BigDecimal quantityDelta = savedInventory.getQuantity().subtract(quantityBefore);
+        BigDecimal reservedDelta = savedInventory.getReservedQuantity().subtract(defaultIfNull(reservedBefore, BigDecimal.ZERO));
+        if (quantityDelta.signum() != 0 || reservedDelta.signum() != 0) {
+            inventoryCommandService.record(
+                savedInventory,
+                InventoryTransactionType.ADJUSTMENT,
+                quantityDelta,
+                reservedDelta,
+                "inventory",
+                savedInventory.getInventoryId(),
+                "Stock record adjusted",
+                null,
+                projectAccessService.requireCurrentUserId()
+            );
+        }
+        if (savedInventory.getLotId() != null) {
+            inventoryCommandService.syncLotStatus(savedInventory.getLotId());
+        }
         return toResponse(savedInventory);
+    }
+
+    /** Absolute quantities from the form, checked against the stock invariants before anything is written. */
+    private static void applyQuantities(Inventory inventory, InventoryAdjustRequest request) {
+        BigDecimal quantity = request.quantity();
+        BigDecimal reserved = defaultIfNull(request.reservedQuantity(), BigDecimal.ZERO);
+        if (quantity.signum() < 0 || reserved.signum() < 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Stock quantities cannot be negative.");
+        }
+        if (reserved.compareTo(quantity) > 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Reserved stock cannot exceed the quantity on hand.");
+        }
+        BigDecimal available = quantity.subtract(reserved);
+        if (request.availableQuantity() != null && request.availableQuantity().compareTo(available) != 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Available stock is always quantity minus reserved.");
+        }
+        inventory.setQuantity(quantity);
+        inventory.setReservedQuantity(reserved);
+        inventory.setAvailableQuantity(available);
     }
 
     @Override
     @Transactional
     public void deleteInventory(String inventoryId) {
         Inventory inventory = findActiveInventory(inventoryId);
+        projectAccessService.requireProjectOwnerAccess(inventory.getProjectId());
         evaluateRules(
             inventory.getProjectId(),
             List.of(
@@ -159,24 +237,15 @@ public class InventoryServiceImpl implements InventoryService {
                 "inventory", inventory
             )
         );
+        // Removing a record that still holds stock would make that stock vanish without a movement.
+        if (defaultIfNull(inventory.getQuantity(), BigDecimal.ZERO).signum() != 0
+            || defaultIfNull(inventory.getReservedQuantity(), BigDecimal.ZERO).signum() != 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "This record still holds " + InventoryCommandService.plain(inventory.getQuantity())
+                    + ". Issue or adjust it to zero before deleting.");
+        }
         inventory.setDeletedYn(DELETED);
-        Inventory savedInventory = inventoryRepository.save(inventory);
-        inventoryTransactionService.recordSystemTransaction(
-            savedInventory,
-            "delete",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            "inventory",
-            savedInventory.getInventoryId(),
-            "Inventory deleted",
-            null
-        );
-    }
-
-    private void ensureProjectExists(String projectId) {
-        projectRepository.findByProjectIdAndDeletedYn(projectId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        inventoryRepository.save(inventory);
     }
 
     private Item findActiveItem(String itemId) {
@@ -189,7 +258,42 @@ public class InventoryServiceImpl implements InventoryService {
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
-    private static InventoryResponse toResponse(Inventory inventory) {
+    /** Full replacement like the rest of the adjust request: omitted minimum means 0, omitted maximum means none. */
+    private static void applyThresholds(Inventory inventory, InventoryAdjustRequest request) {
+        BigDecimal min = defaultIfNull(request.minThreshold(), BigDecimal.ZERO);
+        BigDecimal max = request.maxThreshold();
+        if (min.signum() < 0 || (max != null && max.signum() < 0)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Stock thresholds cannot be negative.");
+        }
+        if (max != null && max.compareTo(min) < 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Maximum stock must be at least the minimum.");
+        }
+        inventory.setMinThreshold(min);
+        inventory.setMaxThreshold(max);
+    }
+
+    static String stockLevel(Inventory inventory) {
+        BigDecimal min = inventory.getMinThreshold();
+        BigDecimal max = inventory.getMaxThreshold();
+        BigDecimal available = defaultIfNull(inventory.getAvailableQuantity(), BigDecimal.ZERO);
+        BigDecimal onHand = defaultIfNull(inventory.getQuantity(), BigDecimal.ZERO);
+        if (min != null && min.signum() > 0 && available.compareTo(min) < 0) {
+            return "low";
+        }
+        if (max != null && onHand.compareTo(max) > 0) {
+            return "over";
+        }
+        return "ok";
+    }
+
+    private InventoryResponse toResponse(Inventory inventory) {
+        String lotNo = inventory.getLotId() == null
+            ? null
+            : lotMasterRepository.findById(inventory.getLotId()).map(LotMaster::getLotNo).orElse(null);
+        return toResponse(inventory, lotNo);
+    }
+
+    private static InventoryResponse toResponse(Inventory inventory, String lotNo) {
         return new InventoryResponse(
             inventory.getInventoryId(),
             inventory.getProjectId(),
@@ -198,7 +302,13 @@ public class InventoryServiceImpl implements InventoryService {
             inventory.getReservedQuantity(),
             inventory.getAvailableQuantity(),
             inventory.getInventoryStatus(),
-            inventory.getLocation()
+            inventory.getLocation(),
+            inventory.getMinThreshold(),
+            inventory.getMaxThreshold(),
+            stockLevel(inventory),
+            inventory.getVersion(),
+            inventory.getLotId(),
+            lotNo
         );
     }
 

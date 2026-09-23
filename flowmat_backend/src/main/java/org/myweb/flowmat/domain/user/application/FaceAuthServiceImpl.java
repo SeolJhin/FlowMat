@@ -49,6 +49,7 @@ public class FaceAuthServiceImpl implements FaceAuthService {
     private final JwtProvider jwtProvider;
     private final ObjectMapper objectMapper;
     private final AuthRedisStore authRedisStore;
+    private final FaceFailureService faceFailureService;
 
     @Value("${face.aes-key:FlowMatFaceKey!!FlowMatFaceKey!!}")
     private String aesKeyRaw;
@@ -110,8 +111,7 @@ public class FaceAuthServiceImpl implements FaceAuthService {
             unlocked.stream()
                 .min(Comparator.comparingDouble(fd -> minDistance(incoming, fromJsonArray(fd.getDescriptor()))))
                 .ifPresent(fd -> {
-                    fd.recordFailure();
-                    faceDescriptorRepository.save(fd);
+                    faceFailureService.recordFailure(fd.getFaceId());
                 });
             throw new BusinessException(ErrorCode.FACE_NOT_RECOGNIZED);
         }
@@ -153,11 +153,10 @@ public class FaceAuthServiceImpl implements FaceAuthService {
     @Override
     @Transactional
     public UserTokenResponse selectAccount(String matchToken, String userId, String deviceId, String userAgent, String ip) {
-        List<String> userIds = authRedisStore.getFaceMatchUserIds(matchToken);
+        List<String> userIds = authRedisStore.consumeFaceMatchToken(matchToken);
         if (!userIds.contains(userId)) {
             throw new BusinessException(ErrorCode.FACE_NOT_RECOGNIZED);
         }
-        authRedisStore.consumeFaceMatchToken(matchToken);
 
         User user = userRepository.findByUserId(userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "User not found."));
@@ -190,8 +189,7 @@ public class FaceAuthServiceImpl implements FaceAuthService {
 
         FaceDistance best = sorted.get(0);
         if (best.distance() >= THRESHOLD) {
-            best.descriptor().recordFailure();
-            faceDescriptorRepository.save(best.descriptor());
+            faceFailureService.recordFailure(best.descriptor().getFaceId());
             throw new BusinessException(ErrorCode.FACE_NOT_RECOGNIZED);
         }
         if (sorted.size() > 1) {
@@ -314,7 +312,12 @@ public class FaceAuthServiceImpl implements FaceAuthService {
     private double[] toDoubleArray(String json) {
         try {
             List<Double> list = objectMapper.readValue(json, new TypeReference<List<Double>>() {});
+            if (list == null || list.size() != 128 || list.stream().anyMatch(value -> value == null || !Double.isFinite(value))) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Face descriptor must contain exactly 128 finite numbers.");
+            }
             return list.stream().mapToDouble(Double::doubleValue).toArray();
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Face descriptor payload is invalid.");
         }

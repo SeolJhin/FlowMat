@@ -60,6 +60,12 @@ public class WorkflowEditorDocumentService {
 
         WorkflowEditorDocument document = documentRepository.findById(workflow.getWorkflowId())
             .orElseGet(() -> newDocument(workflow, userId));
+        if (request.expectedVersion() != null && request.expectedVersion() != document.getVersion()) {
+            throw new BusinessException(
+                ErrorCode.CONFLICT,
+                "Editor document version " + document.getVersion() + " is current."
+            );
+        }
         document.setSchemaVersion(request.schemaVersion() == null ? 1 : request.schemaVersion());
         document.setCameraJson(toJsonOrDefault(request.camera()));
         document.setNextElementSeq(request.nextElementSeq() == null ? request.elements().size() + 1 : request.nextElementSeq());

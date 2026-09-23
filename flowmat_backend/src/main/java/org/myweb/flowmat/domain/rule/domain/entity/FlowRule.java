@@ -32,5 +32,6 @@ public class FlowRule extends CreatedUpdatedAuditEntity {
     @Column(name = "action_config", columnDefinition = "jsonb")
     private String actionConfig;
     private Integer priority;
+    @JdbcTypeCode(SqlTypes.CHAR)
     private String enabledYn;
 }

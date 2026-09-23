@@ -3,6 +3,8 @@ package org.myweb.flowmat.global.exception;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.myweb.flowmat.global.response.ApiResponse;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -33,14 +35,35 @@ public class GlobalExceptionHandler {
             .body(ApiResponse.error(resolveConstraintViolationMessage(e)));
     }
 
+    /** Two writers raced on a {@code @Version} entity; the loser should reload rather than see a 500. */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOptimisticLock(OptimisticLockingFailureException e) {
+        log.info("Optimistic lock conflict: {}", e.getMessage());
+        return ResponseEntity
+            .status(ErrorCode.CONFLICT.getStatus())
+            .body(ApiResponse.error(ErrorCode.CONFLICT.getMessage()));
+    }
+
+    /**
+     * A unique or check constraint rejected the write, e.g. the same requestId sent twice at once. Services validate
+     * first, so this is normally a race; retrying returns the stored result or a specific message.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataIntegrityViolation(DataIntegrityViolationException e) {
+        log.info("Constraint conflict: {}", e.getMostSpecificCause().getMessage());
+        return ResponseEntity
+            .status(ErrorCode.CONFLICT.getStatus())
+            .body(ApiResponse.error("This conflicts with a change that was just saved. Reload and try again."));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleException(Exception e) {
         log.error("Unhandled exception", e);
+        // Never echo unexpected exception messages: they can contain SQL, table names, or stack details.
+        // The request id in the log line links the client-visible error to the full cause.
         return ResponseEntity
             .status(ErrorCode.INTERNAL_ERROR.getStatus())
-            .body(ApiResponse.error(e.getMessage() != null && !e.getMessage().isBlank()
-                ? e.getMessage()
-                : ErrorCode.INTERNAL_ERROR.getMessage()));
+            .body(ApiResponse.error(ErrorCode.INTERNAL_ERROR.getMessage()));
     }
 
     private static String resolveBusinessMessage(BusinessException e) {

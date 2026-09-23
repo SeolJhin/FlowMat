@@ -3,6 +3,7 @@ package org.myweb.flowmat.domain.inventory.api;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.inventory.api.dto.request.InventoryReversalRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.request.InventoryTransactionCreateRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.response.InventoryTransactionResponse;
 import org.myweb.flowmat.domain.inventory.application.InventoryTransactionService;
@@ -42,5 +43,13 @@ public class InventoryTransactionController {
         @PathVariable("inventoryTransactionId") String inventoryTransactionId
     ) {
         return ApiResponse.ok(inventoryTransactionService.getTransaction(inventoryTransactionId));
+    }
+
+    @PostMapping("/{inventoryTransactionId}/reversal")
+    public ApiResponse<InventoryTransactionResponse> reverseTransaction(
+        @PathVariable("inventoryTransactionId") String inventoryTransactionId,
+        @Valid @RequestBody InventoryReversalRequest request
+    ) {
+        return ApiResponse.ok(inventoryTransactionService.reverseTransaction(inventoryTransactionId, request));
     }
 }

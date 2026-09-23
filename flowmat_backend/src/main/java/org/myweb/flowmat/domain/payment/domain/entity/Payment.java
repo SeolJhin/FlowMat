@@ -13,6 +13,8 @@ import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
 import org.myweb.flowmat.global.common.BaseTimeEntity;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Getter
 @Setter
@@ -57,6 +59,7 @@ public class Payment extends BaseTimeEntity {
     private BigDecimal finalAmount;
 
     // ISO 4217
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "currency", nullable = false, length = 3)
     private String currency = "KRW";
 

@@ -1,18 +1,328 @@
+import { useMemo, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { useItemsQuery } from '../../../entities/catalog/api/useItemsQuery'
+import { useProductionRunQuery } from '../../../entities/production/api/useProductionRunQuery'
+import { useProductionRunItemsQuery } from '../../../entities/production/api/useProductionRunItemsQuery'
+import { useRecordRunItemMutation } from '../../../entities/production/api/useRecordRunItemMutation'
+import { useFinishProductionRunMutation } from '../../../entities/production/api/useFinishProductionRunMutation'
+import { useInventoriesQuery } from '../../../entities/inventory/api/useInventoriesQuery'
+import { useUnitsQuery } from '../../../entities/catalog/api/useUnitsQuery'
+import { errorMessage } from '../../../shared/lib/errorMessage'
+import { RunStatusBadge, formatQty, isRunOpen } from './runDisplay'
+
+const cell = { padding: '8px 6px' } as const
+
+const EMPTY_ITEM_FORM = {
+  itemId: '',
+  direction: 'input' as 'input' | 'output',
+  plannedQty: '',
+  actualQty: '',
+  unit: 'ea',
+  inventoryId: '',
+}
 
 export function RunDetailRoute() {
   const { projectId = '', runId = '' } = useParams<{ projectId: string; runId: string }>()
 
+  const runQuery = useProductionRunQuery(runId)
+  const runItemsQuery = useProductionRunItemsQuery(runId)
+  const itemsQuery = useItemsQuery(projectId)
+  const allUnits = useUnitsQuery(true).data ?? []
+  const unitCodeById = new Map(allUnits.map((unit) => [unit.unitId, unit.unitCode]))
+
+  /** Selecting an item pre-fills its catalog unit; items with a unit only accept units of the same type. */
+  function selectItem(itemId: string) {
+    const item = (itemsQuery.data ?? []).find((candidate) => candidate.itemId === itemId)
+    const unitCode = item?.unitId ? unitCodeById.get(item.unitId) : undefined
+    setItemForm((f) => ({ ...f, itemId, inventoryId: '', unit: unitCode ?? f.unit }))
+  }
+  const inventoriesQuery = useInventoriesQuery(projectId)
+
+  const recordMutation = useRecordRunItemMutation(runId, projectId)
+  const finishMutation = useFinishProductionRunMutation()
+
+  const [itemForm, setItemForm] = useState(EMPTY_ITEM_FORM)
+  const [actualOutputQty, setActualOutputQty] = useState('')
+
+  const run = runQuery.data
+  const runItems = runItemsQuery.data ?? []
+  const inventories = inventoriesQuery.data ?? []
+  const itemLabel = useMemo(
+    () => new Map((itemsQuery.data ?? []).map((item) => [item.itemId, `${item.itemCode} · ${item.itemName}`])),
+    [itemsQuery.data],
+  )
+  const inventoryLabel = useMemo(
+    () => new Map(inventories.map((inv) => [inv.inventoryId, inv.location ?? inv.inventoryId])),
+    [inventories],
+  )
+  const inventoriesForItem = inventories.filter((inv) => inv.itemId === itemForm.itemId)
+  const selectedItemUnit = allUnits.find(
+    (unit) => unit.unitId === (itemsQuery.data ?? []).find((item) => item.itemId === itemForm.itemId)?.unitId,
+  )
+  const compatibleUnits = selectedItemUnit
+    ? allUnits.filter(
+        (unit) =>
+          unit.unitType === selectedItemUnit.unitType && (unit.activeYn === 'Y' || unit.unitId === selectedItemUnit.unitId),
+      )
+    : []
+
+  const totals = useMemo(() => {
+    const sum = (direction: string) =>
+      runItems
+        .filter((item) => item.direction === direction)
+        .reduce((acc, item) => acc + Number(item.actualQty ?? item.plannedQty ?? 0), 0)
+    return { input: sum('input'), output: sum('output') }
+  }, [runItems])
+
+  async function handleRecord(e: FormEvent) {
+    e.preventDefault()
+    try {
+      await recordMutation.mutateAsync({
+        productionRunId: runId,
+        itemId: itemForm.itemId,
+        direction: itemForm.direction,
+        plannedQty: Number(itemForm.plannedQty),
+        actualQty: itemForm.actualQty === '' ? undefined : Number(itemForm.actualQty),
+        unit: itemForm.unit.trim(),
+        inventoryId: itemForm.inventoryId || undefined,
+      })
+      setItemForm((f) => ({ ...EMPTY_ITEM_FORM, direction: f.direction, unit: f.unit }))
+    } catch {
+      // Surfaced through the mutation error state below the form (includes rule-engine rejections).
+    }
+  }
+
+  function handleFinish(e: FormEvent) {
+    e.preventDefault()
+    if (!window.confirm('Finish this run? Items can no longer be recorded afterwards.')) return
+    finishMutation.mutate({
+      productionRunId: runId,
+      actualOutputQty: actualOutputQty === '' ? undefined : Number(actualOutputQty),
+    })
+  }
+
+  const backLink = run ? `/projects/${projectId}/runs?workflowId=${run.workflowId}` : `/projects/${projectId}/runs`
+
   return (
-    <div style={{ padding: 32 }}>
-      <Link to={`/projects/${projectId}/runs`} style={{ fontSize: 13, color: 'var(--accent)' }}>
-        Back to runs
-      </Link>
-      <h1>Run Detail</h1>
-      <p style={{ color: 'var(--text)', opacity: 0.6 }}>
-        Run ID: <code>{runId}</code>
-      </p>
-      <p className="inspector-hint">This page is scheduled for a future sprint.</p>
+    <div style={{ padding: 32, maxWidth: 1120, margin: '0 auto' }}>
+      <Link to={backLink} style={{ fontSize: 13, color: 'var(--accent)' }}>Back to runs</Link>
+
+      {runQuery.isLoading && <p>Loading run...</p>}
+      {runQuery.isError && <p style={{ color: '#dc2626' }}>{errorMessage(runQuery.error, 'Failed to load run.')}</p>}
+
+      {run && (
+        <>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <code>{run.runNumber}</code>
+            <RunStatusBadge status={run.runStatus} />
+          </h1>
+
+          <dl
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+              gap: 12,
+              margin: '0 0 24px',
+              fontSize: 13,
+            }}
+          >
+            {[
+              ['Type', run.runType ?? '-'],
+              ['Target item', run.targetItemId ? itemLabel.get(run.targetItemId) ?? run.targetItemId : '-'],
+              ['Planned output', formatQty(run.plannedOutputQty)],
+              ['Actual output', formatQty(run.actualOutputQty)],
+              ['Recorded inputs', formatQty(totals.input)],
+              ['Recorded outputs', formatQty(totals.output)],
+            ].map(([label, value]) => (
+              <div key={label} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+                <dt style={{ fontSize: 11, opacity: 0.6 }}>{label}</dt>
+                <dd style={{ margin: 0, fontWeight: 600 }}>{value}</dd>
+              </div>
+            ))}
+          </dl>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 24, alignItems: 'start' }}>
+            <section>
+              <h3 style={{ marginTop: 0 }}>Recorded items</h3>
+              {runItemsQuery.isLoading && <p>Loading items...</p>}
+              {runItemsQuery.isError && (
+                <p style={{ color: '#dc2626' }}>{errorMessage(runItemsQuery.error, 'Failed to load run items.')}</p>
+              )}
+              {!runItemsQuery.isLoading && runItems.length === 0 && (
+                <p className="inspector-hint">No material movements recorded yet.</p>
+              )}
+              {runItems.length > 0 && (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left' }}>
+                      <th style={cell}>Direction</th>
+                      <th style={cell}>Item</th>
+                      <th style={{ ...cell, textAlign: 'right' }}>Planned</th>
+                      <th style={{ ...cell, textAlign: 'right' }}>Actual</th>
+                      <th style={cell}>Unit</th>
+                      <th style={cell}>Inventory</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {runItems.map((item) => (
+                      <tr key={item.productionRunItemId} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ ...cell, color: item.direction === 'input' ? '#0369a1' : '#047857' }}>
+                          {item.direction === 'input' ? '↓ input' : '↑ output'}
+                        </td>
+                        <td style={cell}>{itemLabel.get(item.itemId) ?? item.itemId}</td>
+                        <td style={{ ...cell, textAlign: 'right' }}>{formatQty(item.plannedQty)}</td>
+                        <td style={{ ...cell, textAlign: 'right' }}>{formatQty(item.actualQty)}</td>
+                        <td style={{ ...cell, opacity: 0.7 }}>{item.unit}</td>
+                        <td style={{ ...cell, opacity: 0.7 }}>
+                          {item.inventoryId ? inventoryLabel.get(item.inventoryId) ?? item.inventoryId : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
+
+            <div style={{ display: 'grid', gap: 16 }}>
+              {isRunOpen(run.runStatus) ? (
+                <>
+                  <section style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 18 }}>
+                    <h3 style={{ marginTop: 0 }}>Record Item</h3>
+                    <form onSubmit={(e) => void handleRecord(e)} style={{ display: 'grid', gap: 10 }}>
+                      <div style={{ display: 'flex', gap: 12 }}>
+                        {(['input', 'output'] as const).map((direction) => (
+                          <label key={direction} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                            <input
+                              type="radio"
+                              name="direction"
+                              checked={itemForm.direction === direction}
+                              onChange={() => setItemForm((f) => ({ ...f, direction }))}
+                            />
+                            {direction}
+                          </label>
+                        ))}
+                      </div>
+                      <label style={{ display: 'grid', gap: 4 }}>
+                        <span>Item *</span>
+                        <select
+                          value={itemForm.itemId}
+                          onChange={(e) => selectItem(e.target.value)}
+                          required
+                        >
+                          <option value="" disabled>Select item</option>
+                          {(itemsQuery.data ?? []).map((item) => (
+                            <option key={item.itemId} value={item.itemId}>{item.itemCode} · {item.itemName}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 70px', gap: 8 }}>
+                        <label style={{ display: 'grid', gap: 4 }}>
+                          <span>Planned *</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={itemForm.plannedQty}
+                            onChange={(e) => setItemForm((f) => ({ ...f, plannedQty: e.target.value }))}
+                            required
+                          />
+                        </label>
+                        <label style={{ display: 'grid', gap: 4 }}>
+                          <span>Actual</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={itemForm.actualQty}
+                            onChange={(e) => setItemForm((f) => ({ ...f, actualQty: e.target.value }))}
+                          />
+                        </label>
+                        <label style={{ display: 'grid', gap: 4 }}>
+                          <span>Unit *</span>
+                          {compatibleUnits.length > 0 ? (
+                            // The server converts to the item's unit and rejects other unit types.
+                            <select
+                              value={itemForm.unit}
+                              onChange={(e) => setItemForm((f) => ({ ...f, unit: e.target.value }))}
+                              required
+                            >
+                              {compatibleUnits.map((unit) => (
+                                <option key={unit.unitId} value={unit.unitCode}>{unit.unitCode}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              value={itemForm.unit}
+                              onChange={(e) => setItemForm((f) => ({ ...f, unit: e.target.value }))}
+                              required
+                            />
+                          )}
+                        </label>
+                      </div>
+                      <label style={{ display: 'grid', gap: 4 }}>
+                        <span>Inventory</span>
+                        <select
+                          value={itemForm.inventoryId}
+                          onChange={(e) => setItemForm((f) => ({ ...f, inventoryId: e.target.value }))}
+                          disabled={!itemForm.itemId || inventoriesForItem.length === 0}
+                        >
+                          <option value="">Don&apos;t adjust stock</option>
+                          {inventoriesForItem.map((inv) => (
+                            <option key={inv.inventoryId} value={inv.inventoryId}>
+                              {inv.location ?? inv.inventoryId} (available {formatQty(inv.availableQuantity)})
+                            </option>
+                          ))}
+                        </select>
+                        {itemForm.inventoryId && (
+                          <span style={{ fontSize: 11, opacity: 0.6 }}>
+                            Stock will be {itemForm.direction === 'input' ? 'decreased' : 'increased'} by the actual
+                            (or planned) quantity.
+                          </span>
+                        )}
+                      </label>
+                      <button type="submit" disabled={recordMutation.isPending}>
+                        {recordMutation.isPending ? 'Recording...' : 'Record'}
+                      </button>
+                      {recordMutation.isError && (
+                        <p style={{ color: '#dc2626', fontSize: 12, margin: 0 }}>
+                          {errorMessage(recordMutation.error, 'Failed to record item.')}
+                        </p>
+                      )}
+                    </form>
+                  </section>
+
+                  <section style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 18 }}>
+                    <h3 style={{ marginTop: 0 }}>Finish Run</h3>
+                    <form onSubmit={handleFinish} style={{ display: 'grid', gap: 10 }}>
+                      <label style={{ display: 'grid', gap: 4 }}>
+                        <span>Actual output qty</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={actualOutputQty}
+                          placeholder={totals.output > 0 ? String(totals.output) : formatQty(run.plannedOutputQty)}
+                          onChange={(e) => setActualOutputQty(e.target.value)}
+                        />
+                      </label>
+                      <button type="submit" disabled={finishMutation.isPending}>
+                        {finishMutation.isPending ? 'Finishing...' : 'Finish'}
+                      </button>
+                      {finishMutation.isError && (
+                        <p style={{ color: '#dc2626', fontSize: 12, margin: 0 }}>
+                          {errorMessage(finishMutation.error, 'Failed to finish run.')}
+                        </p>
+                      )}
+                    </form>
+                  </section>
+                </>
+              ) : (
+                <p className="inspector-hint">This run is {run.runStatus}; no further items can be recorded.</p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

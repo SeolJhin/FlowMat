@@ -31,11 +31,10 @@ public class OAuthExchangeStore {
 
     public OAuthExchangeEntry consume(String code) {
         try {
-            String payload = redisTemplate.opsForValue().get(key(code));
+            String payload = redisTemplate.opsForValue().getAndDelete(key(code));
             if (payload == null || payload.isBlank()) {
                 return null;
             }
-            redisTemplate.delete(key(code));
             return deserialize(payload);
         } catch (DataAccessException e) {
             throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE);

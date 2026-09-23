@@ -9,6 +9,8 @@ export interface UpdateItemInput {
   itemName?: string
   itemType?: string
   resourceCategory?: string
+  /** Empty string clears the unit. */
+  unitId?: string
   itemStatus?: string
 }
 

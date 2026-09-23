@@ -10,6 +10,10 @@ public record ProductionRunStartRequest(
     String targetItemId,
     @NotNull BigDecimal plannedOutputQty,
     String runType,
-    String startedBy
+    String startedBy,
+    /** Optional; the order must be approved or in progress, and supplies the target item when none is given. */
+    String workOrderId,
+    /** Optional; an approved BOM revision whose requirements are frozen onto the run. Defaults to the work order's BOM. */
+    String bomId
 ) {
 }

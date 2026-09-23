@@ -33,4 +33,14 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(response.getBody()).isEqualTo(ApiResponse.error("must not be blank"));
     }
+
+    @Test
+    void handleExceptionDoesNotLeakInternalDetails() {
+        ResponseEntity<ApiResponse<Void>> response = handler.handleException(
+            new IllegalStateException("JDBC exception executing SQL [select r1_0.updated_at from roles r1_0]")
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(response.getBody()).isEqualTo(ApiResponse.error(ErrorCode.INTERNAL_ERROR.getMessage()));
+    }
 }

@@ -50,6 +50,7 @@ public class CanvasAnnotation extends CreatedUpdatedAuditEntity {
     private String zIndex;
 
     private String groupId;
+    @JdbcTypeCode(SqlTypes.CHAR)
     private String lockedYn = "N";
 
     @Column(name = "version")

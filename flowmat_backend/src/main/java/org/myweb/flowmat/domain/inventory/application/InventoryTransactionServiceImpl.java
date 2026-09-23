@@ -1,17 +1,22 @@
 package org.myweb.flowmat.domain.inventory.application;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.inventory.api.dto.request.InventoryReversalRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.request.InventoryTransactionCreateRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.response.InventoryTransactionResponse;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.domain.entity.InventoryTransaction;
+import org.myweb.flowmat.domain.inventory.domain.enums.InventoryTransactionType;
 import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.domain.inventory.repository.InventoryTransactionRepository;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
-import org.myweb.flowmat.global.id.IdGenerator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,20 +26,28 @@ import org.springframework.transaction.annotation.Transactional;
 public class InventoryTransactionServiceImpl implements InventoryTransactionService {
 
     private static final String NOT_DELETED = "N";
+    private static final int MAX_SCALE = 4;
+    private static final String EXTERNAL_TYPES = Arrays.stream(InventoryTransactionType.values())
+        .filter(InventoryTransactionType::external)
+        .map(InventoryTransactionType::code)
+        .collect(Collectors.joining(", "));
 
     private final InventoryTransactionRepository inventoryTransactionRepository;
     private final InventoryRepository inventoryRepository;
-    private final IdGenerator idGenerator;
+    private final InventoryCommandService inventoryCommandService;
+    private final ProjectAccessService projectAccessService;
 
     @Override
     public List<InventoryTransactionResponse> listTransactions(String projectId, String inventoryId) {
         if (inventoryId != null && !inventoryId.isBlank()) {
-            findActiveInventory(inventoryId);
+            Inventory inventory = findActiveInventory(inventoryId);
+            projectAccessService.requireProjectReadAccess(inventory.getProjectId());
             return inventoryTransactionRepository.findAllByInventoryIdOrderByCreatedAtDesc(inventoryId).stream()
                 .map(InventoryTransactionServiceImpl::toResponse)
                 .toList();
         }
         if (projectId != null && !projectId.isBlank()) {
+            projectAccessService.requireProjectReadAccess(projectId);
             return inventoryTransactionRepository.findAllByProjectIdOrderByCreatedAtDesc(projectId).stream()
                 .map(InventoryTransactionServiceImpl::toResponse)
                 .toList();
@@ -46,80 +59,142 @@ public class InventoryTransactionServiceImpl implements InventoryTransactionServ
     @Transactional
     public InventoryTransactionResponse createTransaction(InventoryTransactionCreateRequest request) {
         Inventory inventory = findActiveInventory(request.inventoryId());
-        return toResponse(saveTransaction(
-            inventory,
-            request.transactionType(),
-            request.quantityDelta(),
-            defaultIfNull(request.reservedDelta()),
-            defaultIfNull(request.availableDelta()),
+        projectAccessService.requireProjectWriteAccess(inventory.getProjectId());
+        String actor = projectAccessService.requireCurrentUserId();
+
+        InventoryTransactionType type = InventoryTransactionType.fromCode(request.transactionType())
+            .filter(InventoryTransactionType::external)
+            .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST,
+                "Unknown transaction type '" + request.transactionType() + "'. Use one of: " + EXTERNAL_TYPES + "."));
+        BigDecimal[] deltas = deltas(type, request.quantity(), request.direction());
+        String requestId = request.requestId().trim();
+
+        InventoryTransaction previous = inventoryTransactionRepository
+            .findByProjectIdAndRequestId(inventory.getProjectId(), requestId).orElse(null);
+        if (previous != null) {
+            if (sameMovement(previous, inventory.getInventoryId(), type, deltas, request.referenceType(), request.referenceId())) {
+                return toResponse(previous);
+            }
+            throw new BusinessException(ErrorCode.CONFLICT,
+                "requestId '" + requestId + "' was already used for a different stock movement.");
+        }
+
+        return toResponse(inventoryCommandService.apply(new InventoryMovement(
+            inventory.getInventoryId(),
+            type,
+            deltas[0],
+            deltas[1],
             request.referenceType(),
             request.referenceId(),
             request.note(),
-            request.createdBy()
-        ));
+            requestId,
+            actor
+        )));
     }
 
     @Override
     public InventoryTransactionResponse getTransaction(String inventoryTransactionId) {
-        return toResponse(inventoryTransactionRepository.findByInventoryTransactionId(inventoryTransactionId)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND)));
+        InventoryTransaction transaction = findTransaction(inventoryTransactionId);
+        projectAccessService.requireProjectReadAccess(transaction.getProjectId());
+        return toResponse(transaction);
     }
 
     @Override
     @Transactional
-    public InventoryTransactionResponse recordSystemTransaction(
-        Inventory inventory,
-        String transactionType,
-        BigDecimal quantityDelta,
-        BigDecimal reservedDelta,
-        BigDecimal availableDelta,
-        String referenceType,
-        String referenceId,
-        String note,
-        String createdBy
-    ) {
-        return toResponse(saveTransaction(
-            inventory,
-            transactionType,
-            defaultIfNull(quantityDelta),
-            defaultIfNull(reservedDelta),
-            defaultIfNull(availableDelta),
-            referenceType,
-            referenceId,
-            note,
-            createdBy
-        ));
+    public InventoryTransactionResponse reverseTransaction(String inventoryTransactionId, InventoryReversalRequest request) {
+        InventoryTransaction original = findTransaction(inventoryTransactionId);
+        projectAccessService.requireProjectWriteAccess(original.getProjectId());
+        String actor = projectAccessService.requireCurrentUserId();
+
+        boolean reversible = InventoryTransactionType.fromCode(original.getTransactionType())
+            .map(InventoryTransactionType::reversible)
+            .orElse(false);
+        if (!reversible) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "A " + original.getTransactionType() + " transaction cannot be reversed.");
+        }
+
+        String requestId = request.requestId().trim();
+        InventoryTransaction previous = inventoryTransactionRepository
+            .findByProjectIdAndRequestId(original.getProjectId(), requestId).orElse(null);
+        if (previous != null) {
+            if (InventoryTransactionType.REVERSAL.code().equals(previous.getTransactionType())
+                && original.getInventoryTransactionId().equals(previous.getReferenceId())) {
+                return toResponse(previous);
+            }
+            throw new BusinessException(ErrorCode.CONFLICT,
+                "requestId '" + requestId + "' was already used for a different stock movement.");
+        }
+        inventoryTransactionRepository
+            .findByReferenceIdAndTransactionType(original.getInventoryTransactionId(), InventoryTransactionType.REVERSAL.code())
+            .ifPresent(existing -> {
+                throw new BusinessException(ErrorCode.CONFLICT,
+                    "This transaction was already reversed by " + existing.getCreatedBy() + ".");
+            });
+
+        // The reversal is checked against today's stock: stock already used cannot be un-received.
+        return toResponse(inventoryCommandService.apply(new InventoryMovement(
+            original.getInventoryId(),
+            InventoryTransactionType.REVERSAL,
+            negate(original.getQuantityDelta()),
+            negate(original.getReservedDelta()),
+            "inventory_transaction",
+            original.getInventoryTransactionId(),
+            request.reason(),
+            requestId,
+            actor
+        )));
     }
 
-    private InventoryTransaction saveTransaction(
-        Inventory inventory,
-        String transactionType,
-        BigDecimal quantityDelta,
-        BigDecimal reservedDelta,
-        BigDecimal availableDelta,
+    /** Signed {quantity, reserved} deltas for a positive requested quantity. */
+    static BigDecimal[] deltas(InventoryTransactionType type, BigDecimal quantity, String direction) {
+        if (type.changesStatusOnly()) {
+            return new BigDecimal[] {BigDecimal.ZERO, BigDecimal.ZERO};
+        }
+        if (quantity == null || quantity.signum() <= 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "quantity must be greater than 0.");
+        }
+        if (quantity.stripTrailingZeros().scale() > MAX_SCALE) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Quantities have at most " + MAX_SCALE + " decimal places.");
+        }
+        if (type == InventoryTransactionType.ADJUSTMENT) {
+            String normalized = direction == null ? "" : direction.trim().toLowerCase();
+            return switch (normalized) {
+                case "increase" -> new BigDecimal[] {quantity, BigDecimal.ZERO};
+                case "decrease" -> new BigDecimal[] {quantity.negate(), BigDecimal.ZERO};
+                default -> throw new BusinessException(ErrorCode.BAD_REQUEST,
+                    "An adjustment needs direction 'increase' or 'decrease'.");
+            };
+        }
+        return new BigDecimal[] {
+            quantity.multiply(BigDecimal.valueOf(type.quantitySign())),
+            quantity.multiply(BigDecimal.valueOf(type.reservedSign()))
+        };
+    }
+
+    private static boolean sameMovement(
+        InventoryTransaction previous,
+        String inventoryId,
+        InventoryTransactionType type,
+        BigDecimal[] deltas,
         String referenceType,
-        String referenceId,
-        String note,
-        String createdBy
+        String referenceId
     ) {
-        InventoryTransaction transaction = new InventoryTransaction();
-        transaction.setInventoryTransactionId(idGenerator.generate());
-        transaction.setInventoryId(inventory.getInventoryId());
-        transaction.setProjectId(inventory.getProjectId());
-        transaction.setItemId(inventory.getItemId());
-        transaction.setLotId(inventory.getLotId());
-        transaction.setTransactionType(transactionType);
-        transaction.setQuantityDelta(quantityDelta);
-        transaction.setReservedDelta(reservedDelta);
-        transaction.setAvailableDelta(availableDelta);
-        transaction.setQuantityAfter(inventory.getQuantity());
-        transaction.setReservedAfter(inventory.getReservedQuantity());
-        transaction.setAvailableAfter(inventory.getAvailableQuantity());
-        transaction.setReferenceType(trimToNull(referenceType));
-        transaction.setReferenceId(trimToNull(referenceId));
-        transaction.setNote(trimToNull(note));
-        transaction.setCreatedBy(trimToNull(createdBy));
-        return inventoryTransactionRepository.save(transaction);
+        return previous.getInventoryId().equals(inventoryId)
+            && type.code().equals(previous.getTransactionType())
+            && sameAmount(previous.getQuantityDelta(), deltas[0])
+            && sameAmount(previous.getReservedDelta(), deltas[1])
+            && Objects.equals(previous.getReferenceType(), trimToNull(referenceType))
+            && Objects.equals(previous.getReferenceId(), trimToNull(referenceId));
+    }
+
+    private static boolean sameAmount(BigDecimal stored, BigDecimal requested) {
+        return (stored == null ? BigDecimal.ZERO : stored).compareTo(requested) == 0;
+    }
+
+    private InventoryTransaction findTransaction(String inventoryTransactionId) {
+        return inventoryTransactionRepository.findByInventoryTransactionId(inventoryTransactionId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
     private Inventory findActiveInventory(String inventoryId) {
@@ -127,7 +202,7 @@ public class InventoryTransactionServiceImpl implements InventoryTransactionServ
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
-    private static InventoryTransactionResponse toResponse(InventoryTransaction transaction) {
+    static InventoryTransactionResponse toResponse(InventoryTransaction transaction) {
         return new InventoryTransactionResponse(
             transaction.getInventoryTransactionId(),
             transaction.getInventoryId(),
@@ -144,12 +219,14 @@ public class InventoryTransactionServiceImpl implements InventoryTransactionServ
             transaction.getReferenceId(),
             transaction.getNote(),
             transaction.getCreatedBy(),
-            transaction.getCreatedAt()
+            transaction.getCreatedAt(),
+            transaction.getLotId(),
+            transaction.getRequestId()
         );
     }
 
-    private static BigDecimal defaultIfNull(BigDecimal value) {
-        return value != null ? value : BigDecimal.ZERO;
+    private static BigDecimal negate(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value.negate();
     }
 
     private static String trimToNull(String value) {

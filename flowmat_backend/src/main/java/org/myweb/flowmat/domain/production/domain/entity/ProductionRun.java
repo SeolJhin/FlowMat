@@ -21,6 +21,10 @@ public class ProductionRun extends CreatedUpdatedAuditEntity {
     private String workflowId;
     private String workOrderId;
     private String bomId;
+
+    /** BOM snapshot fixed at start: which revision, and its base quantity at that moment. */
+    private Integer bomVersion;
+    private BigDecimal bomBaseQuantity;
     private String runNumber;
     private String runType;
     private String runStatus;

@@ -11,6 +11,12 @@ public record InventoryAdjustRequest(
     BigDecimal reservedQuantity,
     BigDecimal availableQuantity,
     String location,
-    String inventoryStatus
+    String inventoryStatus,
+    BigDecimal minThreshold,
+    BigDecimal maxThreshold,
+    /** Version the client read; when given and stale, the adjustment is rejected with 409 instead of overwriting. */
+    Long expectedVersion,
+    /** Required on create for LOT-tracked items, forbidden otherwise; a stock record never changes LOT. */
+    String lotId
 ) {
 }

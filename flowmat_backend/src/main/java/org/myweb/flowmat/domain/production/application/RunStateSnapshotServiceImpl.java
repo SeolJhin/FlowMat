@@ -8,6 +8,7 @@ import org.myweb.flowmat.domain.production.domain.entity.ProductionRun;
 import org.myweb.flowmat.domain.production.domain.entity.RunStateSnapshot;
 import org.myweb.flowmat.domain.production.repository.ProductionRunRepository;
 import org.myweb.flowmat.domain.production.repository.RunStateSnapshotRepository;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
@@ -23,11 +24,13 @@ public class RunStateSnapshotServiceImpl implements RunStateSnapshotService {
 
     private final RunStateSnapshotRepository runStateSnapshotRepository;
     private final ProductionRunRepository productionRunRepository;
+    private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
 
     @Override
     public List<RunStateSnapshotResponse> listSnapshots(String productionRunId) {
-        findActiveRun(productionRunId);
+        ProductionRun run = findActiveRun(productionRunId);
+        projectAccessService.requireProjectReadAccess(run.getProjectId());
         return runStateSnapshotRepository.findAllByProductionRunIdOrderByCreatedAtDesc(productionRunId).stream()
             .map(RunStateSnapshotServiceImpl::toResponse)
             .toList();
@@ -37,6 +40,7 @@ public class RunStateSnapshotServiceImpl implements RunStateSnapshotService {
     @Transactional
     public RunStateSnapshotResponse createSnapshot(RunStateSnapshotCreateRequest request) {
         ProductionRun run = findActiveRun(request.productionRunId());
+        projectAccessService.requireProjectWriteAccess(run.getProjectId());
 
         RunStateSnapshot snapshot = new RunStateSnapshot();
         snapshot.setRunStateSnapshotId(idGenerator.generate());
@@ -45,14 +49,16 @@ public class RunStateSnapshotServiceImpl implements RunStateSnapshotService {
         snapshot.setSnapshotType(defaultIfBlank(request.snapshotType(), "manual"));
         snapshot.setSnapshotData(request.snapshotData().trim());
         snapshot.setNote(trimToNull(request.note()));
-        snapshot.setCreatedBy(trimToNull(request.createdBy()));
+        snapshot.setCreatedBy(projectAccessService.requireCurrentUserId());
         return toResponse(runStateSnapshotRepository.save(snapshot));
     }
 
     @Override
     public RunStateSnapshotResponse getSnapshot(String runStateSnapshotId) {
-        return toResponse(runStateSnapshotRepository.findByRunStateSnapshotId(runStateSnapshotId)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND)));
+        RunStateSnapshot snapshot = runStateSnapshotRepository.findByRunStateSnapshotId(runStateSnapshotId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        projectAccessService.requireProjectReadAccess(findActiveRun(snapshot.getProductionRunId()).getProjectId());
+        return toResponse(snapshot);
     }
 
     private ProductionRun findActiveRun(String productionRunId) {

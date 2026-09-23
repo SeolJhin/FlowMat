@@ -1,5 +1,6 @@
 package org.myweb.flowmat.domain.production.repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.myweb.flowmat.domain.production.domain.entity.ProductionRun;
@@ -10,4 +11,6 @@ public interface ProductionRunRepository extends JpaRepository<ProductionRun, St
     List<ProductionRun> findAllByWorkflowIdAndDeletedYnOrderByCreatedAtDesc(String workflowId, String deletedYn);
 
     Optional<ProductionRun> findByProductionRunIdAndDeletedYn(String productionRunId, String deletedYn);
+
+    List<ProductionRun> findAllByWorkOrderIdInAndDeletedYn(Collection<String> workOrderIds, String deletedYn);
 }

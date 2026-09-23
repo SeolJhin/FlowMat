@@ -22,6 +22,18 @@ export interface UserDto {
 
 export interface UserPermissionDto {
   canManageUsers: boolean
+  canManageTemplates: boolean
+  canManageMasterData: boolean
+}
+
+export interface UnitDto {
+  unitId: string
+  unitCode: string
+  unitName: string
+  unitType: string
+  baseUnitCode: string | null
+  conversionRate: number
+  activeYn: string
 }
 
 export interface ProductionRunDto {
@@ -34,6 +46,93 @@ export interface ProductionRunDto {
   targetItemId: string | null
   plannedOutputQty: number
   actualOutputQty: number | null
+  workOrderId: string | null
+}
+
+export type WorkOrderStatus = 'draft' | 'approved' | 'in_progress' | 'completed' | 'cancelled'
+
+export interface WorkOrderDto {
+  workOrderId: string
+  projectId: string
+  workflowId: string | null
+  workOrderNumber: string
+  workOrderTitle: string
+  workOrderStatus: WorkOrderStatus
+  priority: string
+  targetItemId: string | null
+  targetQuantity: number | null
+  plannedStartAt: string | null
+  plannedEndAt: string | null
+  actualStartAt: string | null
+  actualEndAt: string | null
+  instruction: string | null
+  assignedTo: string | null
+  approvedBy: string | null
+  approvedAt: string | null
+  producedQuantity: number
+  runCount: number
+}
+
+export interface ProductionRunItemDto {
+  productionRunItemId: string
+  productionRunId: string
+  processId: string | null
+  processIoId: string | null
+  inventoryId: string | null
+  itemId: string
+  direction: string
+  plannedQty: number
+  actualQty: number | null
+  unit: string
+}
+
+export interface InventoryDto {
+  inventoryId: string
+  projectId: string
+  itemId: string
+  quantity: number
+  reservedQuantity: number
+  availableQuantity: number
+  inventoryStatus: string
+  location: string | null
+  minThreshold: number | null
+  maxThreshold: number | null
+  stockLevel: 'low' | 'ok' | 'over'
+  /** Optimistic-lock version; send it back as expectedVersion when adjusting. */
+  version: number | null
+}
+
+export interface ProjectInvitePreviewDto {
+  projectName: string
+  projectRole: string
+  inviterName: string | null
+  invitedEmailMasked: string | null
+  inviteStatus: string
+  expiredAt: string | null
+  expired: boolean
+  addressedToCurrentUser: boolean
+}
+
+export interface InventoryTransactionDto {
+  inventoryTransactionId: string
+  inventoryId: string
+  projectId: string
+  itemId: string
+  transactionType: string
+  quantityDelta: number
+  reservedDelta: number
+  availableDelta: number
+  quantityAfter: number
+  reservedAfter: number
+  availableAfter: number
+  referenceType: string | null
+  referenceId: string | null
+  note: string | null
+  createdBy: string | null
+  createdAt: string | null
+  lotId: string | null
+  /** Idempotency key sent with the movement; null for rows written before V17. */
+  requestId: string | null
 }
 
 export interface ProjectSummaryDto {

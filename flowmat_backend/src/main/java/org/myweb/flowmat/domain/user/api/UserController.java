@@ -42,7 +42,9 @@ public class UserController {
     public ApiResponse<UserPermissionResponse> myPermissions(@AuthenticationPrincipal AuthUser authUser) {
         requireAuth(authUser);
         return ApiResponse.ok(new UserPermissionResponse(
-            permissionService.hasPermission(SystemPermission.USER_MANAGE)
+            permissionService.hasPermission(SystemPermission.USER_MANAGE),
+            permissionService.hasPermission(SystemPermission.TEMPLATE_MANAGE),
+            permissionService.hasPermission(SystemPermission.MASTER_DATA_MANAGE)
         ));
     }
 

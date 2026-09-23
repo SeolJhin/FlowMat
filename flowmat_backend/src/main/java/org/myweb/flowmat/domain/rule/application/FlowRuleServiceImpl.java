@@ -36,6 +36,7 @@ public class FlowRuleServiceImpl implements FlowRuleService {
     private final FlowRuleRepository flowRuleRepository;
     private final IdGenerator idGenerator;
     private final ProjectAccessService projectAccessService;
+    private final FlowRuleExpressionEvaluator expressionEvaluator;
 
     @Override
     public List<FlowRuleResponse> listRules(String projectId, String targetType, String targetId) {
@@ -86,6 +87,7 @@ public class FlowRuleServiceImpl implements FlowRuleService {
         rule.setPriority(request.priority() != null ? request.priority() : 0);
         rule.setEnabledYn(normalizeYn(request.enabledYn()));
         rule.setDeletedYn(NOT_DELETED);
+        validateCondition(rule);
         return toResponse(flowRuleRepository.save(rule));
     }
 
@@ -132,7 +134,14 @@ public class FlowRuleServiceImpl implements FlowRuleService {
         if (request.enabledYn() != null) {
             rule.setEnabledYn(normalizeYn(request.enabledYn()));
         }
+        validateCondition(rule);
         return toResponse(flowRuleRepository.save(rule));
+    }
+
+    private void validateCondition(FlowRule rule) {
+        if ("expression".equals(rule.getConditionType())) {
+            expressionEvaluator.validate(rule.getConditionExpression());
+        }
     }
 
     @Override

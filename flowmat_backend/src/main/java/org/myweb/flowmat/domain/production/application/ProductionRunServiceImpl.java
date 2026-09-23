@@ -1,16 +1,24 @@
 package org.myweb.flowmat.domain.production.application;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
+import org.myweb.flowmat.domain.bom.application.BomService;
+import org.myweb.flowmat.domain.catalog.application.UnitConverter;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
-import org.myweb.flowmat.domain.inventory.application.InventoryTransactionService;
+import org.myweb.flowmat.domain.inventory.application.InventoryCommandService;
+import org.myweb.flowmat.domain.inventory.application.InventoryMovement;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
+import org.myweb.flowmat.domain.inventory.domain.enums.InventoryTransactionType;
 import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunFinishRequest;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunItemRecordRequest;
@@ -19,9 +27,12 @@ import org.myweb.flowmat.domain.production.api.dto.response.ProductionRunItemRes
 import org.myweb.flowmat.domain.production.api.dto.response.ProductionRunResponse;
 import org.myweb.flowmat.domain.production.domain.entity.ProductionRun;
 import org.myweb.flowmat.domain.production.domain.entity.ProductionRunItem;
+import org.myweb.flowmat.domain.production.domain.entity.WorkOrder;
+import org.myweb.flowmat.domain.production.domain.enums.WorkOrderStatus;
 import org.myweb.flowmat.domain.production.repository.ProductionRunItemRepository;
 import org.myweb.flowmat.domain.production.repository.ProductionRunRepository;
-import org.myweb.flowmat.domain.project.repository.ProjectRepository;
+import org.myweb.flowmat.domain.production.repository.WorkOrderRepository;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.rule.application.FlowRuleEngineService;
 import org.myweb.flowmat.domain.rule.application.RuleEvaluationContext;
 import org.myweb.flowmat.domain.rule.application.RuleTarget;
@@ -43,22 +54,27 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProductionRunServiceImpl implements ProductionRunService {
 
     private static final String NOT_DELETED = "N";
+    private static final Set<String> OPEN_RUN_STATUSES = Set.of("pending", "running");
+    private static final Set<String> RUN_ITEM_DIRECTIONS = Set.of("input", "output");
 
     private final ProductionRunRepository productionRunRepository;
     private final ProductionRunItemRepository productionRunItemRepository;
-    private final ProjectRepository projectRepository;
+    private final ProjectAccessService projectAccessService;
     private final WorkflowRepository workflowRepository;
     private final ProcessRepository processRepository;
     private final ProcessIoRepository processIoRepository;
     private final ItemRepository itemRepository;
     private final InventoryRepository inventoryRepository;
-    private final InventoryTransactionService inventoryTransactionService;
+    private final InventoryCommandService inventoryCommandService;
     private final FlowRuleEngineService flowRuleEngineService;
     private final IdGenerator idGenerator;
+    private final WorkOrderRepository workOrderRepository;
+    private final UnitConverter unitConverter;
+    private final BomService bomService;
 
     @Override
     public List<ProductionRunResponse> listRuns(String workflowId) {
-        findActiveWorkflow(workflowId);
+        projectAccessService.requireWorkflowReadAccess(workflowId);
         return productionRunRepository.findAllByWorkflowIdAndDeletedYnOrderByCreatedAtDesc(workflowId, NOT_DELETED)
             .stream()
             .map(ProductionRunServiceImpl::toResponse)
@@ -68,15 +84,39 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     @Override
     @Transactional
     public ProductionRunResponse startRun(ProductionRunStartRequest request) {
-        ensureProjectExists(request.projectId());
+        projectAccessService.requireProjectWriteAccess(request.projectId());
         Workflow workflow = findActiveWorkflow(request.workflowId());
         validateSameProject(request.projectId(), workflow.getProjectId());
+        WorkOrder workOrder = findRunnableWorkOrder(request.workOrderId(), request.projectId(), workflow);
+        String targetItemId = trimToNull(request.targetItemId());
+        if (targetItemId == null && workOrder != null) {
+            targetItemId = workOrder.getTargetItemId();
+        }
         Item item = null;
-        if (request.targetItemId() != null && !request.targetItemId().isBlank()) {
-            item = findActiveItem(request.targetItemId());
+        if (targetItemId != null) {
+            item = findActiveItem(targetItemId);
             validateSameProject(request.projectId(), item.getProjectId());
         }
         evaluateRunStartRules(request, workflow, item);
+
+        // Freeze the BOM now: later revisions or retirement must not change what this run planned to consume.
+        String bomId = trimToNull(request.bomId());
+        if (bomId == null && workOrder != null) {
+            bomId = trimToNull(workOrder.getBomId());
+        }
+        BomRequirementResponse bom = bomId == null
+            ? null
+            : bomService.requirementsForRun(bomId, request.projectId().trim(), targetItemId, request.plannedOutputQty());
+        if (bom != null && targetItemId == null) {
+            targetItemId = bom.targetItemId();
+        }
+
+        if (workOrder != null && WorkOrderServiceImpl.status(workOrder) == WorkOrderStatus.APPROVED) {
+            // The first run against an approved order starts it.
+            WorkOrderServiceImpl.transition(workOrder, WorkOrderStatus.IN_PROGRESS);
+            workOrder.setActualStartAt(OffsetDateTime.now());
+            workOrderRepository.save(workOrder);
+        }
 
         ProductionRun run = new ProductionRun();
         run.setProductionRunId(idGenerator.generate());
@@ -85,22 +125,48 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         run.setRunNumber(generateRunNumber());
         run.setRunType(defaultIfBlank(request.runType(), "actual"));
         run.setRunStatus("running");
-        run.setTargetItemId(trimToNull(request.targetItemId()));
+        run.setTargetItemId(targetItemId);
+        run.setWorkOrderId(workOrder != null ? workOrder.getWorkOrderId() : null);
         run.setPlannedOutputQty(request.plannedOutputQty());
         run.setActualOutputQty(BigDecimal.ZERO);
-        run.setStartedBy(trimToNull(request.startedBy()));
+        // Audit fields come from the authenticated user, never from the request body.
+        run.setStartedBy(projectAccessService.requireCurrentUserId());
         run.setDeletedYn(NOT_DELETED);
-        return toResponse(productionRunRepository.save(run));
+        if (bom != null) {
+            run.setBomId(bom.bomId());
+            run.setBomVersion(bom.bomVersion());
+            run.setBomBaseQuantity(bom.baseQuantity());
+        }
+        ProductionRun savedRun = productionRunRepository.save(run);
+
+        if (bom != null) {
+            for (BomRequirementResponse.Line line : bom.lines()) {
+                ProductionRunItem planned = new ProductionRunItem();
+                planned.setProductionRunItemId(idGenerator.generate());
+                planned.setProductionRunId(savedRun.getProductionRunId());
+                planned.setItemId(line.childItemId());
+                planned.setDirection("input");
+                planned.setPlannedQty(line.requiredItemQuantity());
+                planned.setUnit(line.itemUnit());
+                planned.setConversionRate(line.conversionRate());
+                planned.setQuantitySource("bom");
+                productionRunItemRepository.save(planned);
+            }
+        }
+        return toResponse(savedRun);
     }
 
     @Override
     public ProductionRunResponse getRun(String productionRunId) {
-        return toResponse(findActiveRun(productionRunId));
+        ProductionRun run = findActiveRun(productionRunId);
+        projectAccessService.requireProjectReadAccess(run.getProjectId());
+        return toResponse(run);
     }
 
     @Override
     public List<ProductionRunItemResponse> listRunItems(String productionRunId) {
-        findActiveRun(productionRunId);
+        ProductionRun run = findActiveRun(productionRunId);
+        projectAccessService.requireProjectReadAccess(run.getProjectId());
         return productionRunItemRepository.findAllByProductionRunIdOrderByProductionRunItemIdAsc(productionRunId).stream()
             .map(ProductionRunServiceImpl::toItemResponse)
             .toList();
@@ -110,6 +176,9 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     @Transactional
     public ProductionRunItemResponse recordRunItem(String productionRunId, ProductionRunItemRecordRequest request) {
         ProductionRun run = findActiveRun(productionRunId);
+        projectAccessService.requireProjectWriteAccess(run.getProjectId());
+        requireOpenRun(run);
+        requireKnownDirection(request.direction());
         Item item = findActiveItem(request.itemId());
         validateSameProject(run.getProjectId(), item.getProjectId());
         Inventory inventory = null;
@@ -131,7 +200,14 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         if (request.inventoryId() != null && !request.inventoryId().isBlank()) {
             inventory = findActiveInventory(request.inventoryId());
             validateSameProject(run.getProjectId(), inventory.getProjectId());
+            if (!item.getItemId().equals(inventory.getItemId())) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "The selected stock record holds a different item.");
+            }
         }
+
+        // Reject incompatible units before anything is saved, even when no stock record is linked.
+        BigDecimal recordedQty = request.actualQty() != null ? request.actualQty() : request.plannedQty();
+        UnitConverter.Conversion conversion = unitConverter.toItemUnit(recordedQty, request.unit(), item.getUnitId());
 
         evaluateRunItemRules(run, request, item, process, processIo, inventory);
 
@@ -146,10 +222,11 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         runItem.setPlannedQty(request.plannedQty());
         runItem.setActualQty(request.actualQty());
         runItem.setUnit(request.unit().trim());
+        runItem.setQuantitySource("manual");
         ProductionRunItem savedRunItem = productionRunItemRepository.save(runItem);
 
         if (inventory != null) {
-            applyInventoryEffect(run, savedRunItem, inventory);
+            applyInventoryEffect(run, savedRunItem, inventory, conversion);
         }
 
         return toItemResponse(savedRunItem);
@@ -159,20 +236,15 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     @Transactional
     public ProductionRunResponse finishRun(String productionRunId, ProductionRunFinishRequest request) {
         ProductionRun run = findActiveRun(productionRunId);
+        projectAccessService.requireProjectWriteAccess(run.getProjectId());
+        requireOpenRun(run);
         evaluateRunFinishRules(run, request);
         run.setRunStatus("finished");
         if (request != null && request.actualOutputQty() != null) {
             run.setActualOutputQty(request.actualOutputQty());
         }
-        if (request != null && request.finishedBy() != null) {
-            run.setFinishedBy(trimToNull(request.finishedBy()));
-        }
+        run.setFinishedBy(projectAccessService.requireCurrentUserId());
         return toResponse(productionRunRepository.save(run));
-    }
-
-    private void ensureProjectExists(String projectId) {
-        projectRepository.findByProjectIdAndDeletedYn(projectId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
     private Workflow findActiveWorkflow(String workflowId) {
@@ -200,6 +272,26 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
+    private WorkOrder findRunnableWorkOrder(String workOrderId, String projectId, Workflow workflow) {
+        String normalized = trimToNull(workOrderId);
+        if (normalized == null) {
+            return null;
+        }
+        WorkOrder workOrder = workOrderRepository.findByWorkOrderIdAndDeletedYn(normalized, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "Work order does not exist."));
+        validateSameProject(projectId.trim(), workOrder.getProjectId());
+        if (workOrder.getWorkflowId() != null && !workOrder.getWorkflowId().equals(workflow.getWorkflowId())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "Work order " + workOrder.getWorkOrderNumber() + " belongs to a different workflow.");
+        }
+        if (!WorkOrderServiceImpl.status(workOrder).acceptsRuns()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "Work order " + workOrder.getWorkOrderNumber() + " is " + workOrder.getWorkOrderStatus()
+                    + "; runs can only start on approved or in-progress orders.");
+        }
+        return workOrder;
+    }
+
     private ProductionRun findActiveRun(String productionRunId) {
         return productionRunRepository.findByProductionRunIdAndDeletedYn(productionRunId, NOT_DELETED)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
@@ -215,7 +307,10 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             run.getRunStatus(),
             run.getTargetItemId(),
             run.getPlannedOutputQty(),
-            run.getActualOutputQty()
+            run.getActualOutputQty(),
+            run.getWorkOrderId(),
+            run.getBomId(),
+            run.getBomVersion()
         );
     }
 
@@ -230,8 +325,23 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             item.getDirection(),
             item.getPlannedQty(),
             item.getActualQty(),
-            item.getUnit()
+            item.getUnit(),
+            item.getQuantitySource(),
+            item.getConversionRate()
         );
+    }
+
+    private static void requireOpenRun(ProductionRun run) {
+        String status = run.getRunStatus() == null ? "" : run.getRunStatus().trim().toLowerCase();
+        if (!OPEN_RUN_STATUSES.contains(status)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Run " + run.getRunNumber() + " is already " + status + ".");
+        }
+    }
+
+    private static void requireKnownDirection(String direction) {
+        if (!RUN_ITEM_DIRECTIONS.contains(direction.trim().toLowerCase())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "direction must be 'input' or 'output'.");
+        }
     }
 
     private static void validateSameProject(String expectedProjectId, String actualProjectId) {
@@ -254,36 +364,50 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         return value != null && !value.isBlank() ? value.trim().toLowerCase() : defaultValue;
     }
 
-    private void applyInventoryEffect(ProductionRun run, ProductionRunItem runItem, Inventory inventory) {
-        BigDecimal actualQty = runItem.getActualQty() != null ? runItem.getActualQty() : runItem.getPlannedQty();
-        if (actualQty == null) {
-            actualQty = BigDecimal.ZERO;
-        }
+    private void applyInventoryEffect(
+        ProductionRun run,
+        ProductionRunItem runItem,
+        Inventory inventory,
+        UnitConverter.Conversion conversion
+    ) {
+        // Stock is kept in the item's unit; inventory columns hold 4 decimals.
+        BigDecimal actualQty = conversion.quantity() == null
+            ? BigDecimal.ZERO
+            : conversion.quantity().setScale(4, RoundingMode.HALF_UP);
 
+        InventoryTransactionType type;
         BigDecimal quantityDelta;
         if ("input".equals(runItem.getDirection())) {
+            type = InventoryTransactionType.PRODUCTION_INPUT;
             quantityDelta = actualQty.negate();
         } else if ("output".equals(runItem.getDirection())) {
+            type = InventoryTransactionType.PRODUCTION_OUTPUT;
             quantityDelta = actualQty;
         } else {
-            quantityDelta = BigDecimal.ZERO;
+            return;
+        }
+        if (quantityDelta.signum() == 0) {
+            return;
         }
 
-        inventory.setQuantity(defaultIfNull(inventory.getQuantity(), BigDecimal.ZERO).add(quantityDelta));
-        inventory.setAvailableQuantity(defaultIfNull(inventory.getAvailableQuantity(), BigDecimal.ZERO).add(quantityDelta));
-        Inventory savedInventory = inventoryRepository.save(inventory);
-
-        inventoryTransactionService.recordSystemTransaction(
-            savedInventory,
-            "run_" + runItem.getDirection(),
+        // Conditional atomic UPDATE: concurrent runs cannot lose updates, and consuming more than is available
+        // (or quarantined stock) is refused instead of driving the record negative.
+        inventoryCommandService.apply(new InventoryMovement(
+            inventory.getInventoryId(),
+            type,
             quantityDelta,
             BigDecimal.ZERO,
-            quantityDelta,
             "production_run_item",
             runItem.getProductionRunItemId(),
-            "Recorded from run " + run.getRunNumber(),
-            run.getStartedBy()
-        );
+            conversion.converted()
+                ? "Recorded from run " + run.getRunNumber() + " ("
+                    + (runItem.getActualQty() != null ? runItem.getActualQty() : runItem.getPlannedQty()).stripTrailingZeros().toPlainString()
+                    + " " + conversion.fromUnitCode() + " = " + actualQty.stripTrailingZeros().toPlainString()
+                    + " " + conversion.toUnitCode() + ")"
+                : "Recorded from run " + run.getRunNumber(),
+            null,
+            projectAccessService.requireCurrentUserId()
+        ));
     }
 
     private static BigDecimal defaultIfNull(BigDecimal value, BigDecimal defaultValue) {

@@ -30,6 +30,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 @RequiredArgsConstructor
@@ -54,9 +56,21 @@ public class GraphSyncService {
 
     @Transactional
     public void broadcast(Type type, String workflowId, String entityId, String userId) {
-        GraphEntityPayload payload = loadPayload(type, entityId);
-        GraphChangeMessage message = graphChangeStore.append(type, workflowId, entityId, userId, payload);
-        messagingTemplate.convertAndSend("/topic/workflow/" + workflowId + "/graph", message);
+        Runnable publish = () -> {
+            GraphEntityPayload payload = loadPayload(type, entityId);
+            GraphChangeMessage message = graphChangeStore.append(type, workflowId, entityId, userId, payload);
+            messagingTemplate.convertAndSend("/topic/workflow/" + workflowId + "/graph", message);
+        };
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            publish.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                publish.run();
+            }
+        });
     }
 
     public WorkflowGraphChangesResponse getChangesSince(String workflowId, long sinceSeq) {

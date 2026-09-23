@@ -157,6 +157,65 @@ class ProjectInviteServiceTest {
             .isEqualTo(ErrorCode.FORBIDDEN);
     }
 
+    @Test
+    void previewShowsProjectRoleAndInviterForAddressee() {
+        Project project = project("project-1", "owner-1");
+        project.setProjectName("Line A");
+        ProjectInvite invite = pendingInvite("guest@flowmat.local", OffsetDateTime.now().plusDays(3));
+        User owner = user("owner-1", "owner@flowmat.local");
+        owner.setUserName("Owner Kim");
+        when(projectInviteRepository.findByInviteToken("token-1")).thenReturn(Optional.of(invite));
+        when(projectRepository.findByProjectIdAndDeletedYn("project-1", "N")).thenReturn(Optional.of(project));
+        when(userRepository.findByUserId("owner-1")).thenReturn(Optional.of(owner));
+        when(projectAccessService.requireCurrentUserId()).thenReturn("guest-1");
+        when(userRepository.findByUserId("guest-1")).thenReturn(Optional.of(user("guest-1", "GUEST@flowmat.local")));
+
+        var preview = projectInviteService.previewInvite("token-1");
+
+        assertThat(preview.projectName()).isEqualTo("Line A");
+        assertThat(preview.projectRole()).isEqualTo("editor");
+        assertThat(preview.inviterName()).isEqualTo("Owner Kim");
+        assertThat(preview.invitedEmailMasked()).isEqualTo("gu***@flowmat.local");
+        assertThat(preview.addressedToCurrentUser()).isTrue();
+        assertThat(preview.expired()).isFalse();
+    }
+
+    @Test
+    void previewFlagsOtherAccountAndExpiry() {
+        ProjectInvite invite = pendingInvite("guest@flowmat.local", OffsetDateTime.now().minusDays(1));
+        when(projectInviteRepository.findByInviteToken("token-1")).thenReturn(Optional.of(invite));
+        when(projectRepository.findByProjectIdAndDeletedYn("project-1", "N")).thenReturn(Optional.of(project("project-1", "owner-1")));
+        when(userRepository.findByUserId("owner-1")).thenReturn(Optional.empty());
+        when(projectAccessService.requireCurrentUserId()).thenReturn("someone-else");
+        when(userRepository.findByUserId("someone-else")).thenReturn(Optional.of(user("someone-else", "other@flowmat.local")));
+
+        var preview = projectInviteService.previewInvite("token-1");
+
+        assertThat(preview.addressedToCurrentUser()).isFalse();
+        assertThat(preview.expired()).isTrue();
+        assertThat(preview.inviterName()).isNull();
+    }
+
+    @Test
+    void maskEmailHidesLocalPart() {
+        assertThat(ProjectInviteServiceImpl.maskEmail("guest@flowmat.local")).isEqualTo("gu***@flowmat.local");
+        assertThat(ProjectInviteServiceImpl.maskEmail("ab@x.io")).isEqualTo("a***@x.io");
+        assertThat(ProjectInviteServiceImpl.maskEmail("not-an-email")).isEqualTo("***");
+    }
+
+    private static ProjectInvite pendingInvite(String invitedEmail, OffsetDateTime expiredAt) {
+        ProjectInvite invite = new ProjectInvite();
+        invite.setInviteId("invite-1");
+        invite.setProjectId("project-1");
+        invite.setInvitedEmail(invitedEmail);
+        invite.setProjectRole("editor");
+        invite.setInviteStatus("pending");
+        invite.setInviteToken("token-1");
+        invite.setInvitedBy("owner-1");
+        invite.setExpiredAt(expiredAt);
+        return invite;
+    }
+
     private static Project project(String projectId, String ownerId) {
         Project project = new Project();
         project.setProjectId(projectId);
