@@ -32,6 +32,8 @@ class S3StorageServiceTest {
             .isInstanceOfAny(java.io.IOException.class);
         assertThatThrownBy(() -> service.store(file("safe.txt", "text/plain"), "C:\\outside"))
             .isInstanceOfAny(java.io.IOException.class);
+        assertThatThrownBy(() -> service.store(file("safe.txt", "text/plain"), "/etc"))
+            .isInstanceOfAny(java.io.IOException.class);
     }
 
     private MockMultipartFile file(String filename, String contentType) {

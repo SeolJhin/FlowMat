@@ -44,7 +44,6 @@ public class ProductionConfigValidator implements InitializingBean {
     private final String mailPassword;
     private final boolean validateInfrastructure;
 
-    @Autowired
     public ProductionConfigValidator(
         String frontendUrl,
         String oauth2RedirectUri,
@@ -56,6 +55,7 @@ public class ProductionConfigValidator implements InitializingBean {
             "", "", "", "", "", "", "", "", false);
     }
 
+    @Autowired
     public ProductionConfigValidator(
         @Value("${app.frontend-url:}") String frontendUrl,
         @Value("${app.oauth2.redirect-uri:}") String oauth2RedirectUri,

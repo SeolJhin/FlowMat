@@ -24,6 +24,12 @@ final class StorageFilenamePolicy {
             return uploadRoot;
         }
         String normalizedDirectory = directory.replace('\\', '/');
+        if (normalizedDirectory.startsWith("/")
+            || normalizedDirectory.startsWith("//")
+            || normalizedDirectory.matches("^[A-Za-z]:/.*")
+            || CONTROL_CHARACTER.matcher(normalizedDirectory).find()) {
+            throw new IOException("Upload directory must be a relative safe path.");
+        }
         Path resolved = uploadRoot.resolve(normalizedDirectory).normalize();
         if (!resolved.startsWith(uploadRoot)) {
             throw new IOException("Upload directory escapes the configured upload root.");

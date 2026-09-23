@@ -45,19 +45,33 @@ npm run dev
 npm run lint
 npm run typecheck
 npm test
+npm run test:e2e
 npm run build
 ```
 
 The canonical applications are `flowmat_backend` and `flowmat_frontend`.
 `legacy` is retained for historical compatibility and is not part of the
-canonical build. The frontend canvas prototype is a development-only feature
-under `flowmat_frontend/src/features/flowmat-canvas-prototype`.
+canonical build; no in-repository build, CI, deployment, or import references
+were found. Its external compatibility consumers must be confirmed before it
+is removed from the repository. The unused standalone canvas prototype has
+been archived outside the repository at
+`E:\projects\git\FlowMat-archive\flowmat-canvas-prototype`; the active
+`/editor-demo` route is unrelated and remains in the canonical frontend.
 The repository-root Gradle files are a historical skeleton and are not used by
 the CI workflows; do not use them for backend verification.
 
 Backend CI enforces the current JaCoCo baseline of 45% line coverage and 30%
 branch coverage. The thresholds are intentionally conservative and should be
 raised as security and domain test coverage grows.
+
+Browser E2E uses Playwright with a mocked API/provider in CI and does not
+require a separate staging environment. Real Google/Kakao OAuth smoke tests
+remain a staging-only operation.
+
+The `prod` Spring profile disables demo seed data through a Flyway session
+setting. `ProdProfileDemoSeedIntegrationTest` verifies this against a real
+PostgreSQL container; development and test profiles retain explicit demo seed
+opt-in behavior.
 
 Actuator endpoints:
 - `/api/actuator/health`
