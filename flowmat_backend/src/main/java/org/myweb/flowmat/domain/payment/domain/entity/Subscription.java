@@ -12,6 +12,8 @@ import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
 import org.myweb.flowmat.global.common.BaseTimeEntity;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Getter
 @Setter
@@ -53,6 +55,7 @@ public class Subscription extends BaseTimeEntity {
     private OffsetDateTime nextBillingAt;
 
     // Y / N
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "auto_renew", nullable = false, length = 1)
     private String autoRenew = "Y";
 

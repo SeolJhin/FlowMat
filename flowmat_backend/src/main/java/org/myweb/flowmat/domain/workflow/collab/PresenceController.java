@@ -2,6 +2,8 @@ package org.myweb.flowmat.domain.workflow.collab;
 
 import java.security.Principal;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.collab.dto.PresenceMessage;
 import org.myweb.flowmat.global.security.AuthUser;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
@@ -18,10 +20,12 @@ import org.springframework.stereotype.Controller;
  */
 @Controller
 @RequiredArgsConstructor
+@Slf4j
 public class PresenceController {
 
     private final SimpMessagingTemplate messagingTemplate;
     private final WorkflowSessionRegistry sessionRegistry;
+    private final ProjectAccessService projectAccessService;
 
     @MessageMapping("/workflow/{workflowId}/presence")
     public void relay(
@@ -31,6 +35,15 @@ public class PresenceController {
         SimpMessageHeaderAccessor headerAccessor
     ) {
         String userId = resolveUserId(principal);
+        if (message == null || message.type() == null || userId == null || workflowId == null || workflowId.isBlank()) {
+            log.warn("Dropping malformed presence message for workflowId={}", workflowId);
+            return;
+        }
+        projectAccessService.requireWorkflowReadAccess(workflowId, userId);
+        if (!isValid(message)) {
+            log.warn("Dropping invalid presence message for workflowId={}, userId={}", workflowId, userId);
+            return;
+        }
         String sessionId = headerAccessor.getSessionId();
         if (sessionId != null && userId != null) {
             if (message.type() == PresenceMessage.Type.LEAVE) {
@@ -48,6 +61,40 @@ public class PresenceController {
 
         String destination = "/topic/workflow/" + workflowId + "/presence";
         messagingTemplate.convertAndSend(destination, message.withServerValues(userId, workflowId));
+    }
+
+    private boolean isValid(PresenceMessage message) {
+        if (!hasLength(message.clientId(), 128)) {
+            return false;
+        }
+        if (message.cursorX() != null && !isCoordinate(message.cursorX())) {
+            return false;
+        }
+        if (message.cursorY() != null && !isCoordinate(message.cursorY())) {
+            return false;
+        }
+        if (message.editingProcessId() != null && !hasLength(message.editingProcessId(), 128)) {
+            return false;
+        }
+        if (message.annotation() != null && message.annotation().toString().length() > 16_384) {
+            return false;
+        }
+        return switch (message.type()) {
+            case JOIN, LEAVE, HEARTBEAT -> message.cursorX() == null
+                && message.cursorY() == null
+                && message.editingProcessId() == null;
+            case CURSOR_MOVED -> message.cursorX() != null && message.cursorY() != null;
+            case NODE_EDITING -> hasLength(message.editingProcessId(), 128);
+            case ANNOTATION_DRAWING -> message.annotation() != null;
+        };
+    }
+
+    private boolean isCoordinate(double value) {
+        return Double.isFinite(value) && value >= -1_000_000d && value <= 1_000_000d;
+    }
+
+    private boolean hasLength(String value, int maxLength) {
+        return value == null || (!value.isBlank() && value.length() <= maxLength);
     }
 
     private String resolveUserId(Principal principal) {

@@ -49,6 +49,21 @@ public class AuthRedisStore {
         });
     }
 
+    public RefreshTokenEntry consumeRefreshToken(String jti, String userId) {
+        return execute(() -> {
+            String payload = redisTemplate.opsForValue().getAndDelete(rtKey(jti));
+            if (payload == null || payload.isBlank()) {
+                return null;
+            }
+            String[] parts = payload.split("\\|", 2);
+            if (!parts[0].equals(userId)) {
+                throw new BusinessException(ErrorCode.TOKEN_INVALID);
+            }
+            redisTemplate.opsForSet().remove(rtUserKey(userId), jti);
+            return new RefreshTokenEntry(parts[0], parts.length > 1 && !parts[1].isBlank() ? parts[1] : null);
+        });
+    }
+
     public void revokeRefreshToken(String jti, String userId) {
         executeQuietly(() -> {
             redisTemplate.delete(rtKey(jti));
@@ -173,10 +188,16 @@ public class AuthRedisStore {
         });
     }
 
-    public void consumeFaceMatchToken(String token) {
-        executeQuietly(() -> {
-            redisTemplate.delete(faceMatchKey(token));
-            return null;
+    public List<String> consumeFaceMatchToken(String token) {
+        return execute(() -> {
+            String value = redisTemplate.opsForValue().getAndDelete(faceMatchKey(token));
+            if (value == null || value.isBlank()) {
+                return List.of();
+            }
+            return Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(v -> !v.isBlank())
+                .toList();
         });
     }
 

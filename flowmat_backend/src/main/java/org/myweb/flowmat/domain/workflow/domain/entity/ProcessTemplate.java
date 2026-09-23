@@ -24,7 +24,9 @@ public class ProcessTemplate extends BaseTimeEntity {
     private String templateType;
     private String iconKey;
     private String defaultColorScheme;
+    @Column(columnDefinition = "numeric(8,2)")
     private Double defaultWidth;
+    @Column(columnDefinition = "numeric(8,2)")
     private Double defaultHeight;
     private String defaultDesc;
 
@@ -32,6 +34,7 @@ public class ProcessTemplate extends BaseTimeEntity {
     @Column(columnDefinition = "jsonb")
     private String defaultConfig;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     private String publicYn;
     private Integer sortOrder;
 }

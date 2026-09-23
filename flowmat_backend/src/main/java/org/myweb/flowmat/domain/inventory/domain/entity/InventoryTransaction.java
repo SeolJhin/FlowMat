@@ -32,4 +32,7 @@ public class InventoryTransaction extends BaseTimeEntity {
     private String referenceId;
     private String note;
     private String createdBy;
+
+    /** Client idempotency key; unique per project. Null for rows written before V17. */
+    private String requestId;
 }

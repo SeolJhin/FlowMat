@@ -33,6 +33,7 @@ public class Workflow extends CreatedUpdatedAuditEntity {
     @Column(columnDefinition = "jsonb")
     private String simulationConfig;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     private String lockedYn;
     private String lockedBy;
 }

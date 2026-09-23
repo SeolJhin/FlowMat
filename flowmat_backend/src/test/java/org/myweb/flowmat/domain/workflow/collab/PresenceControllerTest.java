@@ -11,6 +11,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.collab.dto.PresenceMessage;
 import org.myweb.flowmat.global.security.AuthUser;
 import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
@@ -25,6 +26,9 @@ class PresenceControllerTest {
 
     @Mock
     private WorkflowSessionRegistry sessionRegistry;
+
+    @Mock
+    private ProjectAccessService projectAccessService;
 
     @InjectMocks
     private PresenceController presenceController;

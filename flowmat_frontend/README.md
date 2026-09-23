@@ -1,16 +1,60 @@
-# React + Vite
+# FlowMat Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React 19 + TypeScript + Vite client for FlowMat. Product vision, API contracts, and module rules live in
+[`CLAUDE.md`](./CLAUDE.md); the editor engine's current state is in [`../docs/editor/`](../docs/editor/).
 
-Currently, two official plugins are available:
+## Requirements
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Node.js `^20.19.0` or `>=22.12.0` (Vite 8)
+- The backend on `http://localhost:8080` — see the root [`README.md`](../README.md) for Postgres/Redis and
+  `./gradlew bootRun --args='--spring.profiles.active=dev'`
 
-## React Compiler
+## Run
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+npm ci
+npm run dev        # http://localhost:5173, proxies /api to http://localhost:8080
+```
 
-## Expanding the ESLint configuration
+The dev profile seeds a demo account: **demo-owner / demo1234** (project `prj_demo_main`).
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Checks (same as CI)
+
+```bash
+npm run lint
+npx tsc --noEmit -p tsconfig.json
+npm test           # vitest, node environment, src/**/*.test.{ts,tsx}
+npm run build
+```
+
+## Layout
+
+Feature-Sliced layers, imported only downward (`pages → widgets → features → entities → shared`):
+
+| Folder | Holds |
+|---|---|
+| `src/app` | router, guards, providers |
+| `src/pages` | one folder per route; `ui/` components, `model/` pure logic with tests |
+| `src/entities/<domain>/api` | one React Query hook per endpoint (`useXxxQuery`, `useXxxMutation`) |
+| `src/lib/flowmat-editor` | framework-free drawing engine (no React/Zustand imports — enforced by a test) |
+| `src/shared` | `httpClient`, DTO types in `types/api.ts`, small helpers in `lib/` |
+
+## Screens
+
+| Route | What it does |
+|---|---|
+| `/projects/:id/workflows/:workflowId` | workflow canvas and editor |
+| `/projects/:id/inventory` | Items, Stock (quantities, thresholds, movement history), Units (global unit master) |
+| `/projects/:id/runs`, `/runs/:runId` | start production runs, record material movements, finish runs |
+| `/projects/:id/rules` | flow rules that block run/inventory operations when their condition matches |
+| `/projects/:id/templates` | apply process templates; create/edit them with the `template:manage` permission |
+| `/invite/accept?token=…` | invite preview and acceptance |
+| `/admin` | user roles (requires `user:manage`) |
+
+## Conventions
+
+- Hooks own the request payload, cache invalidation, and query keys; components never call `httpClient`.
+- Failed requests throw a `UiError` object (not an `Error`) — show it with `errorMessage(error, fallback)`
+  from `shared/lib/errorMessage.ts`.
+- Mutations submitted from forms catch the rejection and let the mutation's `error` state render the message.
+- Permission flags for hiding admin UI come from `useMyPermissionsQuery()`; the backend enforces them regardless.

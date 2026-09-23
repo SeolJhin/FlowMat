@@ -23,7 +23,9 @@ public class WorkflowTemplate extends BaseTimeEntity {
     private String templateCategory;
     private String templateType;
     private String iconKey;
+    @Column(columnDefinition = "numeric(8,2)")
     private Double defaultWidth;
+    @Column(columnDefinition = "numeric(8,2)")
     private Double defaultHeight;
     private String defaultDesc;
 
@@ -31,6 +33,7 @@ public class WorkflowTemplate extends BaseTimeEntity {
     @Column(columnDefinition = "jsonb")
     private String defaultConfig;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     private String publicYn;
     private Integer sortOrder;
 }

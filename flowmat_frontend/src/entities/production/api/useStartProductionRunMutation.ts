@@ -10,6 +10,7 @@ export interface StartRunInput {
   plannedOutputQty: number
   runType?: string
   startedBy?: string
+  workOrderId?: string
 }
 
 async function startProductionRun(input: StartRunInput): Promise<ProductionRunDto> {
@@ -23,6 +24,8 @@ export function useStartProductionRunMutation(workflowId: string) {
     mutationFn: startProductionRun,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['production-runs', workflowId] })
+      // Starting the first run moves an approved work order to in_progress.
+      void queryClient.invalidateQueries({ queryKey: ['work-orders'] })
     },
   })
 }

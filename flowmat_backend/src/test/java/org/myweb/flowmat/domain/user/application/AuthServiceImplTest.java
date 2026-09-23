@@ -151,7 +151,8 @@ class AuthServiceImplTest {
         when(jwtProvider.isRefreshToken("refresh-token")).thenReturn(true);
         when(jwtProvider.resolveUserId("refresh-token")).thenReturn("tester");
         when(jwtProvider.resolveJti("refresh-token")).thenReturn("jti-old");
-        when(authRedisStore.getRefreshToken("jti-old")).thenReturn(new AuthRedisStore.RefreshTokenEntry("tester", "device-1"));
+        when(authRedisStore.consumeRefreshToken("jti-old", "tester"))
+            .thenReturn(new AuthRedisStore.RefreshTokenEntry("tester", "device-1"));
         when(userRepository.findByUserId("tester")).thenReturn(Optional.of(user));
         when(jwtProvider.generateAccessToken("tester", "user")).thenReturn("access-token-2");
         when(jwtProvider.generateRefreshToken("tester")).thenReturn("refresh-token-2");
@@ -166,7 +167,6 @@ class AuthServiceImplTest {
         );
 
         assertThat(response.refreshToken()).isEqualTo("refresh-token-2");
-        verify(authRedisStore).revokeRefreshToken("jti-old", "tester");
         verify(authRedisStore).storeRefreshToken(org.mockito.Mockito.eq("jti-new"), org.mockito.Mockito.eq("tester"), org.mockito.Mockito.eq("device-1"), org.mockito.ArgumentMatchers.any());
     }
 

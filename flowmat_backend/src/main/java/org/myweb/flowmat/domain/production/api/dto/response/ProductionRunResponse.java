@@ -11,6 +11,9 @@ public record ProductionRunResponse(
     String runStatus,
     String targetItemId,
     BigDecimal plannedOutputQty,
-    BigDecimal actualOutputQty
+    BigDecimal actualOutputQty,
+    String workOrderId,
+    String bomId,
+    Integer bomVersion
 ) {
 }

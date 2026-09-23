@@ -26,13 +26,16 @@ public class Process extends CreatedUpdatedAuditEntity {
     private String processStatus;
     private String colorScheme;
 
-    @Column(name = "pos_x")
+    // Schema stores coordinates/sizes as numeric; columnDefinition keeps ddl-auto=validate in sync.
+    @Column(name = "pos_x", columnDefinition = "numeric(10,2)")
     private Double posX;
 
-    @Column(name = "pos_y")
+    @Column(name = "pos_y", columnDefinition = "numeric(10,2)")
     private Double posY;
 
+    @Column(columnDefinition = "numeric(8,2)")
     private Double width;
+    @Column(columnDefinition = "numeric(8,2)")
     private Double height;
     private String processDesc;
 

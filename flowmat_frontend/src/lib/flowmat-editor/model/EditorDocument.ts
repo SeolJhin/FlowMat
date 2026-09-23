@@ -7,6 +7,7 @@ export const EDITOR_DOCUMENT_SCHEMA_VERSION = 1
 
 export interface EditorDocument {
   schemaVersion: number
+  version?: number
   elements: readonly EditorElement[]
   selectedIds: readonly ElementId[]
   camera: Camera

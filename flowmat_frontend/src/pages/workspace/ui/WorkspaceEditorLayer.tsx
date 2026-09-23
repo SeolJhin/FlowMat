@@ -67,14 +67,16 @@ import {
 import type { CanvasAnnotationViewModel } from '../../../entities/workflow/model/types'
 import type { WorkflowPaletteTool } from '../../../entities/workflow/model/nodeCatalog'
 import type { PatchCanvasAnnotationInput } from '../../../entities/canvas-annotation/api/canvasAnnotationApi'
-import {
-  computeAlignedPosition,
-  computeDistributedPositions,
-  computeSelectionBounds,
-  type AlignDirection,
-  type DistributeAxis,
-  type LayoutBox,
+import type {
+  AlignDirection,
+  DistributeAxis,
 } from '../../../entities/canvas-annotation/model/annotationLayout'
+import {
+  getWorkspaceEditorSelectionCapabilities,
+  splitWorkspaceEditorSelection as splitSelectedIds,
+  type WorkspaceEditorSelectionCapabilities,
+} from '../model/workspaceEditorSelection'
+import { alignWorkspaceEditorElements, distributeWorkspaceEditorElements } from '../model/workspaceEditorLayout'
 
 const WORKSPACE_LAYER_EXTENT = 100000
 const WORKSPACE_GRID_SIZE = 8
@@ -87,7 +89,7 @@ const WORKSPACE_CONNECTOR_ANCHOR_THRESHOLD = 14
 // re-armed and driving an update-depth loop into React Flow's StoreUpdater.
 const EMPTY_BACKEND_DOCUMENT: EditorDocument = createEmptyEditorDocument()
 
-export interface WorkspaceEditorSelectionSnapshot {
+export interface WorkspaceEditorSelectionSnapshot extends WorkspaceEditorSelectionCapabilities {
   selectedIds: readonly ElementId[]
   elements: readonly EditorElement[]
   canUndo: boolean
@@ -233,6 +235,10 @@ export function WorkspaceEditorLayer({
     () => displayDocument.elements.filter((element) => selectedIds.includes(element.id)),
     [displayDocument.elements, selectedIds],
   )
+  const selectionCapabilities = useMemo(
+    () => getWorkspaceEditorSelectionCapabilities(editable, editableDocument, editableAnnotationDocument, selectedIds),
+    [editable, editableAnnotationDocument, editableDocument, selectedIds],
+  )
   const selectionBounds = getSelectedElementBounds(displayDocument)
   const marqueeBox = interaction?.type === 'marquee'
     ? normalizeBox({
@@ -252,12 +258,13 @@ export function WorkspaceEditorLayer({
 
   useEffect(() => {
     onSelectionChange?.({
+      ...selectionCapabilities,
       selectedIds,
       elements: selectedElements,
       canUndo: canUndoBackendDocument,
       canRedo: canRedoBackendDocument,
     })
-  }, [canRedoBackendDocument, canUndoBackendDocument, onSelectionChange, selectedElements, selectedIds])
+  }, [canRedoBackendDocument, canUndoBackendDocument, onSelectionChange, selectedElements, selectedIds, selectionCapabilities])
 
   const persistDocument = useCallback(
     async (nextDocument: EditorDocument) => {
@@ -463,14 +470,10 @@ export function WorkspaceEditorLayer({
   }, [editable, editableDocument, persistDocument, pushBackendHistorySnapshot, selectedIds])
 
   const groupSelectedElements = useCallback(async () => {
-    if (!editable || selectedIds.length < 2) return
+    if (!selectionCapabilities.canGroup) return
     const split = splitSelectedIds(editableDocument, editableAnnotationDocument, selectedIds)
     const canGroupAnnotations = split.annotationIds.length > 1
     const canGroupBackend = split.backendIds.length > 1
-    if (!canGroupAnnotations && !canGroupBackend) {
-      onError?.('Select at least two elements from the same storage model to group.')
-      return
-    }
     if (canGroupBackend && !canGroupAnnotations) {
       pushBackendHistorySnapshot(editableDocument, selectedIds)
     }
@@ -493,22 +496,28 @@ export function WorkspaceEditorLayer({
       return
     }
     setDraftAnnotationDocument(null)
-  }, [editable, editableAnnotationDocument, editableDocument, onError, persistDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds])
+  }, [editableAnnotationDocument, editableDocument, persistDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds, selectionCapabilities.canGroup])
 
   const ungroupSelectedElements = useCallback(async () => {
-    if (!editable || selectedIds.length === 0) return
+    if (!selectionCapabilities.canUngroup) return
     const split = splitSelectedIds(editableDocument, editableAnnotationDocument, selectedIds)
-    if (split.annotationIds.length > 0) {
+    const groupedAnnotationIds = split.annotationIds.filter((id) =>
+      editableAnnotationDocument.elements.some((element) => element.id === id && element.parentId),
+    )
+    const canUngroupBackend = getWorkspaceEditorSelectionCapabilities(
+      editable, editableDocument, editableAnnotationDocument, split.backendIds,
+    ).canUngroup
+    if (groupedAnnotationIds.length > 0) {
       await persistLayerChanges({
-        annotationDocument: transformSelected(editableAnnotationDocument, split.annotationIds, (element) => ({
+        annotationDocument: transformSelected(editableAnnotationDocument, groupedAnnotationIds, (element) => ({
           ...element,
           parentId: null,
         })),
-        annotationIds: split.annotationIds,
+        annotationIds: groupedAnnotationIds,
       })
     }
-    if (split.backendIds.length > 0) {
-      if (split.annotationIds.length === 0) {
+    if (canUngroupBackend) {
+      if (groupedAnnotationIds.length === 0) {
         pushBackendHistorySnapshot(editableDocument, selectedIds)
       }
       const result = ungroupEditorElements(editableDocument, split.backendIds)
@@ -519,7 +528,7 @@ export function WorkspaceEditorLayer({
       return
     }
     setDraftAnnotationDocument(null)
-  }, [editable, editableAnnotationDocument, editableDocument, persistDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds])
+  }, [editable, editableAnnotationDocument, editableDocument, persistDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds, selectionCapabilities.canUngroup])
 
   const reorderSelectedElementsInLayer = useCallback(async (direction: 'front' | 'back') => {
     if (!editable || selectedIds.length === 0) return
@@ -545,47 +554,24 @@ export function WorkspaceEditorLayer({
   }, [annotations, editable, editableAnnotationDocument, editableDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds])
 
   const alignSelected = useCallback((direction: AlignDirection) => {
-    if (!editable) return
-    const split = splitSelectedIds(editableDocument, editableAnnotationDocument, selectedIds)
-    if (split.backendIds.length < 2) return
-    const elementById = new Map(editableDocument.elements.map((element) => [element.id, element]))
-    const boxes: LayoutBox[] = split.backendIds
-      .map((id) => elementById.get(id))
-      .filter((element): element is EditorElement => element != null)
-      .map((element) => ({ id: element.id, x: element.x, y: element.y, width: element.width, height: element.height }))
-    const bounds = computeSelectionBounds(boxes)
-    const targets = new Map(boxes.map((box) => [box.id, computeAlignedPosition(box, bounds, direction)]))
-
+    if (!selectionCapabilities.canAlign || selectionCapabilities.selectionKind !== 'backend') return
+    const nextBackendDocument = alignWorkspaceEditorElements(editableDocument, selectedIds, direction)
+    if (nextBackendDocument === editableDocument) return
     pushBackendHistorySnapshot(editableDocument, selectedIds)
-    const nextBackendDocument = transformSelected(editableDocument, split.backendIds, (element) => {
-      const target = targets.get(element.id)
-      return target ? { ...element, x: target.x, y: target.y } : element
-    })
     setDraftBackendDocument(null)
     setDraftAnnotationDocument(null)
     void persistLayerChanges({ backendDocument: nextBackendDocument })
-  }, [editable, editableAnnotationDocument, editableDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds])
+  }, [editableDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds, selectionCapabilities.canAlign, selectionCapabilities.selectionKind])
 
   const distributeSelected = useCallback((axis: DistributeAxis) => {
-    if (!editable) return
-    const split = splitSelectedIds(editableDocument, editableAnnotationDocument, selectedIds)
-    if (split.backendIds.length < 3) return
-    const elementById = new Map(editableDocument.elements.map((element) => [element.id, element]))
-    const boxes: LayoutBox[] = split.backendIds
-      .map((id) => elementById.get(id))
-      .filter((element): element is EditorElement => element != null)
-      .map((element) => ({ id: element.id, x: element.x, y: element.y, width: element.width, height: element.height }))
-    const targets = new Map(computeDistributedPositions(boxes, axis).map((position) => [position.id, position]))
-
+    if (!selectionCapabilities.canDistribute || selectionCapabilities.selectionKind !== 'backend') return
+    const nextBackendDocument = distributeWorkspaceEditorElements(editableDocument, selectedIds, axis)
+    if (nextBackendDocument === editableDocument) return
     pushBackendHistorySnapshot(editableDocument, selectedIds)
-    const nextBackendDocument = transformSelected(editableDocument, split.backendIds, (element) => {
-      const target = targets.get(element.id)
-      return target ? { ...element, x: target.x, y: target.y } : element
-    })
     setDraftBackendDocument(null)
     setDraftAnnotationDocument(null)
     void persistLayerChanges({ backendDocument: nextBackendDocument })
-  }, [editable, editableAnnotationDocument, editableDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds])
+  }, [editableDocument, persistLayerChanges, pushBackendHistorySnapshot, selectedIds, selectionCapabilities.canDistribute, selectionCapabilities.selectionKind])
 
   const updateSelectedStyle = useCallback(async (patch: WorkspaceEditorStylePatch) => {
     if (!editable || selectedIds.length === 0) return
@@ -1263,26 +1249,6 @@ function findElementInBase(base: InteractionDocuments, id: ElementId): EditorEle
 export function filterStable<T>(list: readonly T[], predicate: (item: T) => boolean): readonly T[] {
   const filtered = list.filter(predicate)
   return filtered.length === list.length ? list : filtered
-}
-
-function splitSelectedIds(
-  backendDocument: EditorDocument,
-  annotationDocument: EditorDocument,
-  selectedIds: readonly ElementId[],
-): { backendIds: ElementId[]; annotationIds: ElementId[] } {
-  const backendIds = new Set(backendDocument.elements.map((element) => element.id))
-  const annotationIds = new Set(annotationDocument.elements.map((element) => element.id))
-  const split = { backendIds: [] as ElementId[], annotationIds: [] as ElementId[] }
-
-  for (const id of selectedIds) {
-    if (backendIds.has(id)) {
-      split.backendIds.push(id)
-    } else if (annotationIds.has(id)) {
-      split.annotationIds.push(id)
-    }
-  }
-
-  return split
 }
 
 function transformLayerDocuments(

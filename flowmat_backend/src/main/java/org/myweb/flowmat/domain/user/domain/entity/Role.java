@@ -7,6 +7,8 @@ import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
 import org.myweb.flowmat.global.common.BaseTimeEntity;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Getter
 @Setter
@@ -19,5 +21,6 @@ public class Role extends BaseTimeEntity {
 
     private String roleName;
     private String roleDescription;
+    @JdbcTypeCode(SqlTypes.CHAR)
     private String roleIsSystem;
 }

@@ -38,6 +38,7 @@ export interface BackendEditorElementDto {
 }
 
 export interface BackendEditorDocumentSaveInput {
+  expectedVersion: number
   schemaVersion: number
   camera: Camera
   nextElementSeq: number
@@ -49,6 +50,7 @@ export type BackendEditorElementInput = Omit<BackendEditorElementDto, 'version' 
 export function editorDocumentToBackendSaveInput(doc: EditorDocument): BackendEditorDocumentSaveInput {
   const serialized = toSerializedEditorDocument(doc)
   return {
+    expectedVersion: doc.version ?? 0,
     schemaVersion: serialized.schemaVersion,
     camera: serialized.camera,
     nextElementSeq: serialized.nextElementSeq,
@@ -68,7 +70,10 @@ export function backendDtoToEditorDocument(dto: BackendEditorDocumentDto): Edito
     nextElementSeq: dto.nextElementSeq,
     elements: dto.elements.map(backendElementToSerialized),
   }
-  return fromSerializedEditorDocument(serialized)
+  return {
+    ...fromSerializedEditorDocument(serialized),
+    version: dto.version,
+  }
 }
 
 function serializedElementToBackendInput(element: SerializedEditorElement): BackendEditorElementInput {

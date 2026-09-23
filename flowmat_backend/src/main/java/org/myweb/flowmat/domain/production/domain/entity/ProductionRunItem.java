@@ -26,4 +26,10 @@ public class ProductionRunItem {
     private BigDecimal plannedQty;
     private BigDecimal actualQty;
     private String unit;
+
+    /** "manual" when recorded by hand, "bom" when planned from a BOM snapshot. */
+    private String quantitySource;
+
+    /** BOM snapshot: factor from the BOM line unit to the item unit, fixed when the run starts. */
+    private BigDecimal conversionRate;
 }

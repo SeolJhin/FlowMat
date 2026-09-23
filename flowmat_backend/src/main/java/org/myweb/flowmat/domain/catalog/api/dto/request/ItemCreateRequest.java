@@ -10,6 +10,8 @@ public record ItemCreateRequest(
     String resourceCategory,
     String resourceType,
     String unitId,
-    String itemStatus
+    String itemStatus,
+    /** "Y": stock, receipts and production of this item must name a LOT. Defaults to "N". */
+    String lotManageYn
 ) {
 }

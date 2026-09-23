@@ -12,6 +12,9 @@ public record ProductionRunItemResponse(
     String direction,
     BigDecimal plannedQty,
     BigDecimal actualQty,
-    String unit
+    String unit,
+    /** "manual" or "bom" (planned from the BOM snapshot at run start). */
+    String quantitySource,
+    BigDecimal conversionRate
 ) {
 }

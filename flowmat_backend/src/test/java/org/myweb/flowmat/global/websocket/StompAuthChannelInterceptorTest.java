@@ -6,6 +6,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -22,6 +24,30 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 
 @ExtendWith(MockitoExtension.class)
 class StompAuthChannelInterceptorTest {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/topic/**", "/topic/workflow/*/graph", "/topic/workflow/workflow-1/**",
+        "/topic/other", "/topic/workflow/workflow-1/unknown"})
+    void rejectsWildcardAndUnknownSubscriptions(String destination) {
+        assertRejected(StompCommand.SUBSCRIBE, destination);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/topic/workflow/workflow-1/graph", "/topic/workflow/workflow-1/presence",
+        "/app/workflow/*/presence", "/app/unknown"})
+    void rejectsBrokerSendsAndUnknownApplicationDestinations(String destination) {
+        assertRejected(StompCommand.SEND, destination);
+    }
+
+    private void assertRejected(StompCommand command, String destination) {
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(command);
+        accessor.setLeaveMutable(true);
+        accessor.setDestination(destination);
+        accessor.setUser(new UsernamePasswordAuthenticationToken(new AuthUser("user-1"), null));
+        Message<byte[]> message = MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders());
+        assertThatThrownBy(() -> new StompAuthChannelInterceptor(jwtProvider, projectAccessService).preSend(message, null))
+            .isInstanceOf(BusinessException.class).extracting("errorCode").isEqualTo(ErrorCode.FORBIDDEN);
+    }
 
     @Mock
     private ProjectAccessService projectAccessService;

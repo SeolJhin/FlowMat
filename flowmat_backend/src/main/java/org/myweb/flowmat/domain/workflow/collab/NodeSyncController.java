@@ -1,6 +1,8 @@
 package org.myweb.flowmat.domain.workflow.collab;
 
 import java.security.Principal;
+import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.collab.dto.NodeMoveMessage;
 import org.myweb.flowmat.global.security.AuthUser;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
@@ -15,7 +17,10 @@ import org.springframework.stereotype.Controller;
  * DB 에 쓰지 않는다 — 드래그 종료 시 최종 위치 저장은 REST PUT /api/processes/{id} 가 담당한다.
  */
 @Controller
+@RequiredArgsConstructor
 public class NodeSyncController {
+
+    private final ProjectAccessService projectAccessService;
 
     @MessageMapping("/workflow/{workflowId}/node-move")
     @SendTo("/topic/workflow/{workflowId}/node-move")
@@ -25,6 +30,15 @@ public class NodeSyncController {
         Principal principal
     ) {
         String userId = resolveUserId(principal);
+        projectAccessService.requireWorkflowReadAccess(workflowId, userId);
+        if (message == null || message.processId() == null || message.processId().isBlank()
+            || message.processId().length() > 128
+            || !Double.isFinite(message.x()) || !Double.isFinite(message.y())
+            || message.x() < -1_000_000d || message.x() > 1_000_000d
+            || message.y() < -1_000_000d || message.y() > 1_000_000d
+            || message.clientId() == null || message.clientId().isBlank() || message.clientId().length() > 128) {
+            throw new IllegalArgumentException("Invalid node move payload");
+        }
         return message.withServerValues(userId, workflowId);
     }
 

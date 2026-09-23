@@ -5,6 +5,7 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.project.api.dto.request.ProjectInviteAcceptRequest;
 import org.myweb.flowmat.domain.project.api.dto.request.ProjectInviteRequest;
+import org.myweb.flowmat.domain.project.api.dto.response.ProjectInvitePreviewResponse;
 import org.myweb.flowmat.domain.project.api.dto.response.ProjectInviteResponse;
 import org.myweb.flowmat.domain.project.api.dto.response.ProjectMemberResponse;
 import org.myweb.flowmat.domain.project.application.ProjectInviteService;
@@ -33,6 +34,11 @@ public class ProjectInviteController {
     @PostMapping
     public ApiResponse<ProjectInviteResponse> createInvite(@Valid @RequestBody ProjectInviteRequest request) {
         return ApiResponse.ok(projectInviteService.createInvite(request));
+    }
+
+    @GetMapping("/preview")
+    public ApiResponse<ProjectInvitePreviewResponse> previewInvite(@RequestParam("token") String token) {
+        return ApiResponse.ok(projectInviteService.previewInvite(token));
     }
 
     @PostMapping("/accept")

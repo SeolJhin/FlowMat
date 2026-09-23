@@ -224,7 +224,7 @@ public class AuthServiceImpl implements AuthService {
 
         String userId = jwtProvider.resolveUserId(refreshToken);
         String jti = jwtProvider.resolveJti(refreshToken);
-        AuthRedisStore.RefreshTokenEntry entry = authRedisStore.getRefreshToken(jti);
+        AuthRedisStore.RefreshTokenEntry entry = authRedisStore.consumeRefreshToken(jti, userId);
         if (entry == null) {
             throw new BusinessException(ErrorCode.REFRESH_TOKEN_NOT_FOUND);
         }
@@ -241,7 +241,6 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(ErrorCode.UNAUTHORIZED);
         }
 
-        authRedisStore.revokeRefreshToken(jti, userId);
         return issueTokens(user, entry.deviceId());
     }
 

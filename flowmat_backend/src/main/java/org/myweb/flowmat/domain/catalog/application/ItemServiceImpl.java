@@ -7,6 +7,8 @@ import org.myweb.flowmat.domain.catalog.api.dto.request.ItemUpdateRequest;
 import org.myweb.flowmat.domain.catalog.api.dto.response.ItemResponse;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
+import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
@@ -25,6 +27,23 @@ public class ItemServiceImpl implements ItemService {
     private final ItemRepository itemRepository;
     private final IdGenerator idGenerator;
     private final ProjectAccessService projectAccessService;
+    private final UnitMasterRepository unitMasterRepository;
+    private final InventoryRepository inventoryRepository;
+
+    /** Blank clears the unit; otherwise it must reference an active unit_master row. */
+    private String requireActiveUnit(String unitId) {
+        String normalized = trimToNull(unitId);
+        if (normalized == null) {
+            return null;
+        }
+        boolean active = unitMasterRepository.findById(normalized)
+            .map(unit -> "Y".equalsIgnoreCase(unit.getActiveYn()))
+            .orElse(false);
+        if (!active) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Unit '" + normalized + "' does not exist or is inactive.");
+        }
+        return normalized;
+    }
 
     @Override
     public List<ItemResponse> listItems(String projectId) {
@@ -47,8 +66,9 @@ public class ItemServiceImpl implements ItemService {
         item.setItemType(defaultIfBlank(request.itemType(), "generic"));
         item.setResourceCategory(defaultIfBlank(request.resourceCategory(), "material"));
         item.setResourceType(trimToNull(request.resourceType()));
-        item.setUnitId(trimToNull(request.unitId()));
+        item.setUnitId(requireActiveUnit(request.unitId()));
         item.setItemStatus(defaultIfBlank(request.itemStatus(), "active"));
+        item.setLotManageYn(yn(request.lotManageYn()));
         item.setDeletedYn(NOT_DELETED);
         return toResponse(itemRepository.save(item));
     }
@@ -78,10 +98,18 @@ public class ItemServiceImpl implements ItemService {
             item.setResourceType(trimToNull(request.resourceType()));
         }
         if (request.unitId() != null) {
-            item.setUnitId(trimToNull(request.unitId()));
+            item.setUnitId(requireActiveUnit(request.unitId()));
         }
         if (hasText(request.itemStatus())) {
             item.setItemStatus(request.itemStatus().trim().toLowerCase());
+        }
+        if (request.lotManageYn() != null && !yn(request.lotManageYn()).equals(item.getLotManageYn())) {
+            // Existing stock rows were created under the old rule; switching would leave them inconsistent.
+            if (inventoryRepository.existsByItemIdAndDeletedYn(item.getItemId(), NOT_DELETED)) {
+                throw new BusinessException(ErrorCode.CONFLICT,
+                    "LOT tracking can only change while the item has no stock records.");
+            }
+            item.setLotManageYn(yn(request.lotManageYn()));
         }
         return toResponse(itemRepository.save(item));
     }
@@ -111,8 +139,13 @@ public class ItemServiceImpl implements ItemService {
             item.getResourceCategory(),
             item.getResourceType(),
             item.getUnitId(),
-            item.getItemStatus()
+            item.getItemStatus(),
+            item.getLotManageYn()
         );
+    }
+
+    private static String yn(String value) {
+        return "Y".equalsIgnoreCase(value == null ? null : value.trim()) ? "Y" : "N";
     }
 
     private static boolean hasText(String value) {

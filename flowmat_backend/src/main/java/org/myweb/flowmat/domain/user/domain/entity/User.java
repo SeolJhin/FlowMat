@@ -10,6 +10,8 @@ import lombok.Setter;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import org.myweb.flowmat.global.common.BaseTimeEntity;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Getter
 @Setter
@@ -53,6 +55,7 @@ public class User extends BaseTimeEntity {
     @Column(name = "pwd_updated_at")
     private OffsetDateTime pwdUpdatedAt;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "delete_yn")
     private String deleteYn;
 
@@ -68,6 +71,7 @@ public class User extends BaseTimeEntity {
     @Column(name = "withdrawn_at")
     private OffsetDateTime withdrawnAt;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "email_verified_yn")
     private String emailVerifiedYn;
 

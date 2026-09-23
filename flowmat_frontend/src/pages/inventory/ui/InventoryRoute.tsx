@@ -1,34 +1,57 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useItemsQuery } from '../../../entities/catalog/api/useItemsQuery'
 import { useCreateItemMutation } from '../../../entities/catalog/api/useCreateItemMutation'
 import { useDeleteItemMutation } from '../../../entities/catalog/api/useDeleteItemMutation'
 import { useUpdateItemMutation } from '../../../entities/catalog/api/useUpdateItemMutation'
+import { useUnitsQuery } from '../../../entities/catalog/api/useUnitsQuery'
+import { useMyPermissionsQuery } from '../../../entities/auth/api/useMyPermissionsQuery'
 import type { ItemDto } from '../../../shared/types/api'
+import { errorMessage } from '../../../shared/lib/errorMessage'
+import { StockPanel } from './StockPanel'
+import { UnitsPanel } from './UnitsPanel'
+
+const TABS = ['items', 'stock', 'units'] as const
+type Tab = (typeof TABS)[number]
+const TAB_LABELS: Record<Tab, string> = { items: 'Items', stock: 'Stock', units: 'Units' }
+
+const ITEM_TYPE_SUGGESTIONS = ['generic', 'raw_material', 'component', 'semi_finished', 'finished_good', 'consumable']
 
 const RESOURCE_CATEGORIES = ['material', 'labor', 'energy', 'equipment', 'other']
 const ITEM_STATUSES = ['active', 'inactive', 'discontinued']
 
 export function InventoryRoute() {
   const { projectId = '' } = useParams<{ projectId: string }>()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedTab = searchParams.get('tab')
+  const tab: Tab = (TABS as readonly string[]).includes(requestedTab ?? '') ? (requestedTab as Tab) : 'items'
   const itemsQuery = useItemsQuery(projectId)
   const items = itemsQuery.data ?? []
+  // Include inactive units so items that still reference one keep a readable label.
+  const units = useUnitsQuery(true).data ?? []
+  const unitLabel = new Map(units.map((unit) => [unit.unitId, unit.unitCode]))
+  const canManageMasterData = useMyPermissionsQuery().data?.canManageMasterData ?? false
 
   const createMutation = useCreateItemMutation()
   const updateMutation = useUpdateItemMutation()
   const deleteMutation = useDeleteItemMutation(projectId)
 
   const [editingItem, setEditingItem] = useState<ItemDto | null>(null)
-  const [form, setForm] = useState({
+  const EMPTY_ITEM_FORM = {
     itemCode: '',
     itemName: '',
+    itemType: 'generic',
     resourceCategory: 'material',
+    unitId: '',
     itemStatus: 'active',
-  })
+  }
+  const [form, setForm] = useState(EMPTY_ITEM_FORM)
 
   function resetForm() {
-    setForm({ itemCode: '', itemName: '', resourceCategory: 'material', itemStatus: 'active' })
+    setForm(EMPTY_ITEM_FORM)
     setEditingItem(null)
+    createMutation.reset()
+    updateMutation.reset()
   }
 
   function startEdit(item: ItemDto) {
@@ -36,49 +59,86 @@ export function InventoryRoute() {
     setForm({
       itemCode: item.itemCode,
       itemName: item.itemName,
+      itemType: item.itemType ?? 'generic',
       resourceCategory: item.resourceCategory ?? 'material',
+      unitId: item.unitId ?? '',
       itemStatus: item.itemStatus,
     })
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (editingItem) {
-      await updateMutation.mutateAsync({
-        itemId: editingItem.itemId,
-        projectId,
-        itemName: form.itemName,
-        resourceCategory: form.resourceCategory,
-        itemStatus: form.itemStatus,
-      })
-    } else {
-      await createMutation.mutateAsync({
-        projectId,
-        itemCode: form.itemCode,
-        itemName: form.itemName,
-        resourceCategory: form.resourceCategory,
-        itemStatus: form.itemStatus,
-      })
+    try {
+      if (editingItem) {
+        await updateMutation.mutateAsync({
+          itemId: editingItem.itemId,
+          projectId,
+          itemName: form.itemName,
+          itemType: form.itemType.trim() || undefined,
+          resourceCategory: form.resourceCategory,
+          unitId: form.unitId,
+          itemStatus: form.itemStatus,
+        })
+      } else {
+        await createMutation.mutateAsync({
+          projectId,
+          itemCode: form.itemCode,
+          itemName: form.itemName,
+          itemType: form.itemType.trim() || undefined,
+          resourceCategory: form.resourceCategory,
+          unitId: form.unitId || undefined,
+          itemStatus: form.itemStatus,
+        })
+      }
+      resetForm()
+    } catch {
+      // Surfaced through the mutation error state below the form.
     }
-    resetForm()
   }
 
-  async function handleDelete(itemId: string) {
+  function handleDelete(itemId: string) {
     if (!window.confirm('Delete this item?')) return
-    await deleteMutation.mutateAsync(itemId)
-    if (editingItem?.itemId === itemId) resetForm()
+    deleteMutation.mutate(itemId, {
+      onSuccess: () => {
+        if (editingItem?.itemId === itemId) resetForm()
+      },
+    })
   }
 
   const isPending = createMutation.isPending || updateMutation.isPending
 
   return (
-    <div style={{ padding: 32, maxWidth: 960, margin: '0 auto' }}>
+    <div style={{ padding: 32, maxWidth: 1120, margin: '0 auto' }}>
       <Link to="/" style={{ fontSize: 13, color: 'var(--accent)' }}>Back to home</Link>
       <h1>Inventory</h1>
-      <p style={{ color: 'var(--text)', opacity: 0.6, marginTop: 0 }}>
-        Project <code>{projectId}</code>
-      </p>
 
+      <div role="tablist" style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', marginBottom: 20 }}>
+        {TABS.map((name) => (
+          <button
+            key={name}
+            type="button"
+            role="tab"
+            aria-selected={tab === name}
+            onClick={() => setSearchParams(name === 'items' ? {} : { tab: name }, { replace: true })}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              borderBottom: tab === name ? '2px solid var(--accent)' : '2px solid transparent',
+              borderRadius: 0,
+              padding: '8px 14px',
+              fontWeight: tab === name ? 600 : 400,
+              opacity: tab === name ? 1 : 0.65,
+            }}
+          >
+            {name === 'items' ? `Items (${items.length})` : TAB_LABELS[name]}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'stock' && <StockPanel projectId={projectId} items={items} />}
+      {tab === 'units' && <UnitsPanel canManage={canManageMasterData} />}
+
+      {tab === 'items' && (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>
         <section>
           {itemsQuery.isLoading && <p>Loading items...</p>}
@@ -92,6 +152,7 @@ export function InventoryRoute() {
                 <th style={{ padding: '8px 6px' }}>Code</th>
                 <th style={{ padding: '8px 6px' }}>Name</th>
                 <th style={{ padding: '8px 6px' }}>Category</th>
+                <th style={{ padding: '8px 6px' }}>Unit</th>
                 <th style={{ padding: '8px 6px' }}>Status</th>
                 <th style={{ padding: '8px 6px' }}></th>
               </tr>
@@ -108,6 +169,9 @@ export function InventoryRoute() {
                   <td style={{ padding: '8px 6px' }}><code>{item.itemCode}</code></td>
                   <td style={{ padding: '8px 6px' }}>{item.itemName}</td>
                   <td style={{ padding: '8px 6px', opacity: 0.7 }}>{item.resourceCategory ?? '-'}</td>
+                  <td style={{ padding: '8px 6px', opacity: 0.7 }}>
+                    {item.unitId ? unitLabel.get(item.unitId) ?? item.unitId : '-'}
+                  </td>
                   <td style={{ padding: '8px 6px', opacity: 0.7 }}>{item.itemStatus}</td>
                   <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>
                     <button type="button" onClick={() => startEdit(item)} style={{ marginRight: 4, fontSize: 12 }}>
@@ -115,7 +179,7 @@ export function InventoryRoute() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => void handleDelete(item.itemId)}
+                      onClick={() => handleDelete(item.itemId)}
                       style={{ fontSize: 12, color: '#dc2626', border: '1px solid #fca5a5', background: '#fef2f2' }}
                     >
                       Delete
@@ -146,9 +210,33 @@ export function InventoryRoute() {
               <input value={form.itemName} onChange={(e) => setForm((f) => ({ ...f, itemName: e.target.value }))} required />
             </label>
             <label style={{ display: 'grid', gap: 4 }}>
+              <span>Type</span>
+              <input
+                list="item-type-suggestions"
+                value={form.itemType}
+                onChange={(e) => setForm((f) => ({ ...f, itemType: e.target.value }))}
+              />
+              <datalist id="item-type-suggestions">
+                {ITEM_TYPE_SUGGESTIONS.map((type) => <option key={type} value={type} />)}
+              </datalist>
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
               <span>Category</span>
               <select value={form.resourceCategory} onChange={(e) => setForm((f) => ({ ...f, resourceCategory: e.target.value }))}>
                 {RESOURCE_CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span>Unit</span>
+              <select value={form.unitId} onChange={(e) => setForm((f) => ({ ...f, unitId: e.target.value }))}>
+                <option value="">None</option>
+                {units
+                  .filter((unit) => unit.activeYn === 'Y' || unit.unitId === form.unitId)
+                  .map((unit) => (
+                    <option key={unit.unitId} value={unit.unitId}>
+                      {unit.unitCode} · {unit.unitName} ({unit.unitType})
+                    </option>
+                  ))}
               </select>
             </label>
             <label style={{ display: 'grid', gap: 4 }}>
@@ -168,11 +256,14 @@ export function InventoryRoute() {
               )}
             </div>
             {(createMutation.isError || updateMutation.isError) && (
-              <p style={{ color: '#dc2626', fontSize: 12, margin: 0 }}>Failed to save item.</p>
+              <p style={{ color: '#dc2626', fontSize: 12, margin: 0 }}>
+                {errorMessage(createMutation.error ?? updateMutation.error, 'Failed to save item.')}
+              </p>
             )}
           </form>
         </section>
       </div>
+      )}
     </div>
   )
 }

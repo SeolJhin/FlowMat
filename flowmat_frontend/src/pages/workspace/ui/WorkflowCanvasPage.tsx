@@ -2,7 +2,6 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState, type MutableR
 import { useIsMutating, useQueryClient } from '@tanstack/react-query'
 import type {
   CanvasAnnotationPoint,
-  CanvasAnnotationViewModel,
   ConnectCompletePayload,
   ConnectStartPayload,
   WorkflowCanvasViewModel,
@@ -13,6 +12,7 @@ import { applyGraphChangesToCanvas } from '../../../entities/workflow/model/appl
 import { useWorkspaceStore } from '../model/workspaceStore'
 import { useWorkflowCanvasActions } from '../model/useWorkflowCanvasActions'
 import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
+import { createWorkspaceSelectionCommands } from '../model/workspaceSelectionCommands'
 import { getRelatedConnectionIds } from '../../../entities/workflow/model/connectionPolicy'
 import { useAutoLayout } from '../model/useAutoLayout'
 import { CANVAS_ACTIONS } from '../model/canvasActions'
@@ -37,14 +37,6 @@ import {
   fetchEditorDocument,
   saveEditorDocument,
 } from '../../../entities/editor-document/api/editorDocumentApi'
-import {
-  computeAlignedPosition,
-  computeDistributedPositions,
-  computeSelectionBounds,
-  type AlignDirection,
-  type DistributeAxis,
-  type LayoutBox,
-} from '../../../entities/canvas-annotation/model/annotationLayout'
 import {
   preloadCanvasViewport,
   preloadConnectionInspector,
@@ -134,6 +126,11 @@ const EDITOR_TOOL_DEFINITIONS: Array<{
 const EMPTY_EDITOR_SELECTION: WorkspaceEditorSelectionSnapshot = Object.freeze({
   selectedIds: [],
   elements: [],
+  selectionKind: 'none',
+  canAlign: false,
+  canDistribute: false,
+  canGroup: false,
+  canUngroup: false,
   canUndo: false,
   canRedo: false,
 })
@@ -589,7 +586,6 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   const batchAnnotationMutation = useBatchCanvasAnnotationMutation(canvas.workflow.workflowId)
   const canEditAnnotations =
     canvas.workflow.currentUserRole === 'editor' || canvas.workflow.currentUserRole === 'owner'
-  const annotationSelectionRef = useRef<() => string[]>(() => [])
 
   // Presence: remote cursor + node-editing state
   const [remoteCursors, setRemoteCursors] = useState<
@@ -1274,71 +1270,6 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
     await Promise.all(annotationIds.map((annotationId) => deleteAnnotationMutation.mutateAsync(annotationId)))
   }
 
-  function getSelectedAnnotations(): CanvasAnnotationViewModel[] {
-    const ids = new Set(annotationSelectionRef.current())
-    return canvas.annotations.filter((annotation) => ids.has(annotation.id))
-  }
-
-  function toLayoutBox(annotation: CanvasAnnotationViewModel): LayoutBox {
-    return {
-      id: annotation.id,
-      x: annotation.position.x,
-      y: annotation.position.y,
-      width: annotation.size.width,
-      height: annotation.size.height,
-    }
-  }
-
-  async function handleAlign(direction: AlignDirection) {
-    if (editorSelection.elements.length >= 2) {
-      editorCommandApiRef.current?.alignSelected(direction)
-      return
-    }
-    if (!canEditAnnotations) return
-    const selected = getSelectedAnnotations()
-    if (selected.length < 2) return
-    const bounds = computeSelectionBounds(selected.map(toLayoutBox))
-    const items = selected.map((annotation) => {
-      const position = computeAlignedPosition(toLayoutBox(annotation), bounds, direction)
-      return { annotationId: annotation.id, posX: position.x, posY: position.y }
-    })
-    await batchAnnotationMutation.mutateAsync({ items })
-  }
-
-  async function handleDistribute(axis: DistributeAxis) {
-    if (editorSelection.elements.length >= 3) {
-      editorCommandApiRef.current?.distributeSelected(axis)
-      return
-    }
-    if (!canEditAnnotations) return
-    const selected = getSelectedAnnotations()
-    if (selected.length < 3) return
-    const positions = computeDistributedPositions(selected.map(toLayoutBox), axis)
-    const items = positions.map((position) => ({
-      annotationId: position.id,
-      posX: position.x,
-      posY: position.y,
-    }))
-    await batchAnnotationMutation.mutateAsync({ items })
-  }
-
-  async function handleGroup() {
-    if (!canEditAnnotations) return
-    const selected = getSelectedAnnotations()
-    if (selected.length < 2) return
-    const groupId = `grp_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
-    const items = selected.map((annotation) => ({ annotationId: annotation.id, groupId }))
-    await batchAnnotationMutation.mutateAsync({ items })
-  }
-
-  async function handleUngroup() {
-    if (!canEditAnnotations) return
-    const selected = getSelectedAnnotations()
-    if (selected.length === 0) return
-    const items = selected.map((annotation) => ({ annotationId: annotation.id, groupId: '' }))
-    await batchAnnotationMutation.mutateAsync({ items })
-  }
-
   async function handleNodePick(tool: Parameters<typeof createNodeFromTool>[0]) {
     if (!nodePicker) return
     closeNodePicker()
@@ -1349,17 +1280,15 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
     }
   }
 
-  const canAlignSelection = editorSelection.elements.length >= 2 || canEditAnnotations
-  const canDistributeSelection = editorSelection.elements.length >= 3 || canEditAnnotations
-  // Mirrors handleAlign/handleDistribute's own editor-vs-legacy branch, but done here
-  // instead of inside handleGroup/handleUngroup — those two are left untouched per the
-  // migration plan. WorkspaceEditorCommandApi.groupSelected/ungroupSelected already ship
-  // (see WorkspaceEditorLayer.tsx), so this reuses that instead of disabling the button.
-  const canGroupSelection = editorSelection.elements.length >= 2 || canEditAnnotations
-  const canUngroupSelection = editorSelection.elements.length > 0 || canEditAnnotations
-
-  // Ribbon step 2: Home tab wired to the same handlers the old topbar buttons used.
   const ribbonHandlers: RibbonButtonHandlers = {
+    ...createWorkspaceSelectionCommands({
+      selection: editorSelection,
+      editable: canEditAnnotations,
+      editorApi: editorCommandApiRef.current,
+      annotations: canvas.annotations,
+      batchAnnotations: (input) => batchAnnotationMutation.mutateAsync(input),
+      onError: setWorkspaceMessage,
+    }),
     'select-pointer': { onClick: () => setActiveTool('select'), active: activeTool === 'select' },
     'add-node': { onClick: () => void addNode() },
     undo: {
@@ -1432,68 +1361,6 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
       onClick: () => editorCommandApiRef.current?.sendSelectedToBack(),
       disabled: !editorCommandApiRef.current || editorSelection.elements.length === 0,
       title: 'Send to back',
-    },
-    'align-left': {
-      onClick: () => void handleAlign('left'),
-      disabled: !canAlignSelection,
-      title: 'Align left',
-    },
-    'align-center-x': {
-      onClick: () => void handleAlign('centerX'),
-      disabled: !canAlignSelection,
-      title: 'Align center',
-    },
-    'align-right': {
-      onClick: () => void handleAlign('right'),
-      disabled: !canAlignSelection,
-      title: 'Align right',
-    },
-    'align-top': {
-      onClick: () => void handleAlign('top'),
-      disabled: !canAlignSelection,
-      title: 'Align top',
-    },
-    'align-center-y': {
-      onClick: () => void handleAlign('centerY'),
-      disabled: !canAlignSelection,
-      title: 'Align middle',
-    },
-    'align-bottom': {
-      onClick: () => void handleAlign('bottom'),
-      disabled: !canAlignSelection,
-      title: 'Align bottom',
-    },
-    'distribute-horizontal': {
-      onClick: () => void handleDistribute('horizontal'),
-      disabled: !canDistributeSelection,
-      title: 'Distribute horizontally',
-    },
-    'distribute-vertical': {
-      onClick: () => void handleDistribute('vertical'),
-      disabled: !canDistributeSelection,
-      title: 'Distribute vertically',
-    },
-    group: {
-      onClick: () => {
-        if (editorSelection.elements.length >= 2) {
-          editorCommandApiRef.current?.groupSelected()
-          return
-        }
-        void handleGroup()
-      },
-      disabled: !canGroupSelection,
-      title: 'Group selected shapes',
-    },
-    ungroup: {
-      onClick: () => {
-        if (editorSelection.elements.length > 0) {
-          editorCommandApiRef.current?.ungroupSelected()
-          return
-        }
-        void handleUngroup()
-      },
-      disabled: !canUngroupSelection,
-      title: 'Ungroup selected shapes',
     },
     'fit-view': {
       onClick: () => fitViewRef.current(),
@@ -1760,7 +1627,6 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
               onDeleteAnnotations={handleDeleteAnnotations}
               onFitViewReady={(fn) => { fitViewRef.current = fn }}
               onSelectAllReady={(fn) => { selectAllRef.current = fn }}
-              onAnnotationSelectionReady={(fn) => { annotationSelectionRef.current = fn }}
               onExportReady={(fn) => { exportPngRef.current = fn }}
               onDeleteReady={(api) => { deleteApiRef.current = api }}
               onPresence={handlePresence}
