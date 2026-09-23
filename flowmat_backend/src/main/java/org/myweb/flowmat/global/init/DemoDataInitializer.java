@@ -6,19 +6,23 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.myweb.flowmat.domain.user.domain.entity.User;
 import org.myweb.flowmat.domain.user.repository.UserRepository;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-@Slf4j
 @Component
 @RequiredArgsConstructor
+@Profile({"dev", "test"})
 public class DemoDataInitializer implements ApplicationRunner {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(DemoDataInitializer.class);
 
     private static final String DEMO_USER_ID  = "demo-owner";
     private static final String DEMO_PASSWORD = "demo1234";
@@ -49,14 +53,14 @@ public class DemoDataInitializer implements ApplicationRunner {
             user.setFailedLoginCount(0);
             user.setPwdUpdatedAt(OffsetDateTime.now());
             userRepository.save(user);
-            log.info("[DemoDataInitializer] demo-owner created (pw: {})", DEMO_PASSWORD);
+            LOGGER.info("[DemoDataInitializer] demo-owner created for the active demo profile.");
             return;
         }
         User user = existing.get();
         if (needsDemoPasswordReset(user.getUserPwd())) {
             user.setUserPwd(passwordEncoder.encode(DEMO_PASSWORD));
             userRepository.save(user);
-            log.info("[DemoDataInitializer] demo-owner password initialized (pw: {})", DEMO_PASSWORD);
+            LOGGER.info("[DemoDataInitializer] demo-owner password initialized for the active demo profile.");
         }
     }
 

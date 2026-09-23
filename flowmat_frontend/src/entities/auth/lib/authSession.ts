@@ -1,9 +1,8 @@
 import type { ApiEnvelope } from '../../../shared/types/api'
 
-const ACCESS_TOKEN_KEY = 'access_token'
-const REFRESH_TOKEN_KEY = 'refresh_token'
 const COOKIE_SESSION_KEY = 'flowmat_refresh_cookie'
 const AUTH_CHANGE_EVENT = 'flowmat-auth-changed'
+let accessToken: string | null = null
 
 function isBrowser() {
   return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined'
@@ -34,21 +33,16 @@ export function parseJwtUserId(token: string): string | null {
 }
 
 export const tokenStorage = {
-  getAccess: () => (isBrowser() ? window.localStorage.getItem(ACCESS_TOKEN_KEY) : null),
-  getRefresh: () => (isBrowser() ? window.localStorage.getItem(REFRESH_TOKEN_KEY) : null),
+  getAccess: () => accessToken,
+  getRefresh: () => null,
   hasCookieBackedSession: () => isBrowser() && window.localStorage.getItem(COOKIE_SESSION_KEY) === '1',
   hasRefreshSessionHint: () => {
     if (!isBrowser()) return false
-    return !!window.localStorage.getItem(REFRESH_TOKEN_KEY) || window.localStorage.getItem(COOKIE_SESSION_KEY) === '1'
+    return window.localStorage.getItem(COOKIE_SESSION_KEY) === '1'
   },
-  set: (access: string, refresh?: string | null, options?: { cookieBacked?: boolean }) => {
+  set: (access: string, _refresh?: string | null, options?: { cookieBacked?: boolean }) => {
     if (!isBrowser()) return
-    window.localStorage.setItem(ACCESS_TOKEN_KEY, access)
-    if (refresh && refresh.trim().length > 0) {
-      window.localStorage.setItem(REFRESH_TOKEN_KEY, refresh)
-    } else {
-      window.localStorage.removeItem(REFRESH_TOKEN_KEY)
-    }
+    accessToken = access
     if (options?.cookieBacked === true) {
       window.localStorage.setItem(COOKIE_SESSION_KEY, '1')
     } else if (options?.cookieBacked === false) {
@@ -61,8 +55,7 @@ export const tokenStorage = {
   },
   clear: () => {
     if (!isBrowser()) return
-    window.localStorage.removeItem(ACCESS_TOKEN_KEY)
-    window.localStorage.removeItem(REFRESH_TOKEN_KEY)
+    accessToken = null
     window.localStorage.removeItem(COOKIE_SESSION_KEY)
     notifyAuthChanged()
   },
@@ -71,45 +64,56 @@ export const tokenStorage = {
 let refreshPromise: Promise<boolean> | null = null
 
 async function performRefresh(): Promise<boolean> {
-  const refreshToken = tokenStorage.getRefresh()
   const cookieBacked = tokenStorage.hasCookieBackedSession()
-  if (!refreshToken && !cookieBacked) {
+  if (!cookieBacked) {
     tokenStorage.clear()
     return false
   }
 
   try {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (refreshToken) {
-      headers.Authorization = `Bearer ${refreshToken}`
-    }
+    const csrfToken = await getCsrfToken()
 
     const res = await fetch('/api/auth/refresh', {
       method: 'POST',
       credentials: 'same-origin',
-      headers,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-XSRF-TOKEN': csrfToken,
+      },
     })
     if (!res.ok) {
       tokenStorage.clear()
       return false
     }
 
-    const json = (await res.json()) as ApiEnvelope<{ accessToken: string; refreshToken: string }>
+    const json = (await res.json()) as ApiEnvelope<{ accessToken: string; refreshToken?: string | null }>
     if (!json.success || !json.data?.accessToken) {
       tokenStorage.clear()
       return false
     }
 
-    if (json.data.refreshToken) {
-      tokenStorage.set(json.data.accessToken, json.data.refreshToken, { cookieBacked })
-    } else {
-      tokenStorage.setAccessToken(json.data.accessToken, { cookieBacked: cookieBacked || !refreshToken })
-    }
+    tokenStorage.setAccessToken(json.data.accessToken, { cookieBacked: true })
     return true
   } catch {
     tokenStorage.clear()
     return false
   }
+
+}
+
+async function getCsrfToken(): Promise<string> {
+  if (!isBrowser()) return ''
+  const existing = document.cookie
+    .split('; ')
+    .find((cookie) => cookie.startsWith('XSRF-TOKEN='))
+    ?.slice('XSRF-TOKEN='.length)
+  if (existing) return decodeURIComponent(existing)
+
+  const res = await fetch('/api/auth/csrf', { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Unable to initialize CSRF protection.')
+  const json = (await res.json()) as ApiEnvelope<string>
+  if (!json.success || !json.data) throw new Error('Unable to initialize CSRF protection.')
+  return json.data
 }
 
 export async function refreshAccessToken(): Promise<boolean> {
@@ -123,3 +127,5 @@ export async function refreshAccessToken(): Promise<boolean> {
 
   return refreshPromise
 }
+
+export { getCsrfToken }

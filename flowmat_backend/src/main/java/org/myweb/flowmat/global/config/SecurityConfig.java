@@ -22,6 +22,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
@@ -53,7 +55,18 @@ public class SecurityConfig {
         RequestCorrelationFilter requestCorrelationFilter
     ) throws Exception {
         http
-            .csrf(csrf -> csrf.disable())
+            .csrf(csrf -> {
+                CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+                CsrfTokenRequestAttributeHandler handler = new CsrfTokenRequestAttributeHandler();
+                csrf
+                    .csrfTokenRepository(repository)
+                    .csrfTokenRequestHandler(handler)
+                    .requireCsrfProtectionMatcher(request ->
+                        "POST".equalsIgnoreCase(request.getMethod())
+                            && (request.getRequestURI().endsWith("/auth/refresh")
+                                || request.getRequestURI().endsWith("/auth/logout"))
+                    );
+            })
             .cors(Customizer.withDefaults())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
@@ -63,6 +76,7 @@ public class SecurityConfig {
                     "/auth/guest-token",
                     "/auth/refresh",
                     "/auth/logout",
+                    "/auth/csrf",
                     "/auth/check-nickname",
                     "/auth/find-email",
                     "/auth/reset-password/request",

@@ -1,0 +1,4 @@
+spring:
+  flyway:
+    init-sqls:
+      - SET flowmat.demo_seed_enabled = 'true'

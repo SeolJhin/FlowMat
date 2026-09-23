@@ -18,7 +18,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * STOMP CONNECT 프레임의 Authorization 헤더에서 토큰을 추출해 Principal 을 설정한다.
- * JwtProvider 가 실제 JWT 검증을 담당하며, 현재는 pass-through 스텁 상태.
+ * JwtProvider가 access token의 서명, 만료, token type을 검증하고 workflow별 읽기/쓰기 권한을 확인한다.
  */
 @Component
 public class StompAuthChannelInterceptor implements ChannelInterceptor {

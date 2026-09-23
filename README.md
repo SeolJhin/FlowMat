@@ -7,14 +7,57 @@ This project tracks materials in an ERP workflow.
 Run local Redis and PostgreSQL:
 
 ```bash
-docker compose -f flowmat_backend/compose.yaml up -d
+copy flowmat_backend\.env.example flowmat_backend\.env
+docker compose --env-file flowmat_backend/.env -f flowmat_backend/compose.yaml up -d
 ```
 
 Included health checks:
 - Redis
 - PostgreSQL
 
+The compose services bind to localhost only. Replace the example values in
+`flowmat_backend/.env` before using them outside a disposable local database.
+
+# Authentication security
+
+Login and OAuth responses expose only the access token. The refresh token is
+stored in the `HttpOnly` `flowmat_rt` cookie and is never persisted by the
+frontend JavaScript. Cookie-backed refresh and logout requests require the
+`X-XSRF-TOKEN` header obtained from `/api/auth/csrf`; other state-changing API
+requests use the bearer access token and are not cookie-authenticated.
+
 # Backend Ops
+
+Run backend commands from `flowmat_backend`:
+
+```bash
+cd flowmat_backend
+./gradlew test
+./gradlew build
+```
+
+Run frontend commands from `flowmat_frontend`:
+
+```bash
+cd flowmat_frontend
+npm ci
+npm run dev
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+The canonical applications are `flowmat_backend` and `flowmat_frontend`.
+`legacy` is retained for historical compatibility and is not part of the
+canonical build. The frontend canvas prototype is a development-only feature
+under `flowmat_frontend/src/features/flowmat-canvas-prototype`.
+The repository-root Gradle files are a historical skeleton and are not used by
+the CI workflows; do not use them for backend verification.
+
+Backend CI enforces the current JaCoCo baseline of 45% line coverage and 30%
+branch coverage. The thresholds are intentionally conservative and should be
+raised as security and domain test coverage grows.
 
 Actuator endpoints:
 - `/api/actuator/health`

@@ -1,5 +1,9 @@
 -- V2: Demo seed data for local development.
 -- Idempotent via ON CONFLICT DO UPDATE.
+-- The Flyway init SQL sets flowmat.demo_seed_enabled=false in production.
+DO $$
+BEGIN
+IF current_setting('flowmat.demo_seed_enabled', true) = 'true' THEN
 
 INSERT INTO "users" (
     "user_id", "user_name", "user_email", "user_pwd",
@@ -104,3 +108,5 @@ INSERT INTO "process_connection" (
     'demo-owner', 'demo-owner', 'N'
 ) ON CONFLICT ("connection_id") DO UPDATE
 SET connection_type = EXCLUDED.connection_type;
+END IF;
+END $$;

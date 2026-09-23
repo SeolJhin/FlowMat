@@ -1,6 +1,7 @@
 package org.myweb.flowmat.domain.user.api;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import java.time.Duration;
 import java.util.Locale;
@@ -16,6 +17,7 @@ import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.response.ApiResponse;
 import org.myweb.flowmat.global.security.AuthUser;
+import org.myweb.flowmat.global.security.RefreshTokenCookieService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,6 +38,7 @@ public class FaceAuthController {
 
     private final FaceAuthService faceAuthService;
     private final AuthRedisStore authRedisStore;
+    private final RefreshTokenCookieService refreshTokenCookieService;
 
     @GetMapping("/count")
     public ApiResponse<Integer> count(@AuthenticationPrincipal AuthUser authUser) {
@@ -60,26 +63,38 @@ public class FaceAuthController {
     }
 
     @PostMapping("/select")
-    public ApiResponse<UserTokenResponse> select(HttpServletRequest request, @Valid @RequestBody FaceSelectRequest body) {
+    public ApiResponse<UserTokenResponse> select(
+        HttpServletRequest request,
+        HttpServletResponse response,
+        @Valid @RequestBody FaceSelectRequest body
+    ) {
         enforceRateLimit("face-select-ip", clientIpKey(request), FACE_SELECT_IP_LIMIT, FACE_RATE_WINDOW);
-        return ApiResponse.ok(faceAuthService.selectAccount(
+        UserTokenResponse tokenResponse = faceAuthService.selectAccount(
             body.getMatchToken(),
             body.getUserId(),
             body.getDeviceId(),
             request.getHeader("User-Agent"),
             extractIp(request)
-        ));
+        );
+        refreshTokenCookieService.writeRefreshToken(request, response, tokenResponse.refreshToken());
+        return ApiResponse.ok(cookieBackedResponse(tokenResponse));
     }
 
     @PostMapping("/login")
-    public ApiResponse<UserTokenResponse> login(HttpServletRequest request, @Valid @RequestBody FaceLoginRequest body) {
+    public ApiResponse<UserTokenResponse> login(
+        HttpServletRequest request,
+        HttpServletResponse response,
+        @Valid @RequestBody FaceLoginRequest body
+    ) {
         enforceRateLimit("face-login-ip", clientIpKey(request), FACE_LOGIN_IP_LIMIT, FACE_RATE_WINDOW);
-        return ApiResponse.ok(faceAuthService.loginByFace(
+        UserTokenResponse tokenResponse = faceAuthService.loginByFace(
             body.getDescriptor(),
             body.getDeviceId(),
             request.getHeader("User-Agent"),
             extractIp(request)
-        ));
+        );
+        refreshTokenCookieService.writeRefreshToken(request, response, tokenResponse.refreshToken());
+        return ApiResponse.ok(cookieBackedResponse(tokenResponse));
     }
 
     @DeleteMapping
@@ -113,5 +128,14 @@ public class FaceAuthController {
             return "unknown";
         }
         return value.replace('|', '_').replace(' ', '_');
+    }
+
+    private UserTokenResponse cookieBackedResponse(UserTokenResponse response) {
+        return new UserTokenResponse(
+            response.accessToken(),
+            null,
+            response.deviceId(),
+            response.additionalInfoRequired()
+        );
     }
 }

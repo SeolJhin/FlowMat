@@ -1,6 +1,6 @@
 import { normalizeUiError } from '../lib/normalizeUiError'
 import type { ApiEnvelope } from '../types/api'
-import { refreshAccessToken } from '../../entities/auth/lib/authSession'
+import { refreshAccessToken, tokenStorage } from '../../entities/auth/lib/authSession'
 
 const BASE = '/api'
 
@@ -12,7 +12,7 @@ function isApiEnvelope(value: unknown): value is ApiEnvelope<unknown> {
 
 function buildHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const token = localStorage.getItem('access_token')
+  const token = tokenStorage.getAccess()
   if (token) headers['Authorization'] = `Bearer ${token}`
   return headers
 }
@@ -36,6 +36,7 @@ async function requestInternal<T>(method: HttpMethod, path: string, body: unknow
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: buildHeaders(),
+    credentials: 'same-origin',
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
 

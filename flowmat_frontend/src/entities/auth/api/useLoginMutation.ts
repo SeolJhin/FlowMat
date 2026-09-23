@@ -2,7 +2,7 @@ import { useMutation } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse, unwrapApiVoidResponse } from '../../../shared/api/unwrapApiResponse'
 import type { ApiEnvelope } from '../../../shared/types/api'
-import { parseJwtUserId, refreshAccessToken, tokenStorage } from '../lib/authSession'
+import { getCsrfToken, parseJwtUserId, refreshAccessToken, tokenStorage } from '../lib/authSession'
 
 export interface LoginRequest {
   userIdOrEmail: string
@@ -21,7 +21,7 @@ export interface SignupRequest {
 
 export interface TokenResponse {
   accessToken: string
-  refreshToken: string
+  refreshToken?: string | null
 }
 
 async function login(req: LoginRequest): Promise<TokenResponse> {
@@ -62,7 +62,7 @@ async function requestDormant(): Promise<void> {
 export function useLoginMutation() {
   return useMutation({
     mutationFn: login,
-    onSuccess: (data) => tokenStorage.set(data.accessToken, data.refreshToken, { cookieBacked: false }),
+    onSuccess: (data) => tokenStorage.setAccessToken(data.accessToken, { cookieBacked: true }),
   })
 }
 
@@ -93,13 +93,12 @@ export function useRequestDormantMutation() {
 export function useLogoutMutation() {
   return useMutation({
     mutationFn: async () => {
-      const rt = tokenStorage.getRefresh()
-      if (!rt) return
       try {
+        const csrfToken = await getCsrfToken()
         await fetch('/api/auth/logout', {
           method: 'POST',
           credentials: 'same-origin',
-          headers: { Authorization: `Bearer ${rt}`, 'Content-Type': 'application/json' },
+          headers: { 'X-XSRF-TOKEN': csrfToken, 'Content-Type': 'application/json' },
         })
       } catch {
         // Ignore logout transport failures. Local session is cleared regardless.

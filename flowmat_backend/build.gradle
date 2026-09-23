@@ -70,6 +70,25 @@ tasks.named('test') {
 	finalizedBy tasks.named('jacocoTestReport')
 }
 
+tasks.named('jacocoTestCoverageVerification') {
+	dependsOn tasks.named('test')
+	violationRules {
+		rule {
+			element = 'BUNDLE'
+			limit {
+				counter = 'LINE'
+				value = 'COVEREDRATIO'
+				minimum = 0.45
+			}
+			limit {
+				counter = 'BRANCH'
+				value = 'COVEREDRATIO'
+				minimum = 0.30
+			}
+		}
+	}
+}
+
 tasks.named('jacocoTestReport') {
 	reports {
 		xml.required = true

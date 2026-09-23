@@ -2,9 +2,9 @@ spring:
   application:
     name: flowmat
   datasource:
-    url: jdbc:postgresql://localhost:5432/flowmat
-    username: flowmat
-    password: flowmat
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
   jpa:
     hibernate:
       ddl-auto: none

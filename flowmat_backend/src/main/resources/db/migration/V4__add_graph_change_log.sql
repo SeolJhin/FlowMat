@@ -1,3 +1,4 @@
+-- Historical migration superseded by RedisGraphChangeStore; retained for deployed Flyway history.
 CREATE TABLE "graph_change_log" (
     "seq" BIGSERIAL PRIMARY KEY,
     "workflow_id" VARCHAR(64) NOT NULL,

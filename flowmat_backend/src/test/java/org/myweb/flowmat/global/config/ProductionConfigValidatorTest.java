@@ -63,4 +63,30 @@ class ProductionConfigValidatorTest {
             .hasMessageContaining("FRONTEND_URL")
             .hasMessageContaining("APP_CORS_ALLOWED_ORIGINS");
     }
+
+    @Test
+    void reportsMissingInfrastructureAndWeakSecret() {
+        ProductionConfigValidator validator = new ProductionConfigValidator(
+            "https://app.flowmat.io",
+            "https://app.flowmat.io/oauth/callback",
+            "https://app.flowmat.io",
+            "short",
+            "smtp.flowmat.io",
+            "",
+            "",
+            "",
+            "",
+            "70000",
+            "smtp",
+            "",
+            ""
+        );
+
+        assertThat(validator.validate())
+            .anySatisfy(problem -> assertThat(problem).contains("DB_URL"))
+            .anySatisfy(problem -> assertThat(problem).contains("DB_USERNAME"))
+            .anySatisfy(problem -> assertThat(problem).contains("REDIS_PORT"))
+            .anySatisfy(problem -> assertThat(problem).contains("MAIL_PORT"))
+            .anySatisfy(problem -> assertThat(problem).contains("at least 32"));
+    }
 }

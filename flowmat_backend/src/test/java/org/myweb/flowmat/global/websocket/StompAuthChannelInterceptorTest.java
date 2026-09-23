@@ -93,6 +93,35 @@ class StompAuthChannelInterceptorTest {
     }
 
     @Test
+    void connectRejectsExpiredAccessToken() {
+        StompAuthChannelInterceptor interceptor = new StompAuthChannelInterceptor(jwtProvider, projectAccessService);
+        String expiredToken = jwtProvider.generateAccessToken("user-1", "user", -1);
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+        accessor.setLeaveMutable(true);
+        accessor.setNativeHeader("Authorization", "Bearer " + expiredToken);
+        Message<byte[]> message = MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders());
+
+        assertThatThrownBy(() -> interceptor.preSend(message, null))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(ErrorCode.TOKEN_EXPIRED);
+    }
+
+    @Test
+    void connectRejectsMalformedAccessToken() {
+        StompAuthChannelInterceptor interceptor = new StompAuthChannelInterceptor(jwtProvider, projectAccessService);
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+        accessor.setLeaveMutable(true);
+        accessor.setNativeHeader("Authorization", "Bearer not-a-jwt");
+        Message<byte[]> message = MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders());
+
+        assertThatThrownBy(() -> interceptor.preSend(message, null))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(ErrorCode.TOKEN_INVALID);
+    }
+
+    @Test
     void workflowSubscribeRequiresAuthenticatedUser() {
         StompAuthChannelInterceptor interceptor = new StompAuthChannelInterceptor(jwtProvider, projectAccessService);
         StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);

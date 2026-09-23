@@ -36,6 +36,7 @@ import org.myweb.flowmat.global.security.RefreshTokenCookieService;
 import org.myweb.flowmat.global.security.oauth.OAuthExchangeStore;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.HttpHeaders;
+import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -125,7 +126,12 @@ public class AuthController {
         enforceRateLimit("login-account", normalizeRateKey(request.userIdOrEmail()), LOGIN_ACCOUNT_LIMIT, LOGIN_RATE_WINDOW);
         UserTokenResponse response = authService.login(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest));
         writeRefreshCookie(httpRequest, httpResponse, response);
-        return ApiResponse.ok(response);
+        return ApiResponse.ok(cookieBackedResponse(response));
+    }
+
+    @GetMapping("/csrf")
+    public ApiResponse<String> csrfToken(CsrfToken csrfToken) {
+        return ApiResponse.ok(csrfToken.getToken());
     }
 
     @PostMapping("/guest-token")
@@ -157,12 +163,7 @@ public class AuthController {
         );
         writeRefreshCookie(httpRequest, httpResponse, response);
         if (cookieBacked) {
-            return ApiResponse.ok(new UserTokenResponse(
-                response.accessToken(),
-                null,
-                response.deviceId(),
-                response.additionalInfoRequired()
-            ));
+            return ApiResponse.ok(cookieBackedResponse(response));
         }
         return ApiResponse.ok(response);
     }
@@ -200,7 +201,7 @@ public class AuthController {
     ) {
         UserTokenResponse response = authService.completeKakaoSignup(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest));
         writeRefreshCookie(httpRequest, httpResponse, response);
-        return ApiResponse.ok(response);
+        return ApiResponse.ok(cookieBackedResponse(response));
     }
 
     @PostMapping("/oauth2/google/complete")
@@ -211,7 +212,7 @@ public class AuthController {
     ) {
         UserTokenResponse response = authService.completeGoogleSignup(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest));
         writeRefreshCookie(httpRequest, httpResponse, response);
-        return ApiResponse.ok(response);
+        return ApiResponse.ok(cookieBackedResponse(response));
     }
 
     @PostMapping("/oauth2/exchange")
@@ -320,6 +321,15 @@ public class AuthController {
         if (tokenResponse != null && tokenResponse.refreshToken() != null && !tokenResponse.refreshToken().isBlank()) {
             refreshTokenCookieService.writeRefreshToken(request, response, tokenResponse.refreshToken());
         }
+    }
+
+    private UserTokenResponse cookieBackedResponse(UserTokenResponse response) {
+        return new UserTokenResponse(
+            response.accessToken(),
+            null,
+            response.deviceId(),
+            response.additionalInfoRequired()
+        );
     }
 
     private void enforceRateLimit(String category, String subject, int limit, Duration window) {
