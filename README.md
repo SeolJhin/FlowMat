@@ -69,7 +69,7 @@ require a separate staging environment. Real Google/Kakao OAuth smoke tests
 remain a staging-only operation.
 
 The `prod` Spring profile disables demo seed data through a Flyway session
-setting. `ProdProfileDemoSeedIntegrationTest` verifies this against a real
+setting. `ProdMigrationIsolationTest` verifies this against a real
 PostgreSQL container; development and test profiles retain explicit demo seed
 opt-in behavior.
 

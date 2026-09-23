@@ -1,0 +1,32 @@
+name: Staging OAuth Smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  oauth-smoke:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+          cache-dependency-path: flowmat_frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: flowmat_frontend
+        run: npm ci
+
+      - name: Install Playwright browser
+        working-directory: flowmat_frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run real provider callback smoke
+        working-directory: flowmat_frontend
+        env:
+          BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+          STAGING_OAUTH_CALLBACK_URL: ${{ secrets.STAGING_OAUTH_CALLBACK_URL }}
+        run: npx playwright test e2e/staging-oauth.spec.ts

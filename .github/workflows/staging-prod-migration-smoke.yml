@@ -1,0 +1,37 @@
+name: Staging Production Migration Smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Verify staging application health
+        env:
+          STAGING_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+        run: |
+          test -n "$STAGING_BASE_URL"
+          curl --fail --silent --show-error "$STAGING_BASE_URL/api/actuator/health"
+
+      - name: Verify production migration isolation
+        env:
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+          STAGING_DB_USERNAME: ${{ secrets.STAGING_DB_USERNAME }}
+          STAGING_DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+        run: |
+          test -n "$STAGING_DB_URL"
+          test -n "$STAGING_DB_USERNAME"
+          test -n "$STAGING_DB_PASSWORD"
+          export PGPASSWORD="$STAGING_DB_PASSWORD"
+          DEMO_COUNT="$(psql "$STAGING_DB_URL" --username "$STAGING_DB_USERNAME" --tuples-only --no-align --command \
+            "select (select count(*) from \"users\" where \"user_id\" = 'demo-owner') + \
+                    (select count(*) from \"project\" where \"project_id\" = 'prj_demo_main') + \
+                    (select count(*) from \"workflow\" where \"workflow_id\" = 'wf_demo_main');")"
+          test "$DEMO_COUNT" = "0"

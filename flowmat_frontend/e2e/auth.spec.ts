@@ -78,6 +78,96 @@ async function mockAuthApi(page: Page) {
   })
 }
 
+async function mockWorkspaceApi(page: Page) {
+  await page.route('**/api/workflows/wf-e2e/canvas', async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        success: true,
+        data: {
+          workflow: {
+            workflowId: 'wf-e2e',
+            projectId: 'prj-e2e',
+            workflowName: 'E2E Workflow',
+            workflowDesc: 'Browser test workflow',
+            workflowType: 'main',
+            workflowStatus: 'active',
+          },
+          graphSeq: 1,
+          currentUserRole: 'owner',
+          processes: [
+            {
+              processId: 'process-e2e',
+              projectId: 'prj-e2e',
+              workflowId: 'wf-e2e',
+              processName: 'Input Node',
+              processType: 'input',
+              nodeType: 'input',
+              processStatus: 'active',
+              colorScheme: 'sky',
+              posX: 100,
+              posY: 100,
+              width: 180,
+              height: 88,
+              processDesc: 'E2E node',
+              version: 1,
+              versionNonce: 1,
+            },
+          ],
+          processIos: [],
+          connections: [],
+          annotations: [],
+        },
+        message: null,
+      }),
+    })
+  })
+
+  await page.route('**/api/workflows/wf-e2e/editor-document', async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        success: true,
+        data: {
+          schemaVersion: 1,
+          camera: { x: 0, y: 0, zoom: 1 },
+          nextElementSeq: 1,
+          version: 1,
+          versionNonce: 1,
+          elements: [],
+        },
+        message: null,
+      }),
+    })
+  })
+
+  await page.route('**/api/workflows/wf-e2e/graph-changes**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ success: true, data: { currentSeq: 1, resetRequired: false, changes: [] }, message: null }),
+    })
+  })
+
+  await page.route('**/api/workflows/wf-e2e/presence', async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ success: true, data: [], message: null }),
+    })
+  })
+
+  await page.route('**/api/workflows?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ success: true, data: [{ workflowId: 'wf-e2e', workflowName: 'E2E Workflow' }], message: null }),
+    })
+  })
+}
+
 test('login stores access token only in memory and refreshes through cookie', async ({ page }) => {
   await mockAuthApi(page)
   await page.goto('/')
@@ -119,7 +209,7 @@ test('two tabs keep separate in-memory access tokens while sharing the cookie se
   await first.locator('input').nth(0).fill('demo-owner')
   await first.locator('input[type="password"]').fill('demo1234')
   await first.getByRole('button', { name: 'Log in' }).click()
-  await expect(first.getByText('Demo Owner')).toBeVisible()
+  await expect(first.getByText('안녕하세요, Demo Owner님')).toBeVisible()
 
   await second.goto('/')
   await expect(second.locator('input').nth(0)).toBeVisible()
@@ -162,7 +252,29 @@ test('a mocked OAuth provider callback completes login without storing a token',
     })
   })
 
-  await page.goto('/oauth/callback?code=mock-provider-code')
+  await page.goto('/oauth2/success?code=mock-provider-code')
   await expect(page.getByText('안녕하세요, Demo Owner님')).toBeVisible()
   expect(await page.evaluate(() => localStorage.getItem('access_token'))).toBeNull()
+})
+
+test('authenticated user can open workspace, select a node, and switch canvas tools', async ({ page }) => {
+  await mockAuthApi(page)
+  await mockWorkspaceApi(page)
+  await page.goto('/')
+  await page.locator('input').nth(0).fill('demo-owner')
+  await page.locator('input[type="password"]').fill('demo1234')
+  await page.getByRole('button', { name: 'Log in' }).click()
+
+  await page.goto('/projects/prj-e2e/workflows/wf-e2e')
+  await expect(page.getByText('E2E Workflow')).toBeVisible()
+  await expect(page.getByText('Input Node')).toBeVisible()
+  await expect(page.getByText('1 nodes | 0 connections')).toBeVisible()
+
+  await page.getByText('Input Node').click()
+  await expect(page.locator('.inspector__title')).toHaveText('Input Node')
+
+  await page.getByRole('button', { name: 'Annotate' }).click()
+  await expect(page.getByRole('button', { name: 'Save Editor' })).toBeVisible()
+  await page.getByRole('button', { name: 'Home' }).click()
+  await expect(page.getByRole('button', { name: 'Fit View' })).toBeVisible()
 })
