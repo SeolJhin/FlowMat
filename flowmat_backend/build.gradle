@@ -86,6 +86,23 @@ tasks.named('jacocoTestCoverageVerification') {
 				minimum = 0.30
 			}
 		}
+		rule {
+			element = 'PACKAGE'
+			includes = [
+				'org/myweb/flowmat/global/security/*.class',
+				'org/myweb/flowmat/domain/project/application/*.class'
+			]
+			limit {
+				counter = 'LINE'
+				value = 'COVEREDRATIO'
+				minimum = 0.50
+			}
+			limit {
+				counter = 'BRANCH'
+				value = 'COVEREDRATIO'
+				minimum = 0.25
+			}
+		}
 	}
 }
 

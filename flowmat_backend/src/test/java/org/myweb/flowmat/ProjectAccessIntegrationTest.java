@@ -57,6 +57,7 @@ class ProjectAccessIntegrationTest extends IntegrationTestSupport {
             Arguments.of("list workflows", get("/workflows").param("projectId", DEMO_PROJECT)),
             Arguments.of("list flow rules", get("/flow-rules").param("projectId", DEMO_PROJECT)),
             Arguments.of("list inventories", get("/inventories").param("projectId", DEMO_PROJECT)),
+            Arguments.of("list lots", get("/lots").param("projectId", DEMO_PROJECT)),
             Arguments.of("list inventory transactions", get("/inventory-transactions").param("projectId", DEMO_PROJECT)),
             Arguments.of("list production runs", get("/production-runs").param("workflowId", DEMO_WORKFLOW)),
             Arguments.of("start production run", post("/production-runs/start")
@@ -133,6 +134,10 @@ class ProjectAccessIntegrationTest extends IntegrationTestSupport {
             Arguments.of("create flow rule", json(post("/flow-rules"),
                 "{\"projectId\":\"" + DEMO_PROJECT + "\",\"targetType\":\"workflow\",\"targetId\":\"" + DEMO_WORKFLOW
                     + "\",\"ruleName\":\"x\",\"conditionExpression\":\"a > 1\"}")),
+            Arguments.of("create process template", json(post("/process-templates"),
+                "{\"templateName\":\"x\",\"templateCategory\":\"process\"}")),
+            Arguments.of("create workflow template", json(post("/workflow-templates"),
+                "{\"templateName\":\"x\",\"templateCategory\":\"workflow\"}")),
 
             // BOM.
             Arguments.of("list BOMs", get("/boms").param("projectId", DEMO_PROJECT)),
