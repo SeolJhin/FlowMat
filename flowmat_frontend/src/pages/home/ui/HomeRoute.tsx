@@ -16,7 +16,7 @@ import {
 } from '../../../entities/auth/api/useLoginMutation'
 import { useCurrentUserQuery } from '../../../entities/auth/api/useCurrentUserQuery'
 import { useMyPermissionsQuery } from '../../../entities/auth/api/useMyPermissionsQuery'
-import { subscribeAuthChange, tokenStorage } from '../../../entities/auth/lib/authSession'
+import { refreshAccessToken, subscribeAuthChange, tokenStorage } from '../../../entities/auth/lib/authSession'
 import {
   preloadInventoryRoute,
   preloadRulesRoute,
@@ -465,6 +465,12 @@ export function HomeRoute() {
       }),
     []
   )
+
+  useEffect(() => {
+    if (!tokenStorage.getAccess() && tokenStorage.hasRefreshSessionHint()) {
+      void refreshAccessToken()
+    }
+  }, [])
 
   useEffect(() => {
     if (authMode !== 'signup') {

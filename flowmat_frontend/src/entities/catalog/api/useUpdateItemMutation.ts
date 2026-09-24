@@ -12,6 +12,8 @@ export interface UpdateItemInput {
   /** Empty string clears the unit. */
   unitId?: string
   itemStatus?: string
+  /** Can only change while the item has no stock records (409 otherwise). */
+  lotManageYn?: 'Y' | 'N'
 }
 
 async function updateItem({ itemId, projectId: _pid, ...payload }: UpdateItemInput): Promise<ItemDto> {

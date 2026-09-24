@@ -18,7 +18,7 @@ jobs:
           STAGING_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
         run: |
           test -n "$STAGING_BASE_URL"
-          curl --fail --silent --show-error "$STAGING_BASE_URL/api/actuator/health"
+          curl --fail --silent --show-error "$STAGING_BASE_URL/api/actuator/health/readiness"
 
       - name: Verify production migration isolation
         env:

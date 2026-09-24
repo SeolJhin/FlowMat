@@ -72,24 +72,39 @@ public class RedisGraphChangeStore {
             );
             return new WorkflowGraphChangesResponse(currentSeq, true, List.of());
         }
+        if (sinceSeq == currentSeq) {
+            return new WorkflowGraphChangesResponse(currentSeq, false, List.of());
+        }
 
         Set<String> members = redisTemplate.opsForZSet()
             .rangeByScore(seqIndexKey(workflowId), sinceSeq + 1, Double.POSITIVE_INFINITY);
         if (members == null || members.isEmpty()) {
-            return new WorkflowGraphChangesResponse(currentSeq, false, List.of());
+            log.warn("Graph change index empty for workflowId={}, sinceSeq={}, currentSeq={}",
+                workflowId, sinceSeq, currentSeq);
+            return new WorkflowGraphChangesResponse(currentSeq, true, List.of());
         }
 
         List<Object> payloads = redisTemplate.opsForHash().multiGet(dataKey(workflowId), new ArrayList<>(members));
+        if (payloads == null || payloads.size() != members.size() || payloads.stream().anyMatch(item -> item == null)) {
+            log.warn("Graph change payload gap for workflowId={}, sinceSeq={}", workflowId, sinceSeq);
+            return new WorkflowGraphChangesResponse(currentSeq, true, List.of());
+        }
         List<GraphChangeMessage> changes = new ArrayList<>();
-        if (payloads != null) {
-            for (Object payload : payloads) {
-                if (payload == null) {
-                    continue;
-                }
-                changes.add(readMessage(payload.toString()));
-            }
+        for (Object payload : payloads) {
+            changes.add(readMessage(payload.toString()));
         }
         changes.sort((left, right) -> Long.compare(left.seq(), right.seq()));
+        long expectedSeq = sinceSeq + 1;
+        for (GraphChangeMessage change : changes) {
+            if (change.seq() != expectedSeq++) {
+                log.warn("Graph change sequence gap for workflowId={}, sinceSeq={}", workflowId, sinceSeq);
+                return new WorkflowGraphChangesResponse(currentSeq, true, List.of());
+            }
+        }
+        if (expectedSeq - 1 != currentSeq) {
+            log.warn("Graph change tail gap for workflowId={}, sinceSeq={}", workflowId, sinceSeq);
+            return new WorkflowGraphChangesResponse(currentSeq, true, List.of());
+        }
         return new WorkflowGraphChangesResponse(currentSeq, false, changes);
     }
 
@@ -126,7 +141,10 @@ public class RedisGraphChangeStore {
     }
 
     private boolean isResetRequired(long sinceSeq, long currentSeq, Long oldestSeq) {
-        if (sinceSeq <= 0 || currentSeq <= sinceSeq) {
+        if (sinceSeq > currentSeq) {
+            return true;
+        }
+        if (currentSeq == sinceSeq) {
             return false;
         }
         if (oldestSeq == null) {

@@ -4,17 +4,23 @@ import { useCreateInventoryMutation } from '../../../entities/inventory/api/useC
 import { useUpdateInventoryMutation } from '../../../entities/inventory/api/useUpdateInventoryMutation'
 import { useDeleteInventoryMutation } from '../../../entities/inventory/api/useDeleteInventoryMutation'
 import { useInventoryTransactionsQuery } from '../../../entities/inventory/api/useInventoryTransactionsQuery'
+import { useLotsQuery, useQuarantineMutation } from '../../../entities/inventory/api/useLots'
+import { useReverseTransactionMutation } from '../../../entities/inventory/api/useStockMovements'
+import { canReverse, reversedIds } from '../model/stockModel'
+import { StockMovementForm } from './StockMovementForm'
 import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { InventoryDto, ItemDto } from '../../../shared/types/api'
 
-const INVENTORY_STATUSES = ['available', 'hold', 'quarantine']
+// Quarantine is not a free-form status: it goes through a quarantine / release movement (whole LOT when there is one).
+const INVENTORY_STATUSES = ['available', 'hold']
 
 const cell = { padding: '8px 6px' } as const
 const num = { ...cell, textAlign: 'right' } as const
 
 interface StockForm {
   itemId: string
+  lotId: string
   quantity: string
   reservedQuantity: string
   location: string
@@ -25,6 +31,7 @@ interface StockForm {
 
 const EMPTY_FORM: StockForm = {
   itemId: '',
+  lotId: '',
   quantity: '',
   reservedQuantity: '0',
   location: '',
@@ -72,6 +79,7 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
     setEditing(inventory)
     setForm({
       itemId: inventory.itemId,
+      lotId: inventory.lotId ?? '',
       quantity: String(inventory.quantity),
       reservedQuantity: String(inventory.reservedQuantity ?? 0),
       location: inventory.location ?? '',
@@ -87,6 +95,8 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
       projectId,
       itemId: form.itemId,
       quantity: Number(form.quantity),
+      // A stock record keeps its LOT; only a new record names one.
+      lotId: editing ? undefined : form.lotId || undefined,
       reservedQuantity: Number(form.reservedQuantity) || 0,
       location: form.location.trim() || undefined,
       inventoryStatus: form.inventoryStatus,
@@ -119,6 +129,16 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
     })
   }
 
+  const lots = useLotsQuery(projectId).data ?? []
+  const quarantineMutation = useQuarantineMutation(projectId)
+  const reverseMutation = useReverseTransactionMutation(projectId)
+  const reversed = reversedIds(transactionsQuery.data ?? [])
+  const formItem = items.find((item) => item.itemId === form.itemId)
+  const lotTracked = formItem?.lotManageYn === 'Y'
+  const selectableLots = lots.filter(
+    (lot) => lot.itemId === form.itemId && lot.lotStatus !== 'closed' && lot.lotStatus !== 'quarantined',
+  )
+
   const isPending = createMutation.isPending || updateMutation.isPending
   const saveError = createMutation.error ?? updateMutation.error
   // A 409 means the record moved since the form opened; the list is refetched, so offer its current values.
@@ -147,6 +167,7 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left' }}>
                 <th style={cell}>Item</th>
+                <th style={cell}>LOT</th>
                 <th style={cell}>Location</th>
                 <th style={{ ...num }}>On hand</th>
                 <th style={{ ...num }}>Reserved</th>
@@ -168,6 +189,7 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
                   }}
                 >
                   <td style={cell}>{itemLabel.get(inv.itemId) ?? inv.itemId}</td>
+                  <td style={cell}>{inv.lotNo ? <code>{inv.lotNo}</code> : '-'}</td>
                   <td style={{ ...cell, opacity: 0.7 }}>{inv.location ?? '-'}</td>
                   <td style={num}>{formatQty(inv.quantity)}</td>
                   <td style={{ ...num, opacity: 0.7 }}>{formatQty(inv.reservedQuantity)}</td>
@@ -175,7 +197,9 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
                     {formatQty(inv.availableQuantity)}
                   </td>
                   <td style={cell}>
-                    <span style={{ opacity: 0.7 }}>{inv.inventoryStatus}</span>
+                    <span style={inv.inventoryStatus === 'quarantined' ? { color: '#b91c1c', fontWeight: 600 } : { opacity: 0.7 }}>
+                      {inv.inventoryStatus}
+                    </span>
                     {LEVEL_BADGE[inv.stockLevel] && (
                       <span
                         title={
@@ -210,6 +234,20 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
                     </button>
                     <button
                       type="button"
+                      disabled={quarantineMutation.isPending}
+                      onClick={() => {
+                        const release = inv.inventoryStatus === 'quarantined'
+                        const scope = inv.lotNo ? `LOT ${inv.lotNo} (every stock record of it)` : 'this stock record'
+                        if (window.confirm(`${release ? 'Release' : 'Quarantine'} ${scope}?`)) {
+                          quarantineMutation.mutate({ inventoryId: inv.inventoryId, release })
+                        }
+                      }}
+                      style={{ marginRight: 4, fontSize: 12 }}
+                    >
+                      {inv.inventoryStatus === 'quarantined' ? 'Release' : 'Quarantine'}
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => handleDelete(inv.inventoryId)}
                       disabled={deleteMutation.isPending}
                       style={{ fontSize: 12, color: '#dc2626', border: '1px solid #fca5a5', background: '#fef2f2' }}
@@ -222,6 +260,11 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
             </tbody>
           </table>
         )}
+        {quarantineMutation.isError && (
+          <p style={{ color: '#dc2626', fontSize: 12 }}>
+            {errorMessage(quarantineMutation.error, 'Failed to change quarantine.')}
+          </p>
+        )}
         {deleteMutation.isError && (
           <p style={{ color: '#dc2626', fontSize: 12 }}>
             {errorMessage(deleteMutation.error, 'Failed to delete stock record.')}
@@ -233,9 +276,13 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
             <h3 style={{ marginBottom: 8 }}>
               History — {historyInventory ? itemLabel.get(historyInventory.itemId) ?? historyInventory.itemId : historyFor}
             </h3>
+            {historyInventory && <StockMovementForm projectId={projectId} inventory={historyInventory} />}
             {transactionsQuery.isLoading && <p>Loading history...</p>}
             {transactionsQuery.isError && (
               <p style={{ color: '#dc2626' }}>{errorMessage(transactionsQuery.error, 'Failed to load history.')}</p>
+            )}
+            {reverseMutation.isError && (
+              <p style={{ color: '#dc2626', fontSize: 12 }}>{errorMessage(reverseMutation.error, 'The reversal was refused.')}</p>
             )}
             {transactionsQuery.data && transactionsQuery.data.length === 0 && (
               <p className="inspector-hint">No movements recorded.</p>
@@ -250,6 +297,7 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
                     <th style={num}>On hand after</th>
                     <th style={num}>Available after</th>
                     <th style={cell}>Note</th>
+                    <th style={cell}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -265,6 +313,27 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
                       <td style={num}>{formatQty(tx.quantityAfter)}</td>
                       <td style={num}>{formatQty(tx.availableAfter)}</td>
                       <td style={{ ...cell, opacity: 0.7 }}>{tx.note ?? '-'}</td>
+                      <td style={{ ...cell, whiteSpace: 'nowrap' }}>
+                        {reversed.has(tx.inventoryTransactionId) ? (
+                          <span style={{ fontSize: 11, opacity: 0.6 }}>reversed</span>
+                        ) : (
+                          canReverse(tx, transactionsQuery.data ?? []) && (
+                            <button
+                              type="button"
+                              disabled={reverseMutation.isPending}
+                              onClick={() => {
+                                const reason = window.prompt('Why is this movement being reversed?')
+                                if (reason?.trim()) {
+                                  reverseMutation.mutate({ inventoryTransactionId: tx.inventoryTransactionId, reason: reason.trim() })
+                                }
+                              }}
+                              style={{ fontSize: 11 }}
+                            >
+                              Reverse
+                            </button>
+                          )
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -281,7 +350,7 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
             <span>Item *</span>
             <select
               value={form.itemId}
-              onChange={(e) => setForm((f) => ({ ...f, itemId: e.target.value }))}
+              onChange={(e) => setForm((f) => ({ ...f, itemId: e.target.value, lotId: '' }))}
               disabled={Boolean(editing)}
               required
             >
@@ -294,6 +363,21 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
               <span style={{ fontSize: 11, opacity: 0.6 }}>Create an item on the Items tab first.</span>
             )}
           </label>
+          {lotTracked && !editing && (
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span>LOT *</span>
+              <select value={form.lotId} onChange={(e) => setForm((f) => ({ ...f, lotId: e.target.value }))} required>
+                <option value="" disabled>Select LOT</option>
+                {selectableLots.map((lot) => (
+                  <option key={lot.lotId} value={lot.lotId}>{lot.lotNo}{lot.expiryDate ? ` (exp. ${lot.expiryDate})` : ''}</option>
+                ))}
+              </select>
+              {selectableLots.length === 0 && (
+                <span style={{ fontSize: 11, opacity: 0.6 }}>This item tracks LOTs. Register one on the LOTs tab first.</span>
+              )}
+            </label>
+          )}
+          {editing?.lotNo && <span style={{ fontSize: 12, opacity: 0.7 }}>LOT <code>{editing.lotNo}</code></span>}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <label style={{ display: 'grid', gap: 4 }}>
               <span>On hand *</span>

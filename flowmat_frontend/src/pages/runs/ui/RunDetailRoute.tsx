@@ -52,10 +52,15 @@ export function RunDetailRoute() {
     [itemsQuery.data],
   )
   const inventoryLabel = useMemo(
-    () => new Map(inventories.map((inv) => [inv.inventoryId, inv.location ?? inv.inventoryId])),
+    () =>
+      new Map(
+        inventories.map((inv) => [inv.inventoryId, `${inv.location ?? inv.inventoryId}${inv.lotNo ? ` · LOT ${inv.lotNo}` : ''}`]),
+      ),
     [inventories],
   )
   const inventoriesForItem = inventories.filter((inv) => inv.itemId === itemForm.itemId)
+  // LOT-tracked items are only recorded against a LOT (its stock record); the server refuses anything else.
+  const lotTracked = (itemsQuery.data ?? []).find((item) => item.itemId === itemForm.itemId)?.lotManageYn === 'Y'
   const selectedItemUnit = allUnits.find(
     (unit) => unit.unitId === (itemsQuery.data ?? []).find((item) => item.itemId === itemForm.itemId)?.unitId,
   )
@@ -69,7 +74,8 @@ export function RunDetailRoute() {
   const totals = useMemo(() => {
     const sum = (direction: string) =>
       runItems
-        .filter((item) => item.direction === direction)
+        // BOM rows are the plan, not something that was recorded.
+        .filter((item) => item.direction === direction && item.quantitySource !== 'bom')
         .reduce((acc, item) => acc + Number(item.actualQty ?? item.plannedQty ?? 0), 0)
     return { input: sum('input'), output: sum('output') }
   }, [runItems])
@@ -133,6 +139,7 @@ export function RunDetailRoute() {
               ['Actual output', formatQty(run.actualOutputQty)],
               ['Recorded inputs', formatQty(totals.input)],
               ['Recorded outputs', formatQty(totals.output)],
+              ...(run.bomId ? [['BOM', `v${run.bomVersion} (fixed at start)`]] : []),
             ].map(([label, value]) => (
               <div key={label} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
                 <dt style={{ fontSize: 11, opacity: 0.6 }}>{label}</dt>
@@ -169,7 +176,17 @@ export function RunDetailRoute() {
                         <td style={{ ...cell, color: item.direction === 'input' ? '#0369a1' : '#047857' }}>
                           {item.direction === 'input' ? '↓ input' : '↑ output'}
                         </td>
-                        <td style={cell}>{itemLabel.get(item.itemId) ?? item.itemId}</td>
+                        <td style={cell}>
+                          {itemLabel.get(item.itemId) ?? item.itemId}
+                          {item.quantitySource === 'bom' && (
+                            <span
+                              title="Planned from the BOM when the run started"
+                              style={{ marginLeft: 6, fontSize: 10, padding: '1px 6px', borderRadius: 999, background: 'var(--accent-bg)' }}
+                            >
+                              BOM
+                            </span>
+                          )}
+                        </td>
                         <td style={{ ...cell, textAlign: 'right' }}>{formatQty(item.plannedQty)}</td>
                         <td style={{ ...cell, textAlign: 'right' }}>{formatQty(item.actualQty)}</td>
                         <td style={{ ...cell, opacity: 0.7 }}>{item.unit}</td>
@@ -260,19 +277,26 @@ export function RunDetailRoute() {
                         </label>
                       </div>
                       <label style={{ display: 'grid', gap: 4 }}>
-                        <span>Inventory</span>
+                        <span>{lotTracked ? 'LOT *' : 'Inventory'}</span>
                         <select
                           value={itemForm.inventoryId}
                           onChange={(e) => setItemForm((f) => ({ ...f, inventoryId: e.target.value }))}
                           disabled={!itemForm.itemId || inventoriesForItem.length === 0}
+                          required={lotTracked}
                         >
-                          <option value="">Don&apos;t adjust stock</option>
+                          <option value="" disabled={lotTracked}>{lotTracked ? 'Select LOT' : "Don't adjust stock"}</option>
                           {inventoriesForItem.map((inv) => (
                             <option key={inv.inventoryId} value={inv.inventoryId}>
-                              {inv.location ?? inv.inventoryId} (available {formatQty(inv.availableQuantity)})
+                              {inventoryLabel.get(inv.inventoryId)} (available {formatQty(inv.availableQuantity)})
+                              {inv.inventoryStatus === 'quarantined' ? ' — quarantined' : ''}
                             </option>
                           ))}
                         </select>
+                        {lotTracked && inventoriesForItem.length === 0 && (
+                          <span style={{ fontSize: 11, color: '#b45309' }}>
+                            This item tracks LOTs. Register a LOT and its stock record on the Inventory page first.
+                          </span>
+                        )}
                         {itemForm.inventoryId && (
                           <span style={{ fontSize: 11, opacity: 0.6 }}>
                             Stock will be {itemForm.direction === 'input' ? 'decreased' : 'increased'} by the actual

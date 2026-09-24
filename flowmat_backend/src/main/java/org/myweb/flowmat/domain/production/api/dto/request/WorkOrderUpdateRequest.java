@@ -13,6 +13,8 @@ public record WorkOrderUpdateRequest(
     OffsetDateTime plannedStartAt,
     OffsetDateTime plannedEndAt,
     String instruction,
-    String assignedTo
+    String assignedTo,
+    /** BOM revision the order produces with; null clears it. Must be approved before the order is approved. */
+    String bomId
 ) {
 }

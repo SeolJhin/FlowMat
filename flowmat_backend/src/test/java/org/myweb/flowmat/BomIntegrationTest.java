@@ -149,6 +149,37 @@ class BomIntegrationTest extends IntegrationTestSupport {
         call(post("/boms/" + bomId + "/lines"), line(item("unit_kg"), "1", "kg")).andExpect(status().isOk());
     }
 
+    @Test
+    void aWorkOrderCarriesItsBomIntoTheRuns() throws Exception {
+        String product = item("unit_ea");
+        String material = item("unit_kg");
+        String bomId = draftBom(product, "100", "ea", line(material, "20", "kg"));
+
+        // A BOM for another item is refused; an order without a product takes the BOM's product.
+        call(post("/work-orders"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"workOrderTitle\":\"x\",\"targetItemId\":\""
+            + item("unit_ea") + "\",\"bomId\":\"" + bomId + "\"}").andExpect(status().isBadRequest());
+        String orderId = data(call(post("/work-orders"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"workOrderTitle\":\"Bread\","
+            + "\"workflowId\":\"" + DEMO_WORKFLOW + "\",\"targetQuantity\":250,\"bomId\":\"" + bomId + "\"}")
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.targetItemId").value(product))
+            .andExpect(jsonPath("$.data.bomId").value(bomId))).path("workOrderId").asText();
+
+        // The order cannot be approved while its BOM is still a draft.
+        call(post("/work-orders/" + orderId + "/approve")).andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value(containsString("approve it or pick an approved revision")));
+        call(post("/boms/" + bomId + "/submit")).andExpect(status().isOk());
+        call(post("/boms/" + bomId + "/approve")).andExpect(status().isOk());
+        call(post("/work-orders/" + orderId + "/approve")).andExpect(status().isOk());
+
+        // A run started from the order plans its materials from the order's BOM without naming it.
+        String runId = data(call(post("/production-runs/start"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"workflowId\":\""
+            + DEMO_WORKFLOW + "\",\"plannedOutputQty\":250,\"workOrderId\":\"" + orderId + "\"}")
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.bomId").value(bomId))).path("productionRunId").asText();
+        ProductionRunItem planned = productionRunItemRepository.findAllByProductionRunIdOrderByProductionRunItemIdAsc(runId).get(0);
+        assertThat(planned.getPlannedQty()).isEqualByComparingTo("50");
+    }
+
     // ---- helpers ----
 
     private String approvedBom(String product, String base, String unit, String... lines) throws Exception {

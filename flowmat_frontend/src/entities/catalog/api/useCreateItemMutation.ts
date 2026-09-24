@@ -11,6 +11,8 @@ export interface CreateItemInput {
   resourceCategory?: string
   unitId?: string
   itemStatus?: string
+  /** "Y": stock and production of this item must name a LOT. */
+  lotManageYn?: 'Y' | 'N'
 }
 
 async function createItem(input: CreateItemInput): Promise<ItemDto> {

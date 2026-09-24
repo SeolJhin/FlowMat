@@ -145,6 +145,11 @@ class ProjectAccessIntegrationTest extends IntegrationTestSupport {
                 "{\"projectId\":\"" + DEMO_PROJECT + "\",\"targetItemId\":\"" + DEMO_ITEM
                     + "\",\"bomName\":\"x\",\"baseQuantity\":1,\"baseUnit\":\"ea\"}")),
 
+            // LOT.
+            Arguments.of("list LOTs", get("/lots").param("projectId", DEMO_PROJECT)),
+            Arguments.of("create LOT", json(post("/lots"),
+                "{\"projectId\":\"" + DEMO_PROJECT + "\",\"itemId\":\"" + DEMO_ITEM + "\",\"lotNo\":\"OUTSIDER-1\"}")),
+
             // System administration needs a system role, not project membership.
             Arguments.of("list users as admin", get("/admin/users"))
         );

@@ -10,10 +10,13 @@ import type { ItemDto } from '../../../shared/types/api'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { StockPanel } from './StockPanel'
 import { UnitsPanel } from './UnitsPanel'
+import { LotPanel } from './LotPanel'
+import { BomPanel } from './BomPanel'
+import { EquipmentPanel } from './EquipmentPanel'
 
-const TABS = ['items', 'stock', 'units'] as const
+const TABS = ['items', 'stock', 'lots', 'boms', 'units', 'equipment'] as const
 type Tab = (typeof TABS)[number]
-const TAB_LABELS: Record<Tab, string> = { items: 'Items', stock: 'Stock', units: 'Units' }
+const TAB_LABELS: Record<Tab, string> = { items: 'Items', stock: 'Stock', lots: 'LOTs', boms: 'BOMs', units: 'Units', equipment: 'Equipment' }
 
 const ITEM_TYPE_SUGGESTIONS = ['generic', 'raw_material', 'component', 'semi_finished', 'finished_good', 'consumable']
 
@@ -44,6 +47,7 @@ export function InventoryRoute() {
     resourceCategory: 'material',
     unitId: '',
     itemStatus: 'active',
+    lotManageYn: false,
   }
   const [form, setForm] = useState(EMPTY_ITEM_FORM)
 
@@ -63,6 +67,7 @@ export function InventoryRoute() {
       resourceCategory: item.resourceCategory ?? 'material',
       unitId: item.unitId ?? '',
       itemStatus: item.itemStatus,
+      lotManageYn: item.lotManageYn === 'Y',
     })
   }
 
@@ -78,6 +83,7 @@ export function InventoryRoute() {
           resourceCategory: form.resourceCategory,
           unitId: form.unitId,
           itemStatus: form.itemStatus,
+          lotManageYn: form.lotManageYn ? 'Y' : 'N',
         })
       } else {
         await createMutation.mutateAsync({
@@ -88,6 +94,7 @@ export function InventoryRoute() {
           resourceCategory: form.resourceCategory,
           unitId: form.unitId || undefined,
           itemStatus: form.itemStatus,
+          lotManageYn: form.lotManageYn ? 'Y' : 'N',
         })
       }
       resetForm()
@@ -136,7 +143,10 @@ export function InventoryRoute() {
       </div>
 
       {tab === 'stock' && <StockPanel projectId={projectId} items={items} />}
+      {tab === 'lots' && <LotPanel projectId={projectId} items={items} />}
+      {tab === 'boms' && <BomPanel projectId={projectId} items={items} units={units} />}
       {tab === 'units' && <UnitsPanel canManage={canManageMasterData} />}
+      {tab === 'equipment' && <EquipmentPanel projectId={projectId} />}
 
       {tab === 'items' && (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>
@@ -153,6 +163,7 @@ export function InventoryRoute() {
                 <th style={{ padding: '8px 6px' }}>Name</th>
                 <th style={{ padding: '8px 6px' }}>Category</th>
                 <th style={{ padding: '8px 6px' }}>Unit</th>
+                <th style={{ padding: '8px 6px' }}>LOT</th>
                 <th style={{ padding: '8px 6px' }}>Status</th>
                 <th style={{ padding: '8px 6px' }}></th>
               </tr>
@@ -172,6 +183,7 @@ export function InventoryRoute() {
                   <td style={{ padding: '8px 6px', opacity: 0.7 }}>
                     {item.unitId ? unitLabel.get(item.unitId) ?? item.unitId : '-'}
                   </td>
+                  <td style={{ padding: '8px 6px', opacity: 0.7 }}>{item.lotManageYn === 'Y' ? 'tracked' : '-'}</td>
                   <td style={{ padding: '8px 6px', opacity: 0.7 }}>{item.itemStatus}</td>
                   <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>
                     <button type="button" onClick={() => startEdit(item)} style={{ marginRight: 4, fontSize: 12 }}>
@@ -244,6 +256,14 @@ export function InventoryRoute() {
               <select value={form.itemStatus} onChange={(e) => setForm((f) => ({ ...f, itemStatus: e.target.value }))}>
                 {ITEM_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
               </select>
+            </label>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                type="checkbox"
+                checked={form.lotManageYn}
+                onChange={(e) => setForm((f) => ({ ...f, lotManageYn: e.target.checked }))}
+              />
+              <span>Track stock per LOT</span>
             </label>
             <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
               <button type="submit" disabled={isPending}>

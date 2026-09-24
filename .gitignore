@@ -3,6 +3,7 @@
 # ===============================
 /build/
 /.gradle/
+/flowmat_backend/.gradle-user-home/
 /target/
 /out/
 
@@ -73,6 +74,7 @@ docker-compose.override.yml
 # ===============================
 node_modules/
 dist/
+flowmat_frontend/.playwright-browsers/
 # application 관련 파일/폴더 무시
 .application/
 

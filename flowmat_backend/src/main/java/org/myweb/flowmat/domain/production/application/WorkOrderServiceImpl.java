@@ -10,6 +10,9 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.bom.domain.entity.BomHeader;
+import org.myweb.flowmat.domain.bom.domain.enums.BomStatus;
+import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.production.api.dto.request.WorkOrderCreateRequest;
@@ -50,6 +53,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     private final ItemRepository itemRepository;
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
+    private final BomHeaderRepository bomHeaderRepository;
 
     @Override
     public List<WorkOrderResponse> listWorkOrders(String projectId) {
@@ -79,10 +83,9 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         order.setProjectId(projectId);
         order.setWorkOrderNumber(generateWorkOrderNumber());
         order.setWorkOrderStatus(WorkOrderStatus.DRAFT.code());
-        order.setBomId(trimToNull(request.bomId()));
         applyEditableFields(order, request.workOrderTitle(), request.workflowId(), request.targetItemId(),
             request.targetQuantity(), request.priority(), request.plannedStartAt(), request.plannedEndAt(),
-            request.instruction(), request.assignedTo());
+            request.instruction(), request.assignedTo(), request.bomId());
         order.setCreatedBy(projectAccessService.requireCurrentUserId());
         order.setDeletedYn(NOT_DELETED);
         return toResponse(workOrderRepository.save(order), List.of());
@@ -101,7 +104,8 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             ? request.workOrderTitle()
             : order.getWorkOrderTitle();
         applyEditableFields(order, title, request.workflowId(), request.targetItemId(), request.targetQuantity(),
-            request.priority(), request.plannedStartAt(), request.plannedEndAt(), request.instruction(), request.assignedTo());
+            request.priority(), request.plannedStartAt(), request.plannedEndAt(), request.instruction(), request.assignedTo(),
+            request.bomId());
         order.setUpdatedBy(projectAccessService.requireCurrentUserId());
         return toResponse(workOrderRepository.save(order));
     }
@@ -111,6 +115,15 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     public WorkOrderResponse approveWorkOrder(String workOrderId) {
         WorkOrder order = findActiveOrder(workOrderId);
         projectAccessService.requireProjectOwnerAccess(order.getProjectId());
+        // An approved order must be runnable: its BOM (if any) has to be approved too.
+        if (order.getBomId() != null) {
+            BomHeader bom = findBom(order, order.getBomId());
+            if (!BomStatus.APPROVED.code().equals(bom.getBomStatus())) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST,
+                    "BOM " + bom.getBomName() + " v" + bom.getBomVersion() + " is " + bom.getBomStatus()
+                        + "; approve it or pick an approved revision before approving the work order.");
+            }
+        }
         transition(order, WorkOrderStatus.APPROVED);
         String userId = projectAccessService.requireCurrentUserId();
         OffsetDateTime now = OffsetDateTime.now();
@@ -156,7 +169,8 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         OffsetDateTime plannedStartAt,
         OffsetDateTime plannedEndAt,
         String instruction,
-        String assignedTo
+        String assignedTo,
+        String bomId
     ) {
         if (title == null || title.isBlank()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Work order title is required.");
@@ -178,6 +192,22 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             requireSameProject(order, item.getProjectId());
         }
         order.setTargetItemId(normalizedItemId);
+
+        // The BOM must make the order's product; an order without a product takes the BOM's.
+        String normalizedBomId = trimToNull(bomId);
+        if (normalizedBomId != null) {
+            BomHeader bom = findBom(order, normalizedBomId);
+            if (BomStatus.RETIRED.code().equals(bom.getBomStatus())) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST,
+                    "BOM " + bom.getBomName() + " v" + bom.getBomVersion() + " is retired; pick a current revision.");
+            }
+            if (normalizedItemId == null) {
+                order.setTargetItemId(bom.getTargetItemId());
+            } else if (!normalizedItemId.equals(bom.getTargetItemId())) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "The BOM produces a different item than this work order.");
+            }
+        }
+        order.setBomId(normalizedBomId);
 
         if (targetQuantity != null && targetQuantity.signum() <= 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Target quantity must be greater than 0.");
@@ -216,6 +246,13 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         if (!order.getProjectId().equals(projectId)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Referenced records must belong to the same project.");
         }
+    }
+
+    private BomHeader findBom(WorkOrder order, String bomId) {
+        BomHeader bom = bomHeaderRepository.findByBomIdAndDeletedYn(bomId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "BOM does not exist."));
+        requireSameProject(order, bom.getProjectId());
+        return bom;
     }
 
     private WorkOrder findActiveOrder(String workOrderId) {
@@ -271,7 +308,8 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             order.getApprovedBy(),
             order.getApprovedAt(),
             produced,
-            runs.size()
+            runs.size(),
+            order.getBomId()
         );
     }
 

@@ -42,6 +42,9 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
     @Override
     public WorkflowCanvasResponse getCanvas(String workflowId) {
         Workflow workflow = projectAccessService.requireWorkflowReadAccess(workflowId);
+        // Capture the replay cursor before reading the DB snapshot. Changes committed
+        // during the reads are then replayed, rather than silently skipped.
+        long graphSeq = graphSyncService.getCurrentSeq(workflow.getWorkflowId());
 
         List<Process> processes = processRepository.findAllByWorkflowIdAndDeletedYnOrderByCreatedAtAsc(
             workflow.getWorkflowId(),
@@ -58,7 +61,7 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
 
         return new WorkflowCanvasResponse(
             toWorkflowResponse(workflow),
-            graphSyncService.getCurrentSeq(workflow.getWorkflowId()),
+            graphSeq,
             processes.stream().map(WorkflowCanvasServiceImpl::toProcessResponse).toList(),
             processIos.stream().map(WorkflowCanvasServiceImpl::toProcessIoResponse).toList(),
             connections.stream().map(WorkflowCanvasServiceImpl::toConnectionResponse).toList(),

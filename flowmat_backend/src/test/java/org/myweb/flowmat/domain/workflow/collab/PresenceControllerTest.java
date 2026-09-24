@@ -4,6 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.doThrow;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -13,6 +17,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.collab.dto.PresenceMessage;
+import org.myweb.flowmat.domain.workflow.collab.dto.AnnotationPresencePayload;
+import org.myweb.flowmat.global.exception.BusinessException;
+import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.security.AuthUser;
 import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -82,5 +89,37 @@ class PresenceControllerTest {
         assertThat(relayed.userId()).isEqualTo("user-9");
         assertThat(relayed.clientId()).isEqualTo("client-9");
         assertThat(relayed.workflowId()).isEqualTo("workflow-9");
+    }
+
+    @Test
+    void rejectsNonMemberBeforeRelaying() {
+        doThrow(new BusinessException(ErrorCode.FORBIDDEN))
+            .when(projectAccessService).requireWorkflowReadAccess("workflow-1", "user-1");
+        assertThatThrownBy(() -> presenceController.relay("workflow-1",
+            new PresenceMessage(PresenceMessage.Type.JOIN, null, "client-1", null, null, null, null, null, 0),
+            principal(), SimpMessageHeaderAccessor.create()))
+            .isInstanceOf(BusinessException.class);
+        verifyNoInteractions(sessionRegistry, messagingTemplate);
+    }
+
+    @Test
+    void dropsMalformedPresenceWithoutBroadcast() {
+        var invalid = List.of(
+            new PresenceMessage(PresenceMessage.Type.JOIN, null, null, null, null, null, null, null, 0),
+            new PresenceMessage(PresenceMessage.Type.JOIN, null, " ", null, null, null, null, null, 0),
+            new PresenceMessage(PresenceMessage.Type.JOIN, null, "x".repeat(129), null, null, null, null, null, 0),
+            new PresenceMessage(PresenceMessage.Type.CURSOR_MOVED, null, "client", null, Double.NaN, 1d, null, null, 0),
+            new PresenceMessage(PresenceMessage.Type.CURSOR_MOVED, null, "client", null, 1_000_001d, 1d, null, null, 0),
+            new PresenceMessage(PresenceMessage.Type.ANNOTATION_DRAWING, null, "client", null, null, null, null,
+                new AnnotationPresencePayload("freehand", List.of(List.of(Double.NaN, 1d)), true), 0)
+        );
+        for (PresenceMessage message : invalid) {
+            presenceController.relay("workflow-1", message, principal(), SimpMessageHeaderAccessor.create());
+        }
+        verifyNoInteractions(sessionRegistry, messagingTemplate);
+    }
+
+    private UsernamePasswordAuthenticationToken principal() {
+        return new UsernamePasswordAuthenticationToken(new AuthUser("user-1"), null);
     }
 }

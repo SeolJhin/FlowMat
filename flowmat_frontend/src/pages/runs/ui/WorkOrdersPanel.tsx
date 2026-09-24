@@ -9,6 +9,8 @@ import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { ItemDto, WorkflowDto, WorkOrderDto } from '../../../shared/types/api'
 import { availableWorkOrderActions, isWorkOrderEditable, workOrderProgress } from '../model/workOrderActions'
+import { useBomsQuery } from '../../../entities/bom/api/useBoms'
+import { approvedRevision } from '../../inventory/model/bomModel'
 
 const PRIORITIES = ['low', 'normal', 'high', 'urgent']
 
@@ -38,6 +40,7 @@ interface OrderForm {
   workOrderTitle: string
   workflowId: string
   targetItemId: string
+  bomId: string
   targetQuantity: string
   priority: string
   plannedStartAt: string
@@ -49,6 +52,7 @@ const EMPTY_FORM: OrderForm = {
   workOrderTitle: '',
   workflowId: '',
   targetItemId: '',
+  bomId: '',
   targetQuantity: '',
   priority: 'normal',
   plannedStartAt: '',
@@ -91,6 +95,15 @@ export function WorkOrdersPanel({
   const orders = ordersQuery.data ?? []
   const itemLabel = useMemo(() => new Map(items.map((item) => [item.itemId, `${item.itemCode} · ${item.itemName}`])), [items])
   const workflowLabel = useMemo(() => new Map(workflows.map((wf) => [wf.workflowId, wf.workflowName])), [workflows])
+  const boms = useBomsQuery(projectId).data ?? []
+  const bomById = new Map(boms.map((bom) => [bom.bomId, bom]))
+  // Retired revisions can no longer be chosen; draft / pending ones can, but must be approved before the order is.
+  const bomChoices = boms.filter((bom) => bom.targetItemId === form.targetItemId && bom.bomStatus !== 'retired')
+  const chosenBom = form.bomId ? bomById.get(form.bomId) : undefined
+
+  function selectTargetItem(targetItemId: string) {
+    setForm((f) => ({ ...f, targetItemId, bomId: approvedRevision(boms, targetItemId)?.bomId ?? '' }))
+  }
 
   function resetForm() {
     setEditing(null)
@@ -104,6 +117,7 @@ export function WorkOrdersPanel({
       workOrderTitle: order.workOrderTitle,
       workflowId: order.workflowId ?? '',
       targetItemId: order.targetItemId ?? '',
+      bomId: order.bomId ?? '',
       targetQuantity: order.targetQuantity !== null ? String(order.targetQuantity) : '',
       priority: order.priority,
       plannedStartAt: toLocalInput(order.plannedStartAt),
@@ -120,6 +134,7 @@ export function WorkOrdersPanel({
         workOrderTitle: form.workOrderTitle.trim(),
         workflowId: form.workflowId || undefined,
         targetItemId: form.targetItemId || undefined,
+        bomId: form.bomId || undefined,
         targetQuantity: form.targetQuantity === '' ? undefined : Number(form.targetQuantity),
         priority: form.priority,
         plannedStartAt: toIso(form.plannedStartAt),
@@ -204,7 +219,10 @@ export function WorkOrdersPanel({
                     </td>
                     <td style={{ ...cell, opacity: 0.8 }}>
                       <div>{order.targetItemId ? itemLabel.get(order.targetItemId) ?? order.targetItemId : '-'}</div>
-                      <div style={{ fontSize: 11, opacity: 0.7 }}>{formatQty(order.targetQuantity)}</div>
+                      <div style={{ fontSize: 11, opacity: 0.7 }}>
+                        {formatQty(order.targetQuantity)}
+                        {order.bomId && ` · BOM ${bomById.get(order.bomId) ? `v${bomById.get(order.bomId)!.bomVersion}` : ''}`}
+                      </div>
                     </td>
                     <td style={{ ...cell, minWidth: 110 }}>
                       <div style={{ fontSize: 12 }}>
@@ -286,7 +304,7 @@ export function WorkOrdersPanel({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 8 }}>
             <label style={{ display: 'grid', gap: 4 }}>
               <span>Target item</span>
-              <select value={form.targetItemId} onChange={(e) => setForm((f) => ({ ...f, targetItemId: e.target.value }))}>
+              <select value={form.targetItemId} onChange={(e) => selectTargetItem(e.target.value)}>
                 <option value="">None</option>
                 {items.map((item) => <option key={item.itemId} value={item.itemId}>{item.itemCode} · {item.itemName}</option>)}
               </select>
@@ -302,6 +320,27 @@ export function WorkOrdersPanel({
               />
             </label>
           </div>
+          {form.targetItemId && (
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span>BOM</span>
+              <select value={form.bomId} onChange={(e) => setForm((f) => ({ ...f, bomId: e.target.value }))}>
+                <option value="">None — record materials by hand</option>
+                {bomChoices.map((bom) => (
+                  <option key={bom.bomId} value={bom.bomId}>
+                    {bom.bomName} v{bom.bomVersion} ({bom.bomStatus.replace('_', ' ')})
+                  </option>
+                ))}
+              </select>
+              {chosenBom && chosenBom.bomStatus !== 'approved' && (
+                <span style={{ fontSize: 11, color: '#b45309' }}>
+                  This BOM is {chosenBom.bomStatus.replace('_', ' ')}; approve it before approving the work order.
+                </span>
+              )}
+              {bomChoices.length === 0 && (
+                <span style={{ fontSize: 11, opacity: 0.6 }}>No BOM for this item yet. Create one on the Inventory → BOMs tab.</span>
+              )}
+            </label>
+          )}
           <label style={{ display: 'grid', gap: 4 }}>
             <span>Priority</span>
             <select value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))}>

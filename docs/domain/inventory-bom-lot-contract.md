@@ -141,6 +141,12 @@ draft ──submit──▶ pending_approval ──approve──▶ approved ─
 - 이후 BOM이 retire되거나 새 revision이 생겨도 이 값은 바뀌지 않습니다.
 - **[구현 결정]** snapshot으로 만든 계획 행(`quantity_source = bom`)은 계획값입니다. 실제 투입은 지금처럼 `POST /production-runs/{id}/items`로 따로 기록합니다(`quantity_source = manual`). 계획 대비 실적 비교는 두 종류의 행을 품목별로 합쳐서 봅니다.
 
+### 작업지시와 BOM
+
+- 작업지시는 `bomId`를 가질 수 있습니다(생성·수정 모두, draft일 때만). BOM은 같은 프로젝트여야 하고, 대상 품목이 있으면 그 품목의 BOM이어야 합니다. 대상 품목이 비어 있으면 BOM의 품목으로 채웁니다. `retired` revision은 고를 수 없습니다.
+- **작업지시 승인 시 BOM도 `approved`여야 합니다.** 승인된 작업지시는 곧바로 실행을 시작할 수 있어야 하기 때문입니다.
+- 작업지시로 실행을 시작하면 요청에 `bomId`가 없어도 작업지시의 BOM으로 계획을 고정합니다(§5 생산 시작 snapshot).
+
 ### 기타 구현 결정
 
 - **[구현 결정]** 한 품목에는 승인된 revision이 하나만 있습니다. v(n)을 승인하면 기존 approved revision은 자동으로 `retired`가 되고 note에 사유가 남습니다.
@@ -183,6 +189,16 @@ draft ──submit──▶ pending_approval ──approve──▶ approved ─
 
 생산 실행에서 LOT 있는 산출을 기록하면, 그 실행에서 이미 기록된 LOT 투입마다 `lot_trace(parent = 투입 LOT, child = 산출 LOT)`를 만듭니다. 산출 뒤에 투입이 추가되면 그때도 이어 붙입니다.
 
+### 구현 결정
+
+- **[구현 결정]** 계보는 **실행 단위**로 연결합니다. 한 실행의 모든 투입 LOT가 모든 산출 LOT의 부모가 됩니다. 공정(process) 단위로 나눠 연결하지는 않습니다(1차에서는 과하게 넓은 쪽이 추적 누락보다 안전).
+- **[구현 결정]** LOT가 있는 재고 행 하나를 격리하면 **그 LOT의 모든 재고 행과 LOT 자체**가 격리됩니다. 해제도 LOT 전체에 적용되고, 해제 후 LOT 상태는 재고량으로 다시 계산합니다(available / reserved / consumed).
+- **[구현 결정]** 새로 등록한 LOT는 재고가 0이어도 `available`로 시작합니다. 이후 거래 때마다 전체 재고 행 합계로 상태를 다시 계산합니다.
+- **[구현 결정]** `closed` LOT는 모든 재고 이동과 직접 수정이 거절됩니다. 종료는 보유량이 0일 때만, 프로젝트 owner만 할 수 있습니다.
+- **[구현 결정]** 품목의 `lot_manage_yn`은 그 품목의 재고 행이 하나도 없을 때만 바꿀 수 있습니다.
+- LOT 관리 품목을 생산 투입·산출로 기록할 때는 재고 행(= LOT)을 반드시 선택해야 합니다. 실행 항목에는 그 LOT가 `lot_id`로 남습니다.
+- 계보 조회는 최대 50단계까지 따라갑니다(순환 데이터 방어).
+
 ---
 
 ## 7. 실시간 협업 (점검 기준)
@@ -199,5 +215,10 @@ DB가 진실의 원천. 저장 흐름은 `행 잠금 → version 비교 → 409 
 | §4 PUT 불변식 · 품목 변경 금지 · 잔량 있는 행 삭제 금지 | 구현 | `InventoryServiceImplTest` |
 | 생산 투입·산출 → 명령 서비스 경유 | 구현 | `ProductionRunServiceImplTest` |
 | §5 BOM 상태 전이 · 승인 검증 · 소요량 · 생산 시작 snapshot | 구현 | `BomIntegrationTest` 7건 (설계 예시 250/100×20=50 kg, g→kg 환산, 승인 전 사용 거부, 승인본 수정 거부, 새 revision 승인 후에도 기존 실행 계획값 유지, 문제 일괄 보고, 다단계 거부, 반려 사유 필수) |
-| §6 LOT (격리·소진 상태 동기화만 선반영) | 일부 | |
+| §6 LOT 생성 · 필수 선택 · 격리 · 종료 · 계보 정/역추적 | 구현 | `LotIntegrationTest` 6건 (LOT 필수/금지, 다른 품목 LOT 거부, 한 행 격리 → LOT 전체 격리 → 생산 투입 거부 → 해제 후 투입, LOT 없이 생산 기록 거부, 2단계 실행 정·역추적, 빈 LOT만 종료 후 이동 거부) |
+| 권한 (외부인 403) | 구현 | `ProjectAccessIntegrationTest` 73건 (`/boms`, `/lots` 추가) |
+| 작업지시 ↔ BOM (선택, 승인 조건, 실행 시 자동 적용) | 구현 | `BomIntegrationTest.aWorkOrderCarriesItsBomIntoTheRuns` |
+| 화면: Stock 탭 이동 입력(입고·출고·예약·해제·조정)과 역분개(사유 필수, 1회) | 구현 | `stockModel.test.ts` 3건, E2E에서 출고 30 → 가용 70, 초과 출고 거부, 역분개 후 100 복귀 |
+| 실 API E2E `e2e/bom-lot-flow.spec.ts` (`REAL_API_E2E=1`) | 구현 | 품목·LOT·격리·이동·역분개·BOM 승인·소요량·BOM 실행·작업지시 BOM 전 과정, 로컬 반복 통과 |
+| 화면: 품목 LOT 추적 설정, BOMs 탭(작성·승인·폐기·새 revision·소요량), LOTs 탭(등록·종료·정/역추적), Stock 탭(LOT 선택·격리/해제), 생산 시작 시 BOM 선택, 실행 상세의 BOM 계획 행·LOT 선택 | 구현 | 브라우저 확인(2026-09-24): 품목 → LOT 등록 → LOT 재고 100 kg → 격리·해제 → BOM 20,000 g/100 ea 승인 → 250 ea 소요량 50 kg → BOM으로 실행 시작(계획 행 50 kg) → LOT 지정 투입. 콘솔 오류 0. `bomModel.test.ts` 4건 |
 | §7 협업 점검 | 미착수 | |

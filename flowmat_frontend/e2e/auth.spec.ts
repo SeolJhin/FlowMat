@@ -76,6 +76,26 @@ async function mockAuthApi(page: Page) {
       body: JSON.stringify({ success: true, data: [], message: null }),
     })
   })
+
+  await page.route('**/api/users/me/permissions', async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        success: true,
+        data: { canManageUsers: false },
+        message: null,
+      }),
+    })
+  })
+
+  await page.route('**/api/items**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ success: true, data: [], message: null }),
+    })
+  })
 }
 
 async function mockWorkspaceApi(page: Page) {
@@ -211,24 +231,36 @@ test('two tabs keep separate in-memory access tokens while sharing the cookie se
   await first.getByRole('button', { name: 'Log in' }).click()
   await expect(first.getByText('안녕하세요, Demo Owner님')).toBeVisible()
 
-  await second.goto('/')
-  await expect(second.locator('input').nth(0)).toBeVisible()
-  await expect(second.getByText('Restoring session...')).toBeVisible()
-  await second.waitForTimeout(100)
-  await expect(second.getByText('안녕하세요, Demo Owner님')).toBeVisible()
+  await mockWorkspaceApi(second)
+  await second.unroute('**/api/auth/refresh')
+  await second.route('**/api/auth/refresh', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        success: true,
+        data: { accessToken, refreshToken: null },
+        message: null,
+      }),
+    })
+  })
+  await second.goto('/projects/prj-e2e/workflows/wf-e2e')
+  await expect(second.getByText('E2E Workflow')).toBeVisible()
   await context.close()
 })
 
 test('an expired refresh session returns the user to login', async ({ page }) => {
   await mockAuthApi(page)
+  await page.unroute('**/api/auth/refresh')
   await page.route('**/api/auth/refresh', async (route) => {
     await route.fulfill({ status: 401, body: JSON.stringify({ success: false, data: null }) })
   })
   await page.goto('/')
   await page.evaluate(() => localStorage.setItem('flowmat_refresh_cookie', '1'))
-  await page.reload()
+  await page.goto('/projects/prj-e2e/workflows/wf-e2e')
   await expect(page.locator('input').nth(0)).toBeVisible()
-  expect(await page.evaluate(() => localStorage.getItem('flowmat_refresh_cookie'))).toBeNull()
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('flowmat_refresh_cookie'))).toBeNull()
 })
 
 test('a mocked OAuth provider callback completes login without storing a token', async ({ page }) => {
@@ -273,8 +305,8 @@ test('authenticated user can open workspace, select a node, and switch canvas to
   await page.getByText('Input Node').click()
   await expect(page.locator('.inspector__title')).toHaveText('Input Node')
 
-  await page.getByRole('button', { name: 'Annotate' }).click()
+  await page.getByRole('tab', { name: 'Annotate' }).click()
   await expect(page.getByRole('button', { name: 'Save Editor' })).toBeVisible()
-  await page.getByRole('button', { name: 'Home' }).click()
-  await expect(page.getByRole('button', { name: 'Fit View' })).toBeVisible()
+  await page.getByRole('tab', { name: 'View' }).click()
+  await expect(page.locator('button.ribbon-button', { hasText: 'Fit View' })).toBeVisible()
 })

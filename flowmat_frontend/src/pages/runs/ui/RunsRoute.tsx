@@ -7,6 +7,8 @@ import { useStartProductionRunMutation } from '../../../entities/production/api/
 import { useWorkOrdersQuery } from '../../../entities/production/api/useWorkOrders'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { runnableWorkOrders } from '../model/workOrderActions'
+import { useBomsQuery } from '../../../entities/bom/api/useBoms'
+import { approvedRevision } from '../../inventory/model/bomModel'
 import { RunStatusBadge, formatQty } from './runDisplay'
 import { WorkOrdersPanel } from './WorkOrdersPanel'
 
@@ -31,7 +33,12 @@ export function RunsRoute() {
   const workOrderNumber = new Map(workOrders.map((order) => [order.workOrderId, order.workOrderNumber]))
   const selectableOrders = runnableWorkOrders(workOrders, workflowId)
 
-  const [form, setForm] = useState({ workOrderId: '', targetItemId: '', plannedOutputQty: '', runType: 'actual' })
+  const [form, setForm] = useState({ workOrderId: '', targetItemId: '', plannedOutputQty: '', runType: 'actual', useBom: true })
+  const boms = useBomsQuery(projectId).data ?? []
+  // An order with a BOM always plans from it (the server uses the order's BOM), so the checkbox only applies without one.
+  const orderBomId = workOrders.find((order) => order.workOrderId === form.workOrderId)?.bomId ?? null
+  const orderBom = orderBomId ? boms.find((candidate) => candidate.bomId === orderBomId) : undefined
+  const bom = !orderBomId && form.targetItemId ? approvedRevision(boms, form.targetItemId) : undefined
 
   function setView(next: 'runs' | 'work-orders') {
     const params: Record<string, string> = {}
@@ -74,6 +81,7 @@ export function RunsRoute() {
         plannedOutputQty: Number(form.plannedOutputQty),
         runType: form.runType,
         workOrderId: form.workOrderId || undefined,
+        bomId: form.useBom && bom ? bom.bomId : undefined,
       })
       navigate(`/projects/${projectId}/runs/${run.productionRunId}`)
     } catch {
@@ -224,6 +232,24 @@ export function RunsRoute() {
                     required
                   />
                 </label>
+                {orderBomId && (
+                  <span style={{ fontSize: 13 }}>
+                    Materials are planned from the work order&apos;s BOM
+                    {orderBom ? <> <code>{orderBom.bomName} v{orderBom.bomVersion}</code></> : ''}.
+                  </span>
+                )}
+                {bom && (
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+                    <input
+                      type="checkbox"
+                      checked={form.useBom}
+                      onChange={(e) => setForm((f) => ({ ...f, useBom: e.target.checked }))}
+                    />
+                    <span>
+                      Plan materials from BOM <code>{bom.bomName} v{bom.bomVersion}</code>
+                    </span>
+                  </label>
+                )}
                 <label style={{ display: 'grid', gap: 4 }}>
                   <span>Run type</span>
                   <select value={form.runType} onChange={(e) => setForm((f) => ({ ...f, runType: e.target.value }))}>

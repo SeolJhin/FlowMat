@@ -1,5 +1,7 @@
 # 작업 분할 · 인계서 (2026-09-23)
 
+> **2026-09-24: 에이전트 1명에게 모두 맡기는 통합본 [`2026-09-24-agent-brief.md`](2026-09-24-agent-brief.md)가 이 문서의 작업 목록을 대체합니다.**
+
 외부 점검 결과의 "추가로 해야 할 일" 중 **재고·BOM·LOT 담당(Claude 세션 1) 몫을 뺀 나머지**를 정리했습니다.
 에이전트에게 맡길 일 3묶음(A·B·C)과 사람이 해야 할 일(D)로 나눴고, 각 에이전트에 그대로 붙여 넣을 지시문을 함께 둡니다.
 
@@ -22,7 +24,7 @@
 
 ## 1. 모든 에이전트 공통 규칙
 
-1. **커밋·푸시·브랜치 생성/전환 금지.** 변경은 작업 트리에만 남깁니다. (현재 브랜치 `fix/ribbon-stability-20260923` 그대로)
+1. **커밋·푸시·브랜치 생성/전환 금지.** 변경은 작업 트리에만 남깁니다. 커밋은 사람이 직접 합니다. (2026-09-24 기준 브랜치 `main`)
 2. **파일 소유권을 지킵니다.**
 
    | 경로 | 소유 |
@@ -41,8 +43,9 @@
 | 항목 | 값 |
 |---|---|
 | Postgres | 로컬 설치 18, `localhost:5432`, DB/계정/비번 `flowmat`/`flowmat`/`flowmat` |
-| Redis | `docker compose -f flowmat_backend/compose.yaml up -d redis` (Docker Desktop 필요) |
-| 백엔드 실행 | `flowmat_backend`에서 `.\gradlew.bat bootRun --args='--spring.profiles.active=dev'` |
+| Redis | `compose.yaml`이 이제 `.env`(POSTGRES_DB 등)를 요구합니다. `.env`가 없으면 `docker run -d --name flowmat-redis -p 6379:6379 redis:7.4` |
+| 백엔드 실행 | `flowmat_backend`에서 환경변수 `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`(32바이트 이상)을 넣고 `.\gradlew.bat bootRun --args='--spring.profiles.active=dev'`. dev 설정에 기본값이 없습니다 |
+| ⚠ 기존 dev DB | 2026-09-24 커밋 `4e251a0`이 이미 적용된 V2·V4·V5를 수정해 **Flyway 체크섬 불일치로 기동 실패**합니다. 해결 방식(`flyway repair` 또는 파일 복원)은 사람 결정(D4). 그 전까지 화면 확인은 임시 DB로: `docker run -d --name flowmat-uicheck-db -e POSTGRES_DB=flowmat -e POSTGRES_USER=flowmat -e POSTGRES_PASSWORD=flowmat -p 5433:5432 postgres:16` 후 `DB_URL=jdbc:postgresql://localhost:5433/flowmat` |
 | API 주소 | `http://localhost:8080/api` (context-path `/api`) |
 | 데모 계정 | `demo-owner` / `demo1234`, 프로젝트 `prj_demo_main`, 워크플로 `wf_demo_main` |
 | 통합 테스트 | Testcontainers(Postgres 16, Redis 7.4) — Docker 엔진이 켜져 있어야 함 |

@@ -17,6 +17,7 @@ import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.application.InventoryCommandService;
 import org.myweb.flowmat.domain.inventory.application.InventoryMovement;
+import org.myweb.flowmat.domain.inventory.application.LotService;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.domain.enums.InventoryTransactionType;
 import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
@@ -71,6 +72,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     private final WorkOrderRepository workOrderRepository;
     private final UnitConverter unitConverter;
     private final BomService bomService;
+    private final LotService lotService;
 
     @Override
     public List<ProductionRunResponse> listRuns(String workflowId) {
@@ -204,6 +206,12 @@ public class ProductionRunServiceImpl implements ProductionRunService {
                 throw new BusinessException(ErrorCode.BAD_REQUEST, "The selected stock record holds a different item.");
             }
         }
+        // LOT-tracked items are only consumed or produced through an explicit LOT (its stock record).
+        if ("Y".equals(item.getLotManageYn()) && inventory == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                item.getItemCode() + " is LOT-tracked; choose the stock record (LOT) this " + request.direction().trim().toLowerCase()
+                    + " uses.");
+        }
 
         // Reject incompatible units before anything is saved, even when no stock record is linked.
         BigDecimal recordedQty = request.actualQty() != null ? request.actualQty() : request.plannedQty();
@@ -223,13 +231,52 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         runItem.setActualQty(request.actualQty());
         runItem.setUnit(request.unit().trim());
         runItem.setQuantitySource("manual");
+        runItem.setLotId(inventory != null ? inventory.getLotId() : null);
         ProductionRunItem savedRunItem = productionRunItemRepository.save(runItem);
 
         if (inventory != null) {
             applyInventoryEffect(run, savedRunItem, inventory, conversion);
         }
+        if (savedRunItem.getLotId() != null) {
+            linkLotGenealogy(run, savedRunItem);
+        }
 
         return toItemResponse(savedRunItem);
+    }
+
+    /**
+     * Connects this LOT to the LOTs already recorded on the other side of the run: every input LOT is a parent of every
+     * output LOT. Works in either recording order; the same edge is stored once.
+     */
+    private void linkLotGenealogy(ProductionRun run, ProductionRunItem recorded) {
+        boolean isOutput = "output".equals(recorded.getDirection());
+        if (isOutput) {
+            lotService.markProducedBy(recorded.getLotId(), run.getProductionRunId());
+        }
+        for (ProductionRunItem other : productionRunItemRepository.findAllByProductionRunIdOrderByProductionRunItemIdAsc(
+            run.getProductionRunId())) {
+            if (other.getLotId() == null
+                || other.getProductionRunItemId().equals(recorded.getProductionRunItemId())
+                || other.getDirection().equals(recorded.getDirection())) {
+                continue;
+            }
+            ProductionRunItem input = isOutput ? other : recorded;
+            ProductionRunItem output = isOutput ? recorded : other;
+            lotService.recordTrace(
+                run.getProjectId(),
+                run.getProductionRunId(),
+                output.getProcessId() != null ? output.getProcessId() : input.getProcessId(),
+                input.getLotId(),
+                output.getLotId(),
+                recordedQuantity(input),
+                recordedQuantity(output),
+                input.getUnit()
+            );
+        }
+    }
+
+    private static BigDecimal recordedQuantity(ProductionRunItem item) {
+        return item.getActualQty() != null ? item.getActualQty() : item.getPlannedQty();
     }
 
     @Override
@@ -327,7 +374,8 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             item.getActualQty(),
             item.getUnit(),
             item.getQuantitySource(),
-            item.getConversionRate()
+            item.getConversionRate(),
+            item.getLotId()
         );
     }
 

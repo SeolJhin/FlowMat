@@ -28,6 +28,7 @@ function order(overrides: Partial<WorkOrderDto>): WorkOrderDto {
     approvedAt: null,
     producedQuantity: 0,
     runCount: 0,
+    bomId: null,
     ...overrides,
   }
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { CanvasAnnotationDto, WorkflowGraphChangeDto } from '../../../shared/types/api'
 import { applyGraphChangesToCanvas } from './applyGraphChangesToCanvas'
 import { buildWorkflowCanvasViewModel } from './toWorkflowCanvasViewModel'
+import type { CanvasEdgeViewModel, CanvasNodeViewModel } from './types'
 
 describe('applyGraphChangesToCanvas', () => {
   it('applies annotation create, update, and delete graph changes without duplicating annotations', () => {
@@ -44,6 +45,28 @@ describe('applyGraphChangesToCanvas', () => {
     expect(deleted.graphSeq).toBe(4)
     expect(deleted.annotations).toEqual([])
     expect(deleted.annotationMap).toEqual({})
+  })
+
+  it('removes a connection and a node using only entityId when payload is null', () => {
+    const node = (id: string) => ({ id, inputs: [], outputs: [] }) as unknown as CanvasNodeViewModel
+    const edge = (id: string, source: string, target: string) =>
+      ({ id, source, target }) as CanvasEdgeViewModel
+    const canvas = buildWorkflowCanvasViewModel(
+      {
+        workflowId: 'workflow-1', projectId: 'project-1', workflowName: 'Flow',
+        workflowDesc: null, workflowType: 'standard', workflowStatus: 'draft', currentUserRole: 'owner',
+      },
+      1,
+      [node('node-1'), node('node-2')],
+      [edge('edge-1', 'node-1', 'node-2'), edge('edge-2', 'node-1', 'node-2')],
+      [],
+    )
+    const withoutConnection = applyGraphChangesToCanvas(canvas, [graphChange(2, 'CONNECTION_DELETED', 'edge-1', null)])
+    expect(withoutConnection.edges.map((item) => item.id)).toEqual(['edge-2'])
+    const withoutNode = applyGraphChangesToCanvas(withoutConnection, [graphChange(3, 'NODE_DELETED', 'node-1', null)])
+    expect(withoutNode.nodes.map((item) => item.id)).toEqual(['node-2'])
+    expect(withoutNode.edges).toEqual([])
+    expect(withoutNode.graphSeq).toBe(3)
   })
 })
 

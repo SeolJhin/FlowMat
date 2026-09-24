@@ -2,6 +2,8 @@ package org.myweb.flowmat.domain.workflow.editor.application;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -39,6 +41,7 @@ public class WorkflowEditorDocumentService {
 
     private final WorkflowEditorDocumentRepository documentRepository;
     private final WorkflowEditorElementRepository elementRepository;
+    private final EntityManager entityManager;
     private final ProjectAccessService projectAccessService;
     private final ObjectMapper objectMapper;
     private final GraphSyncService graphSyncService;
@@ -55,10 +58,13 @@ public class WorkflowEditorDocumentService {
     public EditorDocumentResponse saveDocument(String workflowId, EditorDocumentSaveRequest request) {
         Workflow workflow = projectAccessService.requireWorkflowWriteAccess(workflowId);
         validateDocument(request);
+        // The document row does not exist on its first save. Lock the parent row
+        // so concurrent creators serialize before checking expectedVersion.
+        entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
         String userId = projectAccessService.requireCurrentUserId();
         long nonce = System.currentTimeMillis();
 
-        WorkflowEditorDocument document = documentRepository.findById(workflow.getWorkflowId())
+        WorkflowEditorDocument document = documentRepository.findByWorkflowIdForUpdate(workflow.getWorkflowId())
             .orElseGet(() -> newDocument(workflow, userId));
         if (request.expectedVersion() != null && request.expectedVersion() != document.getVersion()) {
             throw new BusinessException(

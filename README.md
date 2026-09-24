@@ -64,9 +64,19 @@ Backend CI enforces the current JaCoCo baseline of 45% line coverage and 30%
 branch coverage. The thresholds are intentionally conservative and should be
 raised as security and domain test coverage grows.
 
-Browser E2E uses Playwright with a mocked API/provider in CI and does not
-require a separate staging environment. Real Google/Kakao OAuth smoke tests
-remain a staging-only operation.
+Browser E2E uses Playwright with a mocked API/provider plus a separate
+backend-services job path. The backend path starts PostgreSQL and Redis,
+verifies readiness, and runs the real backend contract and BOM/LOT flow.
+Real Google/Kakao OAuth smoke tests remain a staging-only manual workflow and
+require the `staging` environment secrets.
+
+Staging smoke workflows expect:
+- OAuth: `STAGING_BASE_URL` and `STAGING_OAUTH_CALLBACK_URL`
+- Migration isolation: `STAGING_BASE_URL`, `STAGING_DB_URL`,
+  `STAGING_DB_USERNAME`, and `STAGING_DB_PASSWORD`
+
+`STAGING_DB_URL` must be a PostgreSQL connection URL accepted by `psql`, not a
+JDBC URL.
 
 The `prod` Spring profile disables demo seed data through a Flyway session
 setting. `ProdMigrationIsolationTest` verifies this against a real

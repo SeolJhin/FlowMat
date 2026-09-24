@@ -44,6 +44,7 @@ class WorkOrderServiceImplTest {
     @Mock private ItemRepository itemRepository;
     @Mock private ProjectAccessService projectAccessService;
     @Mock private IdGenerator idGenerator;
+    @Mock private org.myweb.flowmat.domain.bom.repository.BomHeaderRepository bomHeaderRepository;
 
     @InjectMocks
     private WorkOrderServiceImpl workOrderService;
@@ -100,7 +101,7 @@ class WorkOrderServiceImplTest {
         givenOrder("approved");
 
         assertThatThrownBy(() -> workOrderService.updateWorkOrder("wo-1",
-            new WorkOrderUpdateRequest("New title", null, null, null, null, null, null, null, null)))
+            new WorkOrderUpdateRequest("New title", null, null, null, null, null, null, null, null, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Only draft");
         verify(workOrderRepository, never()).save(any());

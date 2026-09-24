@@ -63,7 +63,7 @@ const RECONNECT_DELAY_MS = readPositiveIntEnv('VITE_WORKFLOW_SYNC_RECONNECT_DELA
  * - clientId (per-tab UUID) is sent alongside messages for echo filtering.
  * - sendNodeMove: 160 ms throttled drag relay.
  * - sendPresence: CURSOR_MOVED / NODE_EDITING broadcast.
- * - onReconnect: called on every reconnect after the first connect.
+ * - onReconnect: reconciles the canvas after subscriptions on every connection.
  */
 export function useWorkflowSync(
   workflowId: string,
@@ -85,7 +85,6 @@ export function useWorkflowSync(
   const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pendingMoveRef = useRef<{ processId: string; x: number; y: number } | null>(null)
-  const isFirstConnectRef = useRef(true)
   const onReconnectRef = useRef(onReconnect)
   onReconnectRef.current = onReconnect
 
@@ -102,10 +101,6 @@ export function useWorkflowSync(
     })
 
     client.onConnect = () => {
-      if (!isFirstConnectRef.current) {
-        onReconnectRef.current?.()
-      }
-      isFirstConnectRef.current = false
       connectedRef.current = true
 
       client.subscribe(`/topic/workflow/${workflowId}/node-move`, (message: IMessage) => {
@@ -158,6 +153,7 @@ export function useWorkflowSync(
       }
       sendHeartbeat()
       heartbeatTimerRef.current = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS)
+      onReconnectRef.current?.()
     }
 
     client.onWebSocketClose = () => {

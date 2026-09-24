@@ -8,6 +8,8 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +45,9 @@ class WorkflowEditorDocumentServiceTest {
 
     @Mock
     private WorkflowEditorElementRepository elementRepository;
+
+    @Mock
+    private EntityManager entityManager;
 
     @Mock
     private ProjectAccessService projectAccessService;
@@ -84,7 +89,7 @@ class WorkflowEditorDocumentServiceTest {
     void saveDocumentPersistsPolygonAndLineElements() {
         when(projectAccessService.requireWorkflowWriteAccess(WORKFLOW_ID)).thenReturn(workflow);
         when(projectAccessService.requireCurrentUserId()).thenReturn("user-1");
-        when(documentRepository.findById(WORKFLOW_ID)).thenReturn(Optional.empty());
+        when(documentRepository.findByWorkflowIdForUpdate(WORKFLOW_ID)).thenReturn(Optional.empty());
         when(elementRepository.findAllByWorkflowIdAndDeletedYnOrderByElementOrderAscCreatedAtAsc(WORKFLOW_ID, "N"))
             .thenReturn(List.of());
         EditorDocumentSaveRequest request = new EditorDocumentSaveRequest(
@@ -109,6 +114,7 @@ class WorkflowEditorDocumentServiceTest {
             .extracting(WorkflowEditorElement::getElementType)
             .containsExactly("polygon", "line");
         verify(documentRepository).save(any(WorkflowEditorDocument.class));
+        verify(entityManager).lock(workflow, LockModeType.PESSIMISTIC_WRITE);
         verify(graphSyncService).broadcast(
             GraphChangeMessage.Type.EDITOR_DOCUMENT_UPDATED,
             WORKFLOW_ID,
@@ -123,7 +129,7 @@ class WorkflowEditorDocumentServiceTest {
         WorkflowEditorElement stale = storedElement("old-1", "rectangle", 1);
         when(projectAccessService.requireWorkflowWriteAccess(WORKFLOW_ID)).thenReturn(workflow);
         when(projectAccessService.requireCurrentUserId()).thenReturn("user-1");
-        when(documentRepository.findById(WORKFLOW_ID)).thenReturn(Optional.of(document));
+        when(documentRepository.findByWorkflowIdForUpdate(WORKFLOW_ID)).thenReturn(Optional.of(document));
         when(elementRepository.findAllByWorkflowIdAndDeletedYnOrderByElementOrderAscCreatedAtAsc(WORKFLOW_ID, "N"))
             .thenReturn(List.of(stale));
         EditorDocumentSaveRequest request = new EditorDocumentSaveRequest(1, camera(0, 0, 1), 1, List.of());

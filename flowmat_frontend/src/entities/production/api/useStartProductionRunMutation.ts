@@ -11,6 +11,8 @@ export interface StartRunInput {
   runType?: string
   startedBy?: string
   workOrderId?: string
+  /** Approved BOM revision whose material requirements are frozen onto the run. */
+  bomId?: string
 }
 
 async function startProductionRun(input: StartRunInput): Promise<ProductionRunDto> {

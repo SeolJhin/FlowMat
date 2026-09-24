@@ -14,6 +14,8 @@ export interface WorkOrderInput {
   plannedEndAt?: string
   instruction?: string
   assignedTo?: string
+  /** BOM revision runs of this order plan their materials from; must be approved before the order is. */
+  bomId?: string
 }
 
 export type WorkOrderTransition = 'approve' | 'cancel' | 'complete'

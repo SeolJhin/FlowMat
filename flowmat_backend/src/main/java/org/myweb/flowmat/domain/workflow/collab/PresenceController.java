@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.collab.dto.PresenceMessage;
+import org.myweb.flowmat.domain.workflow.collab.dto.AnnotationPresencePayload;
 import org.myweb.flowmat.global.security.AuthUser;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
@@ -44,7 +45,7 @@ public class PresenceController {
             log.warn("Dropping invalid presence message for workflowId={}, userId={}", workflowId, userId);
             return;
         }
-        String sessionId = headerAccessor.getSessionId();
+        String sessionId = headerAccessor == null ? null : headerAccessor.getSessionId();
         if (sessionId != null && userId != null) {
             if (message.type() == PresenceMessage.Type.LEAVE) {
                 sessionRegistry.remove(sessionId);
@@ -64,7 +65,7 @@ public class PresenceController {
     }
 
     private boolean isValid(PresenceMessage message) {
-        if (!hasLength(message.clientId(), 128)) {
+        if (!hasRequiredLength(message.clientId(), 128)) {
             return false;
         }
         if (message.cursorX() != null && !isCoordinate(message.cursorX())) {
@@ -73,10 +74,10 @@ public class PresenceController {
         if (message.cursorY() != null && !isCoordinate(message.cursorY())) {
             return false;
         }
-        if (message.editingProcessId() != null && !hasLength(message.editingProcessId(), 128)) {
+        if (message.editingProcessId() != null && !hasRequiredLength(message.editingProcessId(), 128)) {
             return false;
         }
-        if (message.annotation() != null && message.annotation().toString().length() > 16_384) {
+        if (message.annotation() != null && !isValidAnnotation(message.annotation())) {
             return false;
         }
         return switch (message.type()) {
@@ -84,7 +85,7 @@ public class PresenceController {
                 && message.cursorY() == null
                 && message.editingProcessId() == null;
             case CURSOR_MOVED -> message.cursorX() != null && message.cursorY() != null;
-            case NODE_EDITING -> hasLength(message.editingProcessId(), 128);
+            case NODE_EDITING -> hasRequiredLength(message.editingProcessId(), 128);
             case ANNOTATION_DRAWING -> message.annotation() != null;
         };
     }
@@ -93,8 +94,27 @@ public class PresenceController {
         return Double.isFinite(value) && value >= -1_000_000d && value <= 1_000_000d;
     }
 
-    private boolean hasLength(String value, int maxLength) {
-        return value == null || (!value.isBlank() && value.length() <= maxLength);
+    private boolean hasRequiredLength(String value, int maxLength) {
+        return value != null && !value.isBlank() && value.length() <= maxLength;
+    }
+
+    private boolean isValidAnnotation(AnnotationPresencePayload annotation) {
+        if (annotation.annotationType() == null
+            || !(annotation.annotationType().equals("freehand")
+                || annotation.annotationType().equals("shape")
+                || annotation.annotationType().equals("text"))
+            || annotation.inProgress() == null
+            || annotation.points() == null
+            || annotation.points().size() > 4096) {
+            return false;
+        }
+        for (var point : annotation.points()) {
+            if (point == null || point.size() != 2 || point.get(0) == null || point.get(1) == null
+                || !isCoordinate(point.get(0)) || !isCoordinate(point.get(1))) {
+                return false;
+            }
+        }
+        return annotation.toString().length() <= 16_384;
     }
 
     private String resolveUserId(Principal principal) {

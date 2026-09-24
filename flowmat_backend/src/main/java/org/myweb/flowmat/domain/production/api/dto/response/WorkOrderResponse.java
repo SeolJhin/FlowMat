@@ -23,6 +23,7 @@ public record WorkOrderResponse(
     OffsetDateTime approvedAt,
     /** Sum of actual output from finished production runs started against this order. */
     BigDecimal producedQuantity,
-    int runCount
+    int runCount,
+    String bomId
 ) {
 }

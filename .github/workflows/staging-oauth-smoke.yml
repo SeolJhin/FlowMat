@@ -29,4 +29,7 @@ jobs:
         env:
           BASE_URL: ${{ secrets.STAGING_BASE_URL }}
           STAGING_OAUTH_CALLBACK_URL: ${{ secrets.STAGING_OAUTH_CALLBACK_URL }}
-        run: npx playwright test e2e/staging-oauth.spec.ts
+        run: |
+          test -n "$BASE_URL"
+          test -n "$STAGING_OAUTH_CALLBACK_URL"
+          npx playwright test e2e/staging-oauth.spec.ts

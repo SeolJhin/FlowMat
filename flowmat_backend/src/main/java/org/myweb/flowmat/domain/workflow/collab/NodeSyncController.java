@@ -30,7 +30,7 @@ public class NodeSyncController {
         Principal principal
     ) {
         String userId = resolveUserId(principal);
-        projectAccessService.requireWorkflowReadAccess(workflowId, userId);
+        projectAccessService.requireWorkflowWriteAccess(workflowId, userId);
         if (message == null || message.processId() == null || message.processId().isBlank()
             || message.processId().length() > 128
             || !Double.isFinite(message.x()) || !Double.isFinite(message.y())

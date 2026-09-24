@@ -47,6 +47,9 @@ export interface ProductionRunDto {
   plannedOutputQty: number
   actualOutputQty: number | null
   workOrderId: string | null
+  /** BOM revision frozen onto the run at start, if any. */
+  bomId: string | null
+  bomVersion: number | null
 }
 
 export type WorkOrderStatus = 'draft' | 'approved' | 'in_progress' | 'completed' | 'cancelled'
@@ -71,6 +74,7 @@ export interface WorkOrderDto {
   approvedAt: string | null
   producedQuantity: number
   runCount: number
+  bomId: string | null
 }
 
 export interface ProductionRunItemDto {
@@ -84,6 +88,10 @@ export interface ProductionRunItemDto {
   plannedQty: number
   actualQty: number | null
   unit: string
+  /** "manual" when recorded by hand, "bom" when planned from the BOM snapshot at run start. */
+  quantitySource: string | null
+  conversionRate: number | null
+  lotId: string | null
 }
 
 export interface InventoryDto {
@@ -100,6 +108,91 @@ export interface InventoryDto {
   stockLevel: 'low' | 'ok' | 'over'
   /** Optimistic-lock version; send it back as expectedVersion when adjusting. */
   version: number | null
+  lotId: string | null
+  lotNo: string | null
+}
+
+export type BomStatus = 'draft' | 'pending_approval' | 'approved' | 'retired'
+
+export interface BomLineDto {
+  bomLineId: string
+  childItemId: string
+  quantity: number
+  unit: string
+  scrapRate: number | null
+  optionalYn: string | null
+  substituteGroup: string | null
+  sortOrder: number | null
+  note: string | null
+}
+
+/** One BOM revision. Only drafts can change; a change to an approved BOM is a new revision. */
+export interface BomDto {
+  bomId: string
+  projectId: string
+  targetItemId: string
+  bomName: string
+  bomVersion: number
+  baseQuantity: number
+  baseUnit: string
+  bomStatus: BomStatus
+  approvedBy: string | null
+  approvedAt: string | null
+  note: string | null
+  lines: BomLineDto[]
+}
+
+export interface BomRequirementLineDto {
+  bomLineId: string
+  childItemId: string
+  lineQuantity: number
+  lineUnit: string
+  requiredQuantity: number
+  itemUnit: string
+  requiredItemQuantity: number
+  conversionRate: number
+}
+
+export interface BomRequirementDto {
+  bomId: string
+  bomVersion: number
+  targetItemId: string
+  productionQuantity: number
+  baseQuantity: number
+  lines: BomRequirementLineDto[]
+}
+
+export type LotStatus = 'available' | 'reserved' | 'quarantined' | 'consumed' | 'closed'
+
+export interface LotDto {
+  lotId: string
+  projectId: string
+  itemId: string
+  lotNo: string
+  serialNo: string | null
+  lotStatus: LotStatus
+  receivedAt: string | null
+  producedAt: string | null
+  expiryDate: string | null
+  productionRunId: string | null
+  quantityOnHand: number
+  quantityReserved: number
+}
+
+export interface LotTraceNodeDto {
+  lot: LotDto
+  depth: number
+  viaLotId: string
+  productionRunId: string | null
+  consumedQty: number | null
+  producedQty: number | null
+  unit: string | null
+}
+
+export interface LotTraceDto {
+  lot: LotDto
+  direction: 'backward' | 'forward'
+  nodes: LotTraceNodeDto[]
 }
 
 export interface ProjectInvitePreviewDto {
@@ -169,6 +262,8 @@ export interface ItemDto {
   resourceType: string | null
   unitId: string | null
   itemStatus: string
+  /** "Y" when stock of this item is tracked per LOT. */
+  lotManageYn: string | null
 }
 
 export interface ProcessDto {

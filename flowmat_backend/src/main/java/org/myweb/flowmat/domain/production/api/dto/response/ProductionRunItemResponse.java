@@ -15,6 +15,8 @@ public record ProductionRunItemResponse(
     String unit,
     /** "manual" or "bom" (planned from the BOM snapshot at run start). */
     String quantitySource,
-    BigDecimal conversionRate
+    BigDecimal conversionRate,
+    /** LOT consumed or produced; set from the chosen stock record. */
+    String lotId
 ) {
 }

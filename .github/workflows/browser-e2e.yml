@@ -1,6 +1,8 @@
 name: Browser E2E with Backend Services
 
 on:
+  push:
+    branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
   workflow_dispatch:
@@ -8,6 +10,7 @@ on:
 jobs:
   browser-e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -68,7 +71,7 @@ jobs:
         run: |
           nohup ./gradlew bootRun --args='--spring.profiles.active=dev --server.port=8080' > /tmp/flowmat-backend.log 2>&1 &
           for attempt in {1..60}; do
-            if curl --fail --silent http://127.0.0.1:8080/api/actuator/health > /dev/null; then
+            if curl --fail --silent http://127.0.0.1:8080/api/actuator/health/readiness > /dev/null; then
               exit 0
             fi
             sleep 2
@@ -80,6 +83,10 @@ jobs:
         working-directory: flowmat_frontend
         run: npm ci
 
+      - name: Verify backend API contract
+        run: |
+          curl --fail --silent --show-error http://127.0.0.1:8080/api/actuator/health/readiness
+
       - name: Install Playwright browser
         working-directory: flowmat_frontend
         run: npx playwright install --with-deps chromium
@@ -87,3 +94,33 @@ jobs:
       - name: Run browser E2E
         working-directory: flowmat_frontend
         run: npm run test:e2e
+
+      - name: Run real backend contract E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/backend-contract.spec.ts
+
+      - name: Run real BOM and LOT E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/bom-lot-flow.spec.ts
+
+      - name: Upload backend log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-e2e-backend-log
+          path: /tmp/flowmat-backend.log
+          if-no-files-found: ignore
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-e2e-playwright-artifacts
+          path: |
+            flowmat_frontend/test-results
+            flowmat_frontend/playwright-report
+          if-no-files-found: ignore

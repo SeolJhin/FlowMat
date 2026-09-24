@@ -63,6 +63,7 @@ class ProductionRunServiceImplTest {
     @Mock private WorkOrderRepository workOrderRepository;
     @Mock private UnitConverter unitConverter;
     @Mock private BomService bomService;
+    @Mock private org.myweb.flowmat.domain.inventory.application.LotService lotService;
 
     @InjectMocks
     private ProductionRunServiceImpl productionRunService;

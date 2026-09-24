@@ -2,7 +2,10 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
-  testIgnore: process.env.STAGING_OAUTH_CALLBACK_URL ? [] : ['**/staging-oauth.spec.ts'],
+  testIgnore: [
+    ...(process.env.STAGING_OAUTH_CALLBACK_URL ? [] : ['**/staging-oauth.spec.ts']),
+    ...(process.env.REAL_API_E2E ? [] : ['**/backend-contract.spec.ts', '**/bom-lot-flow.spec.ts']),
+  ],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
