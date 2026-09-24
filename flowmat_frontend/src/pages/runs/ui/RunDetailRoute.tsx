@@ -4,10 +4,13 @@ import { useItemsQuery } from '../../../entities/catalog/api/useItemsQuery'
 import { useProductionRunQuery } from '../../../entities/production/api/useProductionRunQuery'
 import { useProductionRunItemsQuery } from '../../../entities/production/api/useProductionRunItemsQuery'
 import { useRecordRunItemMutation } from '../../../entities/production/api/useRecordRunItemMutation'
+import { useCancelRunItemMutation } from '../../../entities/production/api/useCancelRunItemMutation'
 import { useFinishProductionRunMutation } from '../../../entities/production/api/useFinishProductionRunMutation'
 import { useInventoriesQuery } from '../../../entities/inventory/api/useInventoriesQuery'
 import { useUnitsQuery } from '../../../entities/catalog/api/useUnitsQuery'
 import { errorMessage } from '../../../shared/lib/errorMessage'
+import type { ProductionRunItemDto } from '../../../shared/types/api'
+import { recordedAgainstPlan, remainingOfPlan } from '../model/runPlan'
 import { RunStatusBadge, formatQty, isRunOpen } from './runDisplay'
 
 const cell = { padding: '8px 6px' } as const
@@ -38,7 +41,22 @@ export function RunDetailRoute() {
   }
   const inventoriesQuery = useInventoriesQuery(projectId)
 
+  /** Copies a BOM plan line into the record form: what is still unrecorded becomes the actual quantity. */
+  function fillFromPlan(planned: ProductionRunItemDto) {
+    const remaining = remainingOfPlan(planned, runItemsQuery.data ?? [])
+    setItemForm({
+      itemId: planned.itemId,
+      direction: 'input',
+      plannedQty: String(planned.plannedQty),
+      actualQty: String(remaining > 0 ? remaining : planned.plannedQty),
+      unit: planned.unit,
+      inventoryId: '',
+    })
+    document.getElementById('record-run-item')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   const recordMutation = useRecordRunItemMutation(runId, projectId)
+  const cancelMutation = useCancelRunItemMutation(runId, projectId)
   const finishMutation = useFinishProductionRunMutation()
 
   const [itemForm, setItemForm] = useState(EMPTY_ITEM_FORM)
@@ -75,7 +93,7 @@ export function RunDetailRoute() {
     const sum = (direction: string) =>
       runItems
         // BOM rows are the plan, not something that was recorded.
-        .filter((item) => item.direction === direction && item.quantitySource !== 'bom')
+        .filter((item) => item.direction === direction && item.quantitySource !== 'bom' && !item.cancelled)
         .reduce((acc, item) => acc + Number(item.actualQty ?? item.plannedQty ?? 0), 0)
     return { input: sum('input'), output: sum('output') }
   }, [runItems])
@@ -151,6 +169,11 @@ export function RunDetailRoute() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 24, alignItems: 'start' }}>
             <section>
               <h3 style={{ marginTop: 0 }}>Recorded items</h3>
+              {cancelMutation.isError && (
+                <p style={{ color: '#dc2626', fontSize: 12 }}>
+                  {errorMessage(cancelMutation.error, 'The item could not be cancelled.')}
+                </p>
+              )}
               {runItemsQuery.isLoading && <p>Loading items...</p>}
               {runItemsQuery.isError && (
                 <p style={{ color: '#dc2626' }}>{errorMessage(runItemsQuery.error, 'Failed to load run items.')}</p>
@@ -172,7 +195,14 @@ export function RunDetailRoute() {
                   </thead>
                   <tbody>
                     {runItems.map((item) => (
-                      <tr key={item.productionRunItemId} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <tr
+                        key={item.productionRunItemId}
+                        title={item.cancelled ? `Cancelled by ${item.cancelledBy ?? '?'}: ${item.cancelReason ?? ''}` : undefined}
+                        style={{
+                          borderBottom: '1px solid var(--border)',
+                          ...(item.cancelled ? { opacity: 0.45, textDecoration: 'line-through' } : {}),
+                        }}
+                      >
                         <td style={{ ...cell, color: item.direction === 'input' ? '#0369a1' : '#047857' }}>
                           {item.direction === 'input' ? '↓ input' : '↑ output'}
                         </td>
@@ -188,10 +218,40 @@ export function RunDetailRoute() {
                           )}
                         </td>
                         <td style={{ ...cell, textAlign: 'right' }}>{formatQty(item.plannedQty)}</td>
-                        <td style={{ ...cell, textAlign: 'right' }}>{formatQty(item.actualQty)}</td>
+                        <td
+                          style={{ ...cell, textAlign: 'right' }}
+                          title={item.quantitySource === 'bom' ? 'Recorded so far against this plan line (same item and unit)' : undefined}
+                        >
+                          {item.quantitySource === 'bom'
+                            ? <span style={{ opacity: 0.7 }}>{formatQty(recordedAgainstPlan(item, runItems))}</span>
+                            : formatQty(item.actualQty)}
+                        </td>
                         <td style={{ ...cell, opacity: 0.7 }}>{item.unit}</td>
                         <td style={{ ...cell, opacity: 0.7 }}>
                           {item.inventoryId ? inventoryLabel.get(item.inventoryId) ?? item.inventoryId : '-'}
+                          {item.quantitySource === 'bom' && isRunOpen(run.runStatus) && (
+                            <button type="button" onClick={() => fillFromPlan(item)} style={{ marginLeft: 6, fontSize: 11 }}>
+                              Record
+                            </button>
+                          )}
+                          {item.cancelled && (
+                            <span style={{ marginLeft: 6, fontSize: 10, textDecoration: 'none', display: 'inline-block' }}>cancelled</span>
+                          )}
+                          {item.quantitySource !== 'bom' && !item.cancelled && isRunOpen(run.runStatus) && (
+                            <button
+                              type="button"
+                              disabled={cancelMutation.isPending}
+                              onClick={() => {
+                                const reason = window.prompt('Why is this recording being cancelled? Its stock movement will be reversed.')
+                                if (reason?.trim()) {
+                                  cancelMutation.mutate({ productionRunItemId: item.productionRunItemId, reason: reason.trim() })
+                                }
+                              }}
+                              style={{ marginLeft: 6, fontSize: 11 }}
+                            >
+                              Cancel
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -205,7 +265,7 @@ export function RunDetailRoute() {
                 <>
                   <section style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 18 }}>
                     <h3 style={{ marginTop: 0 }}>Record Item</h3>
-                    <form onSubmit={(e) => void handleRecord(e)} style={{ display: 'grid', gap: 10 }}>
+                    <form id="record-run-item" onSubmit={(e) => void handleRecord(e)} style={{ display: 'grid', gap: 10 }}>
                       <div style={{ display: 'flex', gap: 12 }}>
                         {(['input', 'output'] as const).map((direction) => (
                           <label key={direction} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>

@@ -753,19 +753,28 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   }, [canvas.workflow.workflowId])
 
   const handleGraphChange = useCallback((msg: GraphChangeMessage) => {
+    if (msg.changeType === 'RESET_REQUIRED') {
+      void queryClient.invalidateQueries({ queryKey: ['workflow-canvas', canvas.workflow.workflowId] })
+      invalidateEditorDocument()
+      return
+    }
     if (msg.seq <= graphSeqRef.current) return
     if (msg.seq === graphSeqRef.current + 1) {
       applyGraphChanges([msg])
       return
     }
     void resyncGraphChanges(graphSeqRef.current)
-  }, [applyGraphChanges, resyncGraphChanges])
+  }, [applyGraphChanges, canvas.workflow.workflowId, invalidateEditorDocument, queryClient, resyncGraphChanges])
 
-  const handleReconnect = useCallback(() => {
-    void resyncGraphChanges(graphSeqRef.current)
+  const handleReconnect = useCallback((forceSnapshot: boolean) => {
+    if (forceSnapshot) {
+      void queryClient.invalidateQueries({ queryKey: ['workflow-canvas', canvas.workflow.workflowId] })
+    } else {
+      void resyncGraphChanges(graphSeqRef.current)
+    }
     invalidateEditorDocument()
     void loadPresenceSnapshot(syncUserId)
-  }, [invalidateEditorDocument, loadPresenceSnapshot, resyncGraphChanges, syncUserId])
+  }, [canvas.workflow.workflowId, invalidateEditorDocument, loadPresenceSnapshot, queryClient, resyncGraphChanges, syncUserId])
 
   useEffect(() => {
     if (inlineEditingNodeId || deferredGraphResyncFromRef.current == null) return

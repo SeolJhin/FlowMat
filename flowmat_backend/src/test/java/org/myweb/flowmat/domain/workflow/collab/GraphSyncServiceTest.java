@@ -6,6 +6,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.mockito.ArgumentCaptor;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -71,5 +74,23 @@ class GraphSyncServiceTest {
         }
         verify(changes, never()).append(eq(Type.CONNECTION_DELETED), eq("wf-1"), eq("edge-1"), eq("user-1"), isNull());
         verifyNoInteractions(messages);
+    }
+
+    @Test
+    void redisFailureAfterCommitSendsSnapshotResetSignal() {
+        TransactionSynchronizationManager.initSynchronization();
+        when(changes.append(eq(Type.NODE_DELETED), eq("wf-1"), eq("node-1"), eq("user-1"), isNull()))
+            .thenThrow(new IllegalStateException("Redis unavailable"));
+
+        service.broadcast(Type.NODE_DELETED, "wf-1", "node-1", "user-1");
+        assertDoesNotThrow(() -> {
+            for (TransactionSynchronization sync : TransactionSynchronizationManager.getSynchronizations()) sync.afterCommit();
+        });
+
+        ArgumentCaptor<Object> signal = ArgumentCaptor.forClass(Object.class);
+        verify(messages).convertAndSend(eq("/topic/workflow/wf-1/graph"), signal.capture());
+        GraphChangeMessage reset = (GraphChangeMessage) signal.getValue();
+        assertEquals("RESET_REQUIRED", reset.changeType());
+        assertEquals("wf-1", reset.workflowId());
     }
 }

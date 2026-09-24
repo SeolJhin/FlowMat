@@ -56,6 +56,7 @@ function readPositiveIntEnv(key: string, fallback: number) {
 
 const HEARTBEAT_INTERVAL_MS = readPositiveIntEnv('VITE_WORKFLOW_SYNC_HEARTBEAT_MS', 15_000)
 const RECONNECT_DELAY_MS = readPositiveIntEnv('VITE_WORKFLOW_SYNC_RECONNECT_DELAY_MS', 3_000)
+const GRAPH_SUBSCRIBE_RECEIPT_TIMEOUT_MS = 3_000
 
 /**
  * STOMP-over-WebSocket collaboration hook.
@@ -63,14 +64,15 @@ const RECONNECT_DELAY_MS = readPositiveIntEnv('VITE_WORKFLOW_SYNC_RECONNECT_DELA
  * - clientId (per-tab UUID) is sent alongside messages for echo filtering.
  * - sendNodeMove: 160 ms throttled drag relay.
  * - sendPresence: CURSOR_MOVED / NODE_EDITING broadcast.
- * - onReconnect: reconciles the canvas after subscriptions on every connection.
+ * - onReconnect: replays changes promptly and confirms with a full snapshot
+ *   after connection, including when the broker sends no receipt.
  */
 export function useWorkflowSync(
   workflowId: string,
   onRemoteNodeMove: (message: NodeMoveMessage) => void,
   onPresence?: (message: PresenceMessage) => void,
   onGraphChange?: (message: GraphChangeMessage) => void,
-  onReconnect?: () => void,
+  onReconnect?: (forceSnapshot: boolean) => void,
 ) {
   const clientRef = useRef<Client | null>(null)
   const connectedRef = useRef(false)
@@ -84,6 +86,8 @@ export function useWorkflowSync(
   const lastSentAtRef = useRef(0)
   const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const graphReceiptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const connectionEpochRef = useRef(0)
   const pendingMoveRef = useRef<{ processId: string; x: number; y: number } | null>(null)
   const onReconnectRef = useRef(onReconnect)
   onReconnectRef.current = onReconnect
@@ -126,6 +130,14 @@ export function useWorkflowSync(
         onPresenceRef.current?.(payload)
       })
 
+      const graphEpoch = ++connectionEpochRef.current
+      const graphReceiptId = `graph-${CLIENT_ID}-${graphEpoch}`
+      let graphSubscriptionAcknowledged = false
+      client.watchForReceipt(graphReceiptId, () => {
+        if (graphSubscriptionAcknowledged || !connectedRef.current || graphEpoch !== connectionEpochRef.current) return
+        graphSubscriptionAcknowledged = true
+        onReconnectRef.current?.(false)
+      })
       client.subscribe(`/topic/workflow/${workflowId}/graph`, (message: IMessage) => {
         let payload: GraphChangeMessage
         try {
@@ -134,7 +146,15 @@ export function useWorkflowSync(
           return
         }
         onGraphChangeRef.current?.(payload)
-      })
+      }, { receipt: graphReceiptId })
+      // Recover promptly; the delayed snapshot also covers a committed change
+      // that Redis failed to record and the subscribe/HTTP race.
+      onReconnectRef.current?.(false)
+      graphReceiptTimerRef.current = setTimeout(() => {
+        graphReceiptTimerRef.current = null
+        if (!connectedRef.current || graphEpoch !== connectionEpochRef.current) return
+        onReconnectRef.current?.(true)
+      }, GRAPH_SUBSCRIBE_RECEIPT_TIMEOUT_MS)
 
       const sendHeartbeat = () => {
         client.publish({
@@ -153,11 +173,14 @@ export function useWorkflowSync(
       }
       sendHeartbeat()
       heartbeatTimerRef.current = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS)
-      onReconnectRef.current?.()
     }
 
     client.onWebSocketClose = () => {
       connectedRef.current = false
+      if (graphReceiptTimerRef.current) {
+        clearTimeout(graphReceiptTimerRef.current)
+        graphReceiptTimerRef.current = null
+      }
       if (heartbeatTimerRef.current) {
         clearInterval(heartbeatTimerRef.current)
         heartbeatTimerRef.current = null
@@ -176,6 +199,10 @@ export function useWorkflowSync(
       if (heartbeatTimerRef.current) {
         clearInterval(heartbeatTimerRef.current)
         heartbeatTimerRef.current = null
+      }
+      if (graphReceiptTimerRef.current) {
+        clearTimeout(graphReceiptTimerRef.current)
+        graphReceiptTimerRef.current = null
       }
       pendingMoveRef.current = null
       void client.deactivate()

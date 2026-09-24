@@ -4,7 +4,7 @@
 
 ## 한 것 / 못 한 것
 
-- C1: `flowmat_backend`에서 `gradlew.bat test build --no-daemon` 통과(처음 42 suites, 305 tests, 실패 0; 협업 변경 후 45 suites, 315 tests, 실패 0). 첫 시도는 다른 세션과 공유하는 `build/test-results/test/binary/output.bin` 삭제 충돌로 실패했고, 단독 재시도에 성공했다. 프론트 `typecheck`·`lint`·`build`와 Vitest 처음 172건, 변경 뒤 176건 통과.
+- C1: 최신 작업 트리에서 `gradlew.bat test build --no-daemon --rerun-tasks` 통과(47 suites, 319 tests, 실패 0). V18 마이그레이션이 다른 작업자에 의해 수정되는 중 한 차례 prod 프로필 테스트가 `demo-owner` UUID 변환 오류로 실패했으나, 현재 파일로 해당 단독 테스트와 전체 테스트를 다시 실행해 모두 통과했다. 첫 시도의 공유 `build/test-results/test/binary/output.bin` 삭제 충돌도 단독 재시도로 해소했다. 프론트 `typecheck`·`lint`·`build`와 Vitest 178건 통과.
 - C2: 별도 임시 `postgres:16` 컨테이너(`flowmat-c2-audit-20260924`, 포트 57799)에 빈 DB를 만들고 Spring Boot jar를 dev + `ddl-auto=validate`로 18080 포트에서 기동했다. Flyway V1~V17 모두 성공(17행, migration 2.120초, 첫 앱 시작 16.252초). 데모 로그인 성공; `/api/projects`, `/api/items?projectId=prj_demo_main`, `/api/workflows?projectId=prj_demo_main` 각각 데이터 1건을 확인했다. 임시 백엔드와 DB 컨테이너는 종료했다. 로그는 작업 공간 밖 임시 폴더에 있다. 기존 개발/운영 DB에는 접속하거나 `repair`하지 않았다.
 - C3: BOM 생성·라인, LOT 등록, 생산 시작, 작업지시 생성, 재고 거래, 재고 생성 프론트 요청 타입을 대응 Java request record와 대조했다. 전체 API 자동 대조 도구는 없으므로 이 범위 외의 무불일치는 보증하지 않는다.
 

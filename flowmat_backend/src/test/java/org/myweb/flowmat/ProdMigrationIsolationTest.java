@@ -54,6 +54,15 @@ class ProdMigrationIsolationTest {
         assertThat(count("users", "user_id", "demo-owner")).isZero();
         assertThat(count("project", "project_id", "prj_demo_main")).isZero();
         assertThat(count("workflow", "workflow_id", "wf_demo_main")).isZero();
+        // V2 still inserts the seed (applied migrations are immutable); V18 removes all of it outside demo environments.
+        assertThat(count("item", "item_id", "itm_demo_mix_output")).isZero();
+        assertThat(count("process", "project_id", "prj_demo_main")).isZero();
+        assertThat(count("process_io", "process_io_id", "pio_demo_input_out")).isZero();
+        assertThat(count("process_connection", "connection_id", "pcn_demo_input_to_mix")).isZero();
+        assertThat(count("project_member", "user_id", "demo-owner")).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+            "select count(*) from user_roles ur left join users u on u.id = ur.user_id where u.id is null",
+            Integer.class)).as("no role rows left pointing at removed users").isZero();
     }
 
     private int count(String table, String column, String value) {

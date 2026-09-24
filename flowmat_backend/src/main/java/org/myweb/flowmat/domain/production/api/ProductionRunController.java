@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunFinishRequest;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunItemRecordRequest;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunStartRequest;
+import org.myweb.flowmat.domain.production.api.dto.request.RunItemCancelRequest;
 import org.myweb.flowmat.domain.production.api.dto.response.ProductionRunItemResponse;
 import org.myweb.flowmat.domain.production.api.dto.response.ProductionRunResponse;
 import org.myweb.flowmat.domain.production.application.ProductionRunService;
@@ -63,5 +64,14 @@ public class ProductionRunController {
         @RequestBody ProductionRunFinishRequest request
     ) {
         return ApiResponse.ok(productionRunService.finishRun(productionRunId, request));
+    }
+
+    @PostMapping("/{productionRunId}/items/{productionRunItemId}/cancel")
+    public ApiResponse<ProductionRunItemResponse> cancelRunItem(
+        @PathVariable("productionRunId") String productionRunId,
+        @PathVariable("productionRunItemId") String productionRunItemId,
+        @Valid @RequestBody RunItemCancelRequest request
+    ) {
+        return ApiResponse.ok(productionRunService.cancelRunItem(productionRunId, productionRunItemId, request.reason()));
     }
 }

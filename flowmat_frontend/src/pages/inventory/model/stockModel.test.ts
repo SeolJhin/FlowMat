@@ -43,6 +43,8 @@ describe('canReverse', () => {
     expect(canReverse(receipt, [receipt, reversal])).toBe(false)
     expect(canReverse(reversal, [receipt, reversal])).toBe(false)
     expect(canReverse(tx({ transactionType: 'quarantine' }), [])).toBe(false)
+    expect(canReverse(tx({ transactionType: 'production_input' }), [])).toBe(false)
+    expect(canReverse(tx({ transactionType: 'production_output' }), [])).toBe(false)
   })
 })
 

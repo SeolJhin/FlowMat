@@ -106,10 +106,13 @@ public class InventoryTransactionServiceImpl implements InventoryTransactionServ
         projectAccessService.requireProjectWriteAccess(original.getProjectId());
         String actor = projectAccessService.requireCurrentUserId();
 
-        boolean reversible = InventoryTransactionType.fromCode(original.getTransactionType())
-            .map(InventoryTransactionType::reversible)
-            .orElse(false);
-        if (!reversible) {
+        InventoryTransactionType originalType = InventoryTransactionType.fromCode(original.getTransactionType()).orElse(null);
+        if (originalType == InventoryTransactionType.PRODUCTION_INPUT || originalType == InventoryTransactionType.PRODUCTION_OUTPUT) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "Production movements are corrected on their production run, not reversed here; "
+                    + "otherwise the run's records and LOT genealogy would no longer match the stock.");
+        }
+        if (originalType == null || !originalType.reversible()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 "A " + original.getTransactionType() + " transaction cannot be reversed.");
         }

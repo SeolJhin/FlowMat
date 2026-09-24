@@ -390,7 +390,7 @@ interface Props {
   onEdgeReconnect?(oldEdgeId: string, newConnection: ConnectCompletePayload): void
   onPresence?(msg: PresenceMessage): void
   onGraphChange?(msg: GraphChangeMessage): void
-  onReconnect?(): void
+  onReconnect?(forceSnapshot: boolean): void
   onBeforeDelete?(params: { nodeIds: string[]; edgeIds: string[] }): Promise<boolean>
   onDeleteElements?(params: { nodeIds: string[]; edgeIds: string[] }): Promise<void>
   onDeleteReady?(api: {

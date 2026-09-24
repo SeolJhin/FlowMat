@@ -206,6 +206,24 @@ public class LotServiceImpl implements LotService {
         });
     }
 
+    @Override
+    @Transactional
+    public void clearProducedBy(String lotId, String productionRunId) {
+        lotMasterRepository.findById(lotId).ifPresent(lot -> {
+            if (productionRunId.equals(lot.getProductionRunId())) {
+                lot.setProductionRunId(null);
+                lot.setProducedAt(null);
+                lotMasterRepository.save(lot);
+            }
+        });
+    }
+
+    @Override
+    @Transactional
+    public void clearRunTrace(String productionRunId) {
+        lotTraceRepository.deleteAllByProductionRunId(productionRunId);
+    }
+
     private LotMaster findLot(String lotId) {
         return lotMasterRepository.findById(lotId).orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }

@@ -16,4 +16,6 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
     Optional<InventoryTransaction> findByProjectIdAndRequestId(String projectId, String requestId);
 
     Optional<InventoryTransaction> findByReferenceIdAndTransactionType(String referenceId, String transactionType);
+
+    List<InventoryTransaction> findAllByReferenceTypeAndReferenceId(String referenceType, String referenceId);
 }

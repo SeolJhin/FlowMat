@@ -44,6 +44,12 @@ class LotIntegrationTest extends IntegrationTestSupport {
         createStock(plain, lotId, "5").andExpect(status().isBadRequest());
         call(post("/lots"), lotBody(tracked, lotNo.toLowerCase())).andExpect(status().isConflict());
         createStock(tracked, lotId, "5").andExpect(status().isOk()).andExpect(jsonPath("$.data.lotNo").value(lotNo));
+
+        // A second record for the same LOT at the same place is refused with a clear message.
+        createStock(tracked, lotId, "1", "WH-SAME").andExpect(status().isOk());
+        createStock(tracked, lotId, "1", "WH-SAME")
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.message").value("LOT " + lotNo + " already has a stock record at WH-SAME. Receive into that record instead."));
     }
 
     @Test
@@ -121,6 +127,20 @@ class LotIntegrationTest extends IntegrationTestSupport {
         call(get("/lots/" + lotA + "/trace").param("direction", "forward"))
             .andExpect(jsonPath("$.data.nodes[*].lot.lotId").value(containsInAnyOrder(lotM, lotF)));
         call(get("/lots/" + lotM)).andExpect(jsonPath("$.data.productionRunId").value(run1));
+
+        // Production movements are corrected on the run, never reversed from the stock screen.
+        JsonNode history = objectMapper.readTree(call(get("/inventory-transactions").param("inventoryId", stockA))
+            .andReturn().getResponse().getContentAsString()).path("data");
+        String productionInputId = null;
+        for (JsonNode tx : history) {
+            if ("production_input".equals(tx.path("transactionType").asText())) {
+                productionInputId = tx.path("inventoryTransactionId").asText();
+            }
+        }
+        call(post("/inventory-transactions/" + productionInputId + "/reversal"),
+            "{\"requestId\":\"" + UUID.randomUUID() + "\",\"reason\":\"wrong\"}")
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value(containsString("corrected on their production run")));
     }
 
     @Test
@@ -136,6 +156,65 @@ class LotIntegrationTest extends IntegrationTestSupport {
         call(post("/lots/" + lotId + "/close")).andExpect(status().isOk()).andExpect(jsonPath("$.data.lotStatus").value("closed"));
         move(stock, "receipt", "1").andExpect(status().isConflict())
             .andExpect(jsonPath("$.message").value(containsString("is closed")));
+    }
+
+    @Test
+    void cancellingAnInputReturnsTheStockAndDropsItsGenealogy() throws Exception {
+        String raw = item("unit_kg", true);
+        String product = item("unit_kg", true);
+        String rawLot = createLot(raw, "CR-" + suffix());
+        String productLot = createLot(product, "CP-" + suffix());
+        String rawStock = id(createStock(raw, rawLot, "20"), "inventoryId");
+        String productStock = id(createStock(product, productLot, "0"), "inventoryId");
+
+        String runId = startRun();
+        String inputId = id(recordRunItem(runId, rawStock, raw, "input", "5", "kg").andExpect(status().isOk()), "productionRunItemId");
+        recordRunItem(runId, productStock, product, "output", "4", "kg").andExpect(status().isOk());
+        call(get("/inventories/" + rawStock)).andExpect(jsonPath("$.data.quantity").value(15));
+        call(get("/lots/" + productLot + "/trace")).andExpect(jsonPath("$.data.nodes.length()").value(1));
+
+        cancel(runId, inputId, "Wrong LOT picked")
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.cancelled").value(true))
+            .andExpect(jsonPath("$.data.cancelReason").value("Wrong LOT picked"))
+            .andExpect(jsonPath("$.data.cancelledBy").value(DEMO_OWNER));
+        call(get("/inventories/" + rawStock)).andExpect(jsonPath("$.data.quantity").value(20));
+        call(get("/lots/" + productLot + "/trace")).andExpect(jsonPath("$.data.nodes.length()").value(0));
+
+        cancel(runId, inputId, "again").andExpect(status().isConflict());
+    }
+
+    @Test
+    void cancellingAnOutputWhoseStockWasUsedIsRefused() throws Exception {
+        String product = item("unit_kg", true);
+        String productLot = createLot(product, "CU-" + suffix());
+        String productStock = id(createStock(product, productLot, "0"), "inventoryId");
+        String runId = startRun();
+        String outputId = id(recordRunItem(runId, productStock, product, "output", "4", "kg").andExpect(status().isOk()),
+            "productionRunItemId");
+        move(productStock, "issue", "3").andExpect(status().isOk());
+
+        cancel(runId, outputId, "Counted twice")
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.message").value(containsString("Not enough available stock")));
+        call(get("/production-runs/" + runId + "/items"))
+            .andExpect(jsonPath("$.data[0].cancelled").value(false));
+        call(get("/inventories/" + productStock)).andExpect(jsonPath("$.data.quantity").value(1));
+    }
+
+    @Test
+    void itemsOfAFinishedRunCannotBeCancelled() throws Exception {
+        String material = item("unit_kg", false);
+        String runId = startRun();
+        String itemId = id(recordRunItem(runId, null, material, "input", "1", "kg").andExpect(status().isOk()),
+            "productionRunItemId");
+        call(post("/production-runs/" + runId + "/finish"), "{\"actualOutputQty\":1}").andExpect(status().isOk());
+
+        cancel(runId, itemId, "late fix").andExpect(status().isBadRequest());
+    }
+
+    private ResultActions cancel(String runId, String itemId, String reason) throws Exception {
+        return call(post("/production-runs/" + runId + "/items/" + itemId + "/cancel"), "{\"reason\":\"" + reason + "\"}");
     }
 
     // ---- helpers ----

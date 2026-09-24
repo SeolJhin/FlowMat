@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.annotation.api.dto.response.CanvasAnnotationResponse;
 import org.myweb.flowmat.domain.workflow.annotation.domain.CanvasAnnotation;
@@ -34,6 +35,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class GraphSyncService {
@@ -57,9 +59,22 @@ public class GraphSyncService {
     @Transactional
     public void broadcast(Type type, String workflowId, String entityId, String userId) {
         Runnable publish = () -> {
-            GraphEntityPayload payload = loadPayload(type, entityId);
-            GraphChangeMessage message = graphChangeStore.append(type, workflowId, entityId, userId, payload);
-            messagingTemplate.convertAndSend("/topic/workflow/" + workflowId + "/graph", message);
+            String topic = "/topic/workflow/" + workflowId + "/graph";
+            try {
+                GraphEntityPayload payload = loadPayload(type, entityId);
+                GraphChangeMessage message = graphChangeStore.append(type, workflowId, entityId, userId, payload);
+                messagingTemplate.convertAndSend(topic, message);
+            } catch (RuntimeException error) {
+                log.error("Committed graph change could not be published for workflowId={}, entityId={}",
+                    workflowId, entityId, error);
+                try {
+                    messagingTemplate.convertAndSend(topic, new GraphChangeMessage(
+                        0, "RESET_REQUIRED", workflowId, entityId, userId, System.currentTimeMillis(), null
+                    ));
+                } catch (RuntimeException fallbackError) {
+                    log.error("Graph reset signal could not be published for workflowId={}", workflowId, fallbackError);
+                }
+            }
         };
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             publish.run();

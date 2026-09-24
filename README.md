@@ -67,6 +67,8 @@ raised as security and domain test coverage grows.
 Browser E2E uses Playwright with a mocked API/provider plus a separate
 backend-services job path. The backend path starts PostgreSQL and Redis,
 verifies readiness, and runs the real backend contract and BOM/LOT flow.
+The frontend-only workflow runs the deterministic mocked authentication suite;
+the backend-services workflow owns the full browser regression suite.
 Real Google/Kakao OAuth smoke tests remain a staging-only manual workflow and
 require the `staging` environment secrets.
 

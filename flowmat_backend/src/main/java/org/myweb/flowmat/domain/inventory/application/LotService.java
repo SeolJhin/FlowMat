@@ -42,4 +42,10 @@ public interface LotService {
 
     /** Marks a LOT as produced by a run if nothing else claimed it yet. */
     void markProducedBy(String lotId, String productionRunId);
+
+    /** Undoes {@link #markProducedBy} when the run no longer produces that LOT (its output was cancelled). */
+    void clearProducedBy(String lotId, String productionRunId);
+
+    /** Drops every genealogy edge of a run so it can be rebuilt from the run's remaining items. */
+    void clearRunTrace(String productionRunId);
 }

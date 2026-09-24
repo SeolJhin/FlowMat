@@ -115,6 +115,41 @@ public class InventoryCommandService {
         return inventoryTransactionRepository.saveAndFlush(transaction);
     }
 
+    /**
+     * Reverses every not-yet-reversed movement recorded for a source record (e.g. one production run item), checking
+     * today's stock like any other movement. Used when that source is cancelled; the external reversal endpoint refuses
+     * production movements so the run and the stock cannot drift apart.
+     */
+    @Transactional
+    public int reverseMovementsOf(String referenceType, String referenceId, String reason, String actorUserId) {
+        int reversed = 0;
+        for (InventoryTransaction original : inventoryTransactionRepository.findAllByReferenceTypeAndReferenceId(referenceType, referenceId)) {
+            boolean alreadyReversed = inventoryTransactionRepository
+                .findByReferenceIdAndTransactionType(original.getInventoryTransactionId(), InventoryTransactionType.REVERSAL.code())
+                .isPresent();
+            if (alreadyReversed || InventoryTransactionType.REVERSAL.code().equals(original.getTransactionType())) {
+                continue;
+            }
+            apply(new InventoryMovement(
+                original.getInventoryId(),
+                InventoryTransactionType.REVERSAL,
+                negate(original.getQuantityDelta()),
+                negate(original.getReservedDelta()),
+                "inventory_transaction",
+                original.getInventoryTransactionId(),
+                reason,
+                null,
+                actorUserId
+            ));
+            reversed++;
+        }
+        return reversed;
+    }
+
+    private static BigDecimal negate(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value.negate();
+    }
+
     /** Recomputes a LOT's status from all its stock rows; quarantined and closed LOTs keep their status. */
     @Transactional
     public void syncLotStatus(String lotId) {

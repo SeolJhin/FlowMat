@@ -20,6 +20,19 @@ public interface InventoryRepository extends JpaRepository<Inventory, String> {
 
     boolean existsByItemIdAndDeletedYn(String itemId, String deletedYn);
 
+    /** Mirrors the V17 unique index uq_inventory_item_location_lot (a blank location counts as the same place). */
+    @Query("""
+        select count(i) > 0 from Inventory i
+         where i.projectId = :projectId and i.itemId = :itemId and i.lotId = :lotId and i.deletedYn = 'N'
+           and coalesce(i.location, '') = coalesce(:location, '')
+        """)
+    boolean existsLotStockAt(
+        @Param("projectId") String projectId,
+        @Param("itemId") String itemId,
+        @Param("lotId") String lotId,
+        @Param("location") String location
+    );
+
     /**
      * Applies a stock movement in a single UPDATE so concurrent movements cannot overwrite each other, and only if the
      * result keeps the stock invariants (quantity >= 0, 0 <= reserved <= quantity, available = quantity - reserved).

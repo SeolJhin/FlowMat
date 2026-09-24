@@ -12,8 +12,9 @@ import java.util.Optional;
 public enum InventoryTransactionType {
     RECEIPT("receipt", 1, 0, true, false, true),
     ISSUE("issue", -1, 0, true, true, true),
-    PRODUCTION_INPUT("production_input", -1, 0, false, true, true),
-    PRODUCTION_OUTPUT("production_output", 1, 0, false, false, true),
+    // Not reversible here: the run's items and LOT genealogy would no longer match the stock. Correct them on the run.
+    PRODUCTION_INPUT("production_input", -1, 0, false, true, false),
+    PRODUCTION_OUTPUT("production_output", 1, 0, false, false, false),
     RESERVE("reserve", 0, 1, true, true, true),
     RELEASE("release", 0, -1, true, false, true),
     ADJUSTMENT("adjustment", 0, 0, true, false, true),

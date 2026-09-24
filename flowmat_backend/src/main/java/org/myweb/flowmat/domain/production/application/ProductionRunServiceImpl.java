@@ -244,6 +244,62 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         return toItemResponse(savedRunItem);
     }
 
+    @Override
+    @Transactional
+    public ProductionRunItemResponse cancelRunItem(String productionRunId, String productionRunItemId, String reason) {
+        ProductionRun run = findActiveRun(productionRunId);
+        projectAccessService.requireProjectWriteAccess(run.getProjectId());
+        requireOpenRun(run);
+        ProductionRunItem item = productionRunItemRepository.findById(productionRunItemId)
+            .filter(found -> found.getProductionRunId().equals(run.getProductionRunId()))
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        if ("bom".equals(item.getQuantitySource())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "BOM plan lines are the plan, not a recording; there is nothing to cancel.");
+        }
+        if (item.isCancelled()) {
+            throw new BusinessException(ErrorCode.CONFLICT, "This item was already cancelled by " + item.getCancelledBy() + ".");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Give a reason for cancelling the item.");
+        }
+        String actor = projectAccessService.requireCurrentUserId();
+
+        // Stock first: if the produced stock was already used, the reversal fails and nothing else changes.
+        inventoryCommandService.reverseMovementsOf("production_run_item", item.getProductionRunItemId(),
+            "Run " + run.getRunNumber() + " item cancelled: " + reason.trim(), actor);
+
+        item.setCancelledYn("Y");
+        item.setCancelledBy(actor);
+        item.setCancelledAt(OffsetDateTime.now());
+        item.setCancelReason(reason.trim());
+        ProductionRunItem saved = productionRunItemRepository.save(item);
+
+        if (saved.getLotId() != null) {
+            rebuildLotGenealogy(run, saved);
+        }
+        return toItemResponse(saved);
+    }
+
+    /** Drops the run's genealogy and links the remaining (not cancelled) input and output LOTs again. */
+    private void rebuildLotGenealogy(ProductionRun run, ProductionRunItem cancelled) {
+        lotService.clearRunTrace(run.getProductionRunId());
+        List<ProductionRunItem> active = productionRunItemRepository
+            .findAllByProductionRunIdOrderByProductionRunItemIdAsc(run.getProductionRunId()).stream()
+            .filter(candidate -> candidate.getLotId() != null && !candidate.isCancelled())
+            .toList();
+        for (ProductionRunItem output : active) {
+            if ("output".equals(output.getDirection())) {
+                linkLotGenealogy(run, output);
+            }
+        }
+        boolean stillProduced = active.stream()
+            .anyMatch(candidate -> "output".equals(candidate.getDirection()) && candidate.getLotId().equals(cancelled.getLotId()));
+        if ("output".equals(cancelled.getDirection()) && !stillProduced) {
+            lotService.clearProducedBy(cancelled.getLotId(), run.getProductionRunId());
+        }
+    }
+
     /**
      * Connects this LOT to the LOTs already recorded on the other side of the run: every input LOT is a parent of every
      * output LOT. Works in either recording order; the same edge is stored once.
@@ -256,6 +312,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         for (ProductionRunItem other : productionRunItemRepository.findAllByProductionRunIdOrderByProductionRunItemIdAsc(
             run.getProductionRunId())) {
             if (other.getLotId() == null
+                || other.isCancelled()
                 || other.getProductionRunItemId().equals(recorded.getProductionRunItemId())
                 || other.getDirection().equals(recorded.getDirection())) {
                 continue;
@@ -375,7 +432,11 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             item.getUnit(),
             item.getQuantitySource(),
             item.getConversionRate(),
-            item.getLotId()
+            item.getLotId(),
+            item.isCancelled(),
+            item.getCancelledBy(),
+            item.getCancelledAt(),
+            item.getCancelReason()
         );
     }
 

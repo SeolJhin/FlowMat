@@ -20,4 +20,11 @@ public interface ProductionRunService {
     ProductionRunItemResponse recordRunItem(String productionRunId, ProductionRunItemRecordRequest request);
 
     ProductionRunResponse finishRun(String productionRunId, ProductionRunFinishRequest request);
+
+    /**
+     * Cancels a recorded item of an open run: reverses its stock movement (re-checking today's stock), marks it
+     * cancelled, and rebuilds the run's LOT genealogy without it. BOM plan lines are not recordings and cannot be
+     * cancelled.
+     */
+    ProductionRunItemResponse cancelRunItem(String productionRunId, String productionRunItemId, String reason);
 }

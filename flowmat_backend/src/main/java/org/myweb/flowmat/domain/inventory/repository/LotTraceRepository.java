@@ -12,4 +12,6 @@ public interface LotTraceRepository extends JpaRepository<LotTrace, String> {
     List<LotTrace> findAllByParentLotIdIn(Collection<String> parentLotIds);
 
     boolean existsByParentLotIdAndChildLotIdAndProductionRunId(String parentLotId, String childLotId, String productionRunId);
+
+    void deleteAllByProductionRunId(String productionRunId);
 }

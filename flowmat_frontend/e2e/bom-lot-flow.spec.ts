@@ -16,7 +16,7 @@ async function login(page: Page) {
   await page.getByRole('textbox', { name: 'demo-owner' }).fill('demo-owner')
   await page.getByRole('textbox', { name: '••••••••' }).fill('demo1234')
   await page.getByRole('button', { name: 'Log in' }).click()
-  await expect(page.getByRole('button', { name: 'Log in' })).toHaveCount(0)
+  await expect(page.getByText('안녕하세요, Demo Owner님')).toBeVisible({ timeout: 15_000 })
   // Let the session cookie settle before the full-page navigations below.
   await page.waitForLoadState('networkidle')
 }
@@ -26,8 +26,14 @@ async function addItem(page: Page, code: string, unit: string, lotTracked: boole
   await page.getByRole('textbox', { name: 'Name *' }).fill(code.toLowerCase())
   await page.getByLabel('Unit').selectOption({ label: unit })
   await page.getByRole('checkbox', { name: 'Track stock per LOT' }).setChecked(lotTracked)
+  const createResponse = page.waitForResponse((response) =>
+    response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/api/items')
+  )
   await page.getByRole('button', { name: 'Add' }).click()
-  await expect(page.getByRole('row', { name: new RegExp(code) })).toBeVisible()
+  const response = await createResponse
+  const responseBody = response.ok() ? '' : await response.text()
+  expect(response.ok(), responseBody).toBeTruthy()
+  await expect(page.getByRole('row', { name: new RegExp(code) })).toBeVisible({ timeout: 15_000 })
 }
 
 test('LOT-tracked stock, quarantine, BOM approval and a run planned from the BOM', async ({ page }) => {
@@ -36,6 +42,7 @@ test('LOT-tracked stock, quarantine, BOM approval and a run planned from the BOM
 
   // Items: a LOT-tracked material and a product.
   await page.goto(`/projects/${PROJECT}/inventory`)
+  await expect(page.getByRole('heading', { name: 'Inventory' })).toBeVisible({ timeout: 15_000 })
   await addItem(page, FLOUR, 'kg · Kilogram (mass)', true)
   await addItem(page, BREAD, 'ea · Each (count)', false)
   await expect(page.getByRole('row', { name: new RegExp(FLOUR) })).toContainText('tracked')
@@ -104,6 +111,16 @@ test('LOT-tracked stock, quarantine, BOM approval and a run planned from the BOM
   const plannedRow = page.getByRole('row', { name: new RegExp(`${FLOUR}.*BOM`) })
   await expect(plannedRow).toContainText('50')
   await expect(plannedRow).toContainText('kg')
+
+  // Recording against the plan line pre-fills the form; the plan line then shows what was recorded.
+  await plannedRow.getByRole('button', { name: 'Record' }).click()
+  await expect(page.getByRole('spinbutton', { name: 'Actual', exact: true })).toHaveValue('50')
+  const lotSelect = page.getByLabel('LOT *')
+  const lotValue = await lotSelect.locator('option', { hasText: `LOT ${LOT}` }).getAttribute('value')
+  await lotSelect.selectOption(lotValue ?? '')
+  await page.getByRole('button', { name: 'Record', exact: true }).last().click()
+  await expect(page.getByRole('row', { name: new RegExp(`LOT ${LOT}`) })).toBeVisible()
+  await expect(plannedRow.getByRole('cell').nth(3)).toHaveText('50')
 
   // A work order for the product picks the approved BOM, and runs started from the order plan from it.
   await page.goto(`/projects/${PROJECT}/runs?view=work-orders`)

@@ -12,7 +12,8 @@ export const MOVEMENT_LABELS: Record<MovementType, string> = {
   adjustment: 'Adjust (count correction)',
 }
 
-const NOT_REVERSIBLE = new Set(['reversal', 'quarantine', 'unquarantine'])
+// Production movements are corrected on their run (the server refuses them here too).
+const NOT_REVERSIBLE = new Set(['reversal', 'quarantine', 'unquarantine', 'production_input', 'production_output'])
 
 /**
  * Whether the Reverse button makes sense for a history row: the type can be reversed and no reversal in the same

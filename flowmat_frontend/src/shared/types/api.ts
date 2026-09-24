@@ -92,6 +92,11 @@ export interface ProductionRunItemDto {
   quantitySource: string | null
   conversionRate: number | null
   lotId: string | null
+  /** A cancelled recording: its stock movement was reversed and it no longer counts. */
+  cancelled: boolean
+  cancelledBy: string | null
+  cancelledAt: string | null
+  cancelReason: string | null
 }
 
 export interface InventoryDto {

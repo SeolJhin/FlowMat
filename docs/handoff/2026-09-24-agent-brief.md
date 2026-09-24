@@ -13,7 +13,7 @@
    - `flowmat_backend/src/main/java/org/myweb/flowmat/domain/{inventory,bom,production,catalog}/**`
    - `flowmat_frontend/src/pages/{inventory,runs}/**`, `flowmat_frontend/src/entities/{bom,inventory,production,catalog}/**`
    - `docs/domain/**`
-   - `flowmat_backend/src/main/resources/db/migration/**` — **새 파일도, 기존 파일 수정도 금지.** 고칠 것이 있으면 보고서에 적습니다.
+   - `flowmat_backend/src/main/resources/db/migration/**` — **새 파일도, 기존 파일 수정도 금지.** 고칠 것이 있으면 보고서에 적습니다. (프로젝트 규칙: 적용된 마이그레이션은 오타·주석까지 포함해 수정하지 않고, 변경은 항상 새 버전으로 한다.)
 3. **스캐폴딩 스텁 삭제 금지**: `features/user/*`, `src/router/Router.jsx`, `flowmat-canvas-prototype`, 루트 Gradle 파일, `docs/seolly` 중복본, 루트 `package-lock.json`, `.ai/mcp/mcp.json`, 실행되지 않는 라우트 전부.
 4. **수정 전에 `git status`로 그 파일이 다른 사람 작업 중(커밋 안 된 `M`)인지 확인.** 작업 중이면 손대지 말고 보고서에 적습니다. 현재 확인된 것: `.github/workflows/browser-e2e.yml`(작업 중).
 5. **Gradle 테스트는 한 번에 하나.** 다른 세션과 `build/test-results`를 공유합니다. "Unable to delete directory"가 나면 잠시 뒤 재실행.
@@ -26,7 +26,7 @@
 | 항목 | 값 |
 |---|---|
 | Docker | Docker Desktop 실행 필요 (Testcontainers, Redis) |
-| 로컬 Postgres | 18, `localhost:5432`, `flowmat`/`flowmat`/`flowmat`. **⚠ 기존 dev DB는 Flyway 체크섬 불일치로 백엔드가 기동하지 않습니다(§3 G).** |
+| 로컬 Postgres | 18, `localhost:5432`, `flowmat`/`flowmat`/`flowmat`. V18까지 적용됨(체크섬 문제는 해결, §3 G) |
 | 임시 DB (기동 확인용) | `docker run -d --name flowmat-uicheck-db -e POSTGRES_DB=flowmat -e POSTGRES_USER=flowmat -e POSTGRES_PASSWORD=flowmat -p 5433:5432 postgres:16` |
 | Redis | `compose.yaml`은 `.env`가 필요. 없으면 `docker run -d --name flowmat-uicheck-redis -p 6379:6379 redis:7.4` |
 | 백엔드 기동 | `flowmat_backend`에서 `DB_URL`(임시 DB면 `jdbc:postgresql://localhost:5433/flowmat`), `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`(32바이트 이상) 환경변수 설정 후 `.\gradlew.bat bootRun --args='--spring.profiles.active=dev'` |
@@ -46,7 +46,12 @@
 
 ### 1순위 — 막혀 있는 것부터
 
-#### G. Flyway 체크섬 문제 해결안 작성 (문서만, 실행 금지)
+#### ~~G. Flyway 체크섬 문제 해결안 작성~~ — **완료(2026-09-24, 세션 1).** 건너뜁니다.
+결정: C안. V2·V4·V5를 `4e251a0` 이전 내용으로 원복했고(`repair` 사용 안 함), 운영 데모 데이터 제거는 `V18__remove_demo_data_from_non_demo_environment.sql`로 처리합니다. 기존 dev DB가 repair 없이 검증 통과(V17·V18 적용), `ProdMigrationIsolationTest`·`DemoSeedCleanupMigrationTest` 통과.
+**규칙: 적용된 Flyway 마이그레이션은 오타·주석을 포함해 절대 수정하지 않습니다. 변경은 항상 새 버전으로.**
+
+<details><summary>원래 지시(참고용)</summary>
+
 커밋 `4e251a0`이 이미 적용된 마이그레이션을 수정했습니다: V2(데모 시드를 `flowmat.demo_seed_enabled` 조건으로 감쌈), V4·V5(주석 한 줄 추가). 기존 DB는 모두 `Migration checksum mismatch`로 기동 실패합니다.
 
 - 두 해결 방식을 비교합니다.
@@ -55,6 +60,7 @@
 - 각 방식의 명령, 적용 순서, 위험(운영 DB에 데모 행 유입 가능성 포함), 되돌리기, 검증 방법(`ProdMigrationIsolationTest`, `FlowMatSmokeTest`)을 적습니다.
 - **어떤 DB에도 repair를 실행하지 말고, 마이그레이션 파일도 수정하지 마세요.**
 - 산출물: `reports/G-flyway-checksum-options.md`
+</details>
 
 #### C1–C3. 실행 검증 기준선
 - C1: 백엔드 `.\gradlew.bat test` 전체 + 프론트 typecheck·lint·build·vitest. 실패는 소유자와 함께 기록.
@@ -109,6 +115,39 @@
 - C5 협업 모델 비교표: 현재 모델(DB + expectedVersion + commit 후 STOMP) / 요소 단위 조건부 patch / Yjs CRDT. 기준: 충돌 처리, 재접속, undo, 권한 철회, 운영 복잡도, 구현 비용. 참고 `docs/hj/*`, `docs/jb/*`, `docs/editor/*`, A6 결과. → `reports/C-collab-model-comparison.md`
 - C6 DB 전환·rollback 실행서: V16·V17 적용 순서, 적용 전 점검 SQL(음수 재고, 예약 초과, 중복 LOT 번호, 중복 revision), `NOT VALID` 제약의 `VALIDATE CONSTRAINT` 절차, 되돌리기 SQL. G의 결론과 연결. **실행 금지.** → `reports/C-db-migration-runbook.md`
 
+#### I. 레퍼런스 구조 조사 (읽기 전용, 레포당 반나절 이내)
+
+목적은 기능 복사가 아니라 **FlowMat ERD·백엔드 구조 결정에 쓸 비교 근거**입니다. 레포 소개문은 필요 없습니다.
+
+**규칙**
+- 레포는 FlowMat 저장소 **밖**(예: `E:\projects\refs\`)에 클론하거나 GitHub에서 읽습니다. FlowMat 안에 넣지 않습니다.
+- **코드를 복사하지 않습니다.** AGPL(OCA/manufacture, OpenMes)은 구조·흐름만 요약하고 코드 인용 금지. Apache-2.0(Flowable, Conductor, OpenWMS)도 인용은 짧은 식별자 수준까지만.
+- 각 주장에는 근거 파일 경로(레포 기준)를 답니다.
+
+**확인된 레포 정보 (2026-09-24, GitHub API)**
+
+| 레포 | 라이선스 | 마지막 커밋 | 비고 |
+|---|---|---|---|
+| flowable/flowable-engine | Apache-2.0 | 2026-09-17 | |
+| conductor-oss/conductor | Apache-2.0 | 2026-09-24 | |
+| openwms/org.openwms | Apache-2.0 | 2026-07-13 | |
+| OCA/manufacture | AGPL-3.0 | 2026-09-21 | 구조만 참고 |
+| Mes-Open/OpenMes | AGPL-3.0 | 2026-09-22 | 구조만 참고 |
+| sindohmes/mes4u | LGPL-2.1 | 2020-12-24 | 오래 멈춤 — 필요할 때 ERD만 참고 |
+
+**질문 (이 순서로)**
+
+| # | 질문 | 볼 곳 | FlowMat 비교 대상 | 산출 |
+|---|---|---|---|---|
+| I1 | **실행이 그래프를 따라가게 하려면?** 정의 ↔ 인스턴스 ↔ 노드(태스크) 인스턴스 분리, 상태 전이, 병렬(fork/join)·조건 분기, 재시도, 실행 이력 | Flowable(런타임·이력 테이블 구조, Execution/Task 모델), Conductor(WorkflowDef/TaskDef ↔ Workflow/Task 인스턴스, 상태값) | `workflow`/`process`/`process_connection`(정의) ↔ `production_run`(인스턴스). 노드 인스턴스는 **없음**, 이력은 `run_state_snapshot`뿐 | FlowMat용 **실행 단계 테이블 초안**(컬럼, 상태 전이표, `production_run_item`과의 연결)과 대안 비교. 제안서일 뿐 마이그레이션은 쓰지 않음 |
+| I2 | 공정 순서(routing)·작업지시·BOM·LOT 계보를 어떤 단위로 잇는가 | OCA/manufacture(+ 기반인 Odoo MRP 모델) | `docs/domain/inventory-bom-lot-contract.md`의 `[구현 결정]`: 1단계 BOM, 실행 단위 계보, 소요량 반올림, revision 방식, 승인 시 기존 revision 자동 폐기 | 결정별 "레퍼런스는 이렇게 함 / 우리와 차이 / 유지·변경 제안" |
+| I3 | 재고 이동·예약·위치·격리 모델 | OpenWMS | 재고 명령 API(§2~3), 예약·격리·역분개 | 차이점과 누락 개념(위치 계층, 이동 지시 등) 목록 |
+| I4 | 실제 MES의 엔티티 구성과 작업지시·실적·품질·비가동 흐름 | OpenMes | 전체 ERD | FlowMat에 없는 개념 목록과 우선순위(지금 / 나중 / 불필요) |
+
+**하지 말 것:** 워크플로 엔진(Flowable·Temporal 등) 도입이나 BPMN·bpmn-js 전환을 결론으로 밀지 않습니다. 필요하다고 판단되면 "사람 결정 필요" 항목으로만 적습니다.
+
+산출물: `reports/I-reference-architecture.md` (맨 앞에 질문별 한 줄 결론, 이어서 질문별 비교표, 마지막에 FlowMat 변경 제안을 우선순위별로)
+
 ### 4순위
 
 #### H. 화면 접근성 점검 (보고서만)
@@ -139,6 +178,7 @@
 | D4 | Flyway 체크섬 해결 방식 선택과 각 DB 적용, 운영 DB 전환·`VALIDATE CONSTRAINT` | G, C6, B |
 | D5 | 협업·STOMP 독립 보안 검토 | A |
 | D6 | 브라우저 실사용·다중 사용자·부하·사용성 검증 | 전체 |
+| D7 | 실행 단계(노드 인스턴스) 모델 채택 여부와 범위, 외부 워크플로 엔진 도입 여부 결정 | I1 |
 
 ---
 

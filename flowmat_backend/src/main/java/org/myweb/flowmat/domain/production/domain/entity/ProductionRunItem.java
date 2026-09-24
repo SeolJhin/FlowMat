@@ -4,8 +4,11 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Getter
 @Setter
@@ -32,4 +35,15 @@ public class ProductionRunItem {
 
     /** BOM snapshot: factor from the BOM line unit to the item unit, fixed when the run starts. */
     private BigDecimal conversionRate;
+
+    /** "Y" once the recording was cancelled: its stock movement is reversed and it no longer counts. */
+    @JdbcTypeCode(SqlTypes.CHAR)
+    private String cancelledYn = "N";
+    private String cancelledBy;
+    private OffsetDateTime cancelledAt;
+    private String cancelReason;
+
+    public boolean isCancelled() {
+        return "Y".equals(cancelledYn);
+    }
 }

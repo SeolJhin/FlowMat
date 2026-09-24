@@ -80,7 +80,20 @@ reserved_quantity  <= quantity
 - `transaction_type = reversal`, `reference_type = inventory_transaction`, `reference_id = 원거래 ID`, `note = 사유`, `created_by = 역분개한 사용자`. 원거래 작성자는 원거래 행에 남아 있습니다.
 - 원거래 하나당 성공한 역분개는 하나(부분 UNIQUE 인덱스).
 - 역분개도 현재 재고 정책을 다시 검사합니다. 예: 입고 10을 역분개하려는데 이미 6을 출고했다면 거절됩니다.
-- 역분개할 수 없는 유형: `reversal`, `quarantine`, `unquarantine`.
+- 역분개할 수 없는 유형: `reversal`, `quarantine`, `unquarantine`, **`production_input`, `production_output`**.
+  - **[구현 결정]** 생산 거래를 재고 화면에서 역분개하면 재고만 돌아오고 생산 실행 기록과 LOT 계보는 그대로 남아 서로 어긋납니다. 생산 거래는 생산 실행에서 정정해야 하며, 이 API는 400과 안내 메시지를 돌려줍니다.
+
+### 생산 실행 기록 정정 — `POST /production-runs/{runId}/items/{itemId}/cancel`
+
+요청: `{ "reason": "..." }` (필수)
+
+- **진행 중인 실행의 수동 기록만** 취소할 수 있습니다. BOM 계획 행은 계획이라 취소 대상이 아니고(400), 끝난 실행은 거절합니다(400), 이미 취소된 항목은 409.
+- 한 트랜잭션에서 순서대로 처리합니다.
+  1. 그 항목이 만든 재고 거래를 역분개합니다(`reversal`, 사유 포함). **현재 재고 정책을 다시 검사**하므로 산출물이 이미 쓰였으면 409로 거절되고 아무것도 바뀌지 않습니다.
+  2. 항목에 취소 표시(`cancelled_yn`, 누가·언제·왜 — V19). 행은 감사 기록으로 남습니다.
+  3. 실행의 LOT 계보를 지우고 남은(취소되지 않은) 투입·산출로 다시 연결합니다. 취소된 산출이 그 LOT의 유일한 산출이었다면 LOT의 "생산 실행" 표시도 지웁니다.
+- 취소된 항목은 실행 합계와 계획 대비 기록량에서 빠집니다.
+- 같은 품목·위치·LOT의 재고 행은 하나뿐입니다(V17 유니크 인덱스). 두 번째 생성은 "LOT X already has a stock record at Y. Receive into that record instead." 409로 거절합니다.
 
 ## 4. 재고 행 직접 수정 (`PUT /inventories/{id}`)과 삭제
 
@@ -151,7 +164,7 @@ draft ──submit──▶ pending_approval ──approve──▶ approved ─
 
 - **[구현 결정]** 한 품목에는 승인된 revision이 하나만 있습니다. v(n)을 승인하면 기존 approved revision은 자동으로 `retired`가 되고 note에 사유가 남습니다.
 - **[구현 결정]** 새 revision은 같은 품목에 `draft`/`pending_approval` revision이 없을 때만 만들 수 있습니다.
-- **[구현 결정]** 소요량은 12자리 비율로 계산하고, 품목 단위 수량은 소수 4자리에서 반올림(HALF_UP)합니다. 자재를 넉넉히 잡으려면 올림(UP)으로 바꿀 수 있습니다. 결정이 필요합니다.
+- **[확정 2026-09-24]** BOM 및 생산 소요량의 표준 저장·반영 정밀도는 **소수점 4자리, `RoundingMode.HALF_UP`**입니다. 내부 계산은 충분한 정밀도(비율 12자리, 중간값 8자리)로 하고 저장·재고 반영 시점에만 4자리로 맞춥니다. 올림(CEILING)은 쓰지 않습니다. 자재 여유분은 반올림 규칙이 아니라 향후 스크랩률·손실률·안전재고·발주단위 같은 별도 정책으로 처리합니다.
 - 승인 검증은 submit 때 한 번, approve 때 다시 한 번 합니다(그 사이 품목·단위가 바뀔 수 있으므로). 문제는 한 메시지에 모두 나열합니다.
 
 ---
@@ -219,6 +232,9 @@ DB가 진실의 원천. 저장 흐름은 `행 잠금 → version 비교 → 409 
 | 권한 (외부인 403) | 구현 | `ProjectAccessIntegrationTest` 73건 (`/boms`, `/lots` 추가) |
 | 작업지시 ↔ BOM (선택, 승인 조건, 실행 시 자동 적용) | 구현 | `BomIntegrationTest.aWorkOrderCarriesItsBomIntoTheRuns` |
 | 화면: Stock 탭 이동 입력(입고·출고·예약·해제·조정)과 역분개(사유 필수, 1회) | 구현 | `stockModel.test.ts` 3건, E2E에서 출고 30 → 가용 70, 초과 출고 거부, 역분개 후 100 복귀 |
+| 화면: 실행 상세의 BOM 계획 행 "Record"(남은 양으로 폼 채움)와 계획 대비 기록량 | 구현 | `runPlan.test.ts` 2건, E2E에서 계획 50 kg → Record → LOT 지정 기록 → 계획 행 실적 50 |
+| 생산 실행 기록 정정(취소: 재고 역분개 + 취소 표시 + 계보 재구성) | 구현 | `LotIntegrationTest` 3건(투입 취소 → 재고 복귀·계보 제거·재취소 409, 쓰인 산출 취소 409, 끝난 실행 400), E2E에서 투입 취소 → 원재료 LOT 40 복귀·반죽 LOT "Made from" 비움 |
+| 실 API E2E `e2e/lot-genealogy.spec.ts` | 구현 | 원재료 LOT 투입 10 kg + 반죽 LOT 산출 12 kg → 반죽 LOT "Made from"에 원재료 LOT(used 10), 원재료 LOT "Used in"에 반죽 LOT, 원재료 재고 40 → 30 |
 | 실 API E2E `e2e/bom-lot-flow.spec.ts` (`REAL_API_E2E=1`) | 구현 | 품목·LOT·격리·이동·역분개·BOM 승인·소요량·BOM 실행·작업지시 BOM 전 과정, 로컬 반복 통과 |
 | 화면: 품목 LOT 추적 설정, BOMs 탭(작성·승인·폐기·새 revision·소요량), LOTs 탭(등록·종료·정/역추적), Stock 탭(LOT 선택·격리/해제), 생산 시작 시 BOM 선택, 실행 상세의 BOM 계획 행·LOT 선택 | 구현 | 브라우저 확인(2026-09-24): 품목 → LOT 등록 → LOT 재고 100 kg → 격리·해제 → BOM 20,000 g/100 ea 승인 → 250 ea 소요량 50 kg → BOM으로 실행 시작(계획 행 50 kg) → LOT 지정 투입. 콘솔 오류 0. `bomModel.test.ts` 4건 |
 | §7 협업 점검 | 미착수 | |

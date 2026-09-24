@@ -47,6 +47,6 @@ jobs:
       if: matrix.node-version == '22.x'
       run: npx playwright install --with-deps chromium
 
-    - name: Run browser E2E
+    - name: Run mocked authentication E2E
       if: matrix.node-version == '22.x'
-      run: npm run test:e2e
+      run: npm run test:e2e -- e2e/auth.spec.ts

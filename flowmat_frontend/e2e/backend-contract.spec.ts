@@ -41,4 +41,14 @@ test('backend contract is reachable through the frontend proxy', async ({ reques
   const currentUserEnvelope = await currentUser.json()
   expect(currentUserEnvelope.success).toBe(true)
   expect(currentUserEnvelope.data.userId).toBe('demo-owner')
+
+  const projects = await request.get('/api/projects', {
+    headers: { Authorization: `Bearer ${loginEnvelope.data.accessToken}` },
+  })
+  expect(projects.ok()).toBeTruthy()
+  const projectsEnvelope = await projects.json()
+  expect(projectsEnvelope.success).toBe(true)
+  expect(projectsEnvelope.data).toEqual(
+    expect.arrayContaining([expect.objectContaining({ projectId: 'prj_demo_main' })]),
+  )
 })

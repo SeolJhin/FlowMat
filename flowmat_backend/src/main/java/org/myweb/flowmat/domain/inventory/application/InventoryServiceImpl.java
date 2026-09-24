@@ -80,7 +80,14 @@ public class InventoryServiceImpl implements InventoryService {
                 throw new BusinessException(ErrorCode.BAD_REQUEST,
                     item.getItemCode() + " is LOT-tracked; choose a LOT for this stock record.");
             }
-            lotService.requireLotForStock(lotId, item.getProjectId(), item.getItemId());
+            LotMaster lot = lotService.requireLotForStock(lotId, item.getProjectId(), item.getItemId());
+            // One stock record per item + location + LOT (V17 unique index); say so instead of a bare conflict.
+            if (inventoryRepository.existsLotStockAt(item.getProjectId(), item.getItemId(), lotId, trimToNull(request.location()))) {
+                throw new BusinessException(ErrorCode.CONFLICT,
+                    "LOT " + lot.getLotNo() + " already has a stock record"
+                        + (trimToNull(request.location()) != null ? " at " + request.location().trim() : " without a location")
+                        + ". Receive into that record instead.");
+            }
         } else if (lotId != null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 item.getItemCode() + " is not LOT-tracked; its stock records cannot name a LOT.");

@@ -1,6 +1,7 @@
 package org.myweb.flowmat.domain.production.api.dto.response;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 
 public record ProductionRunItemResponse(
     String productionRunItemId,
@@ -17,6 +18,10 @@ public record ProductionRunItemResponse(
     String quantitySource,
     BigDecimal conversionRate,
     /** LOT consumed or produced; set from the chosen stock record. */
-    String lotId
+    String lotId,
+    boolean cancelled,
+    String cancelledBy,
+    OffsetDateTime cancelledAt,
+    String cancelReason
 ) {
 }
