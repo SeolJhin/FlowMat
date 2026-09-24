@@ -1,6 +1,8 @@
 package org.myweb.flowmat.domain.workflow.api.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 
 public record ProcessConnectionCreateRequest(
@@ -18,6 +20,9 @@ public record ProcessConnectionCreateRequest(
     String unit,
     BigDecimal delayTimeSec,
     BigDecimal lossRate,
-    Integer priority
+    Integer priority,
+    @Size(max = 2000) String conditionExpr,
+    @DecimalMin("0.0") BigDecimal capacity,
+    String failurePolicy
 ) {
 }

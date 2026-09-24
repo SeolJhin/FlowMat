@@ -206,6 +206,8 @@ public class InventoryServiceImpl implements InventoryService {
         if (savedInventory.getLotId() != null) {
             inventoryCommandService.syncLotStatus(savedInventory.getLotId());
         }
+        // Thresholds may have moved even when the quantities did not.
+        inventoryCommandService.refreshAlerts(savedInventory);
         return toResponse(savedInventory);
     }
 
@@ -253,6 +255,8 @@ public class InventoryServiceImpl implements InventoryService {
         }
         inventory.setDeletedYn(DELETED);
         inventoryRepository.save(inventory);
+        // A deleted row has nothing left to watch; its open alerts close.
+        inventoryCommandService.refreshAlerts(inventory);
     }
 
     private Item findActiveItem(String itemId) {

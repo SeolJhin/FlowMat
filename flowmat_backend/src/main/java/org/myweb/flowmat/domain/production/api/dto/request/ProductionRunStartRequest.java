@@ -14,6 +14,8 @@ public record ProductionRunStartRequest(
     /** Optional; the order must be approved or in progress, and supplies the target item when none is given. */
     String workOrderId,
     /** Optional; an approved BOM revision whose requirements are frozen onto the run. Defaults to the work order's BOM. */
-    String bomId
+    String bomId,
+    /** Optional published workflow revision. When omitted, the latest published revision is used if one exists. */
+    String workflowRevisionId
 ) {
 }

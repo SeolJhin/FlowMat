@@ -1,0 +1,197 @@
+package org.myweb.flowmat.domain.inventory.application;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
+import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.catalog.domain.entity.Item;
+import org.myweb.flowmat.domain.catalog.domain.entity.UnitMaster;
+import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
+import org.myweb.flowmat.domain.inventory.api.dto.response.StockAlertResponse;
+import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
+import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
+import org.myweb.flowmat.domain.inventory.domain.entity.StockAlert;
+import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
+import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
+import org.myweb.flowmat.domain.inventory.repository.StockAlertRepository;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.global.id.IdGenerator;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * Stock alerts (docs/domain/stock-alert.md): a row whose available stock is below its minimum, or whose stock on hand
+ * is above its maximum, has one open alert of that type; the alert closes by itself once the row is back inside.
+ *
+ * <p>{@link #evaluate} runs inside the stock movement's transaction while the movement holds the row lock, so two
+ * movements cannot open two alerts for the same row. The periodic sweep locks the row itself.
+ */
+@Service
+@RequiredArgsConstructor
+public class StockAlertService {
+
+    static final String SYSTEM = "system";
+    private static final String OPEN = "N";
+
+    private final StockAlertRepository stockAlertRepository;
+    private final InventoryRepository inventoryRepository;
+    private final ItemRepository itemRepository;
+    private final UnitMasterRepository unitMasterRepository;
+    private final LotMasterRepository lotMasterRepository;
+    private final ProjectAccessService projectAccessService;
+    private final IdGenerator idGenerator;
+
+    /** How many days ahead of a LOT's expiry date its stock raises an expiry alert. */
+    @Value("${app.stock-alert.expiry-warning-days:7}")
+    private int expiryWarningDays;
+
+    /** Brings the row's open alerts in line with its current numbers; {@code inventory} holds the values now. */
+    @Transactional
+    public void evaluate(Inventory inventory) {
+        boolean active = "N".equals(inventory.getDeletedYn());
+        BigDecimal available = zeroIfNull(inventory.getAvailableQuantity());
+        BigDecimal onHand = zeroIfNull(inventory.getQuantity());
+        BigDecimal min = inventory.getMinThreshold();
+        BigDecimal max = inventory.getMaxThreshold();
+        boolean low = active && min != null && min.signum() > 0 && available.compareTo(min) < 0;
+        boolean over = active && max != null && onHand.compareTo(max) > 0;
+        sync(inventory, StockAlert.LOW, low, min, available,
+            available.signum() == 0 ? "critical" : "warning",
+            "Available " + plain(available) + " is below the minimum " + plain(min) + ".");
+        sync(inventory, StockAlert.OVER, over, max, onHand, "info",
+            "On hand " + plain(onHand) + " is above the maximum " + plain(max) + ".");
+
+        // Stock of a LOT that expires soon, or already has: the date moves on by itself, so the sweep keeps this current.
+        LotMaster lot = inventory.getLotId() == null ? null : lotMasterRepository.findById(inventory.getLotId()).orElse(null);
+        LocalDate today = LocalDate.now();
+        long daysLeft = lot == null || lot.getExpiryDate() == null ? Long.MAX_VALUE : ChronoUnit.DAYS.between(today, lot.getExpiryDate());
+        boolean expiring = active && onHand.signum() > 0 && daysLeft <= expiryWarningDays;
+        sync(inventory, StockAlert.EXPIRY, expiring, BigDecimal.valueOf(expiryWarningDays), BigDecimal.valueOf(Math.min(daysLeft, 99_999)),
+            daysLeft < 0 ? "critical" : "warning",
+            lot == null ? null : "LOT " + lot.getLotNo() + (daysLeft < 0 ? " expired on " : " expires on ") + lot.getExpiryDate() + ".");
+    }
+
+    /** For the sweep: locks the row, then evaluates it. A row that no longer exists closes its alerts. */
+    @Transactional
+    public void evaluateLocked(String inventoryId) {
+        Optional<Inventory> row = inventoryRepository.findForUpdate(inventoryId);
+        if (row.isPresent()) {
+            evaluate(row.get());
+            return;
+        }
+        for (String type : List.of(StockAlert.LOW, StockAlert.OVER, StockAlert.EXPIRY)) {
+            stockAlertRepository.findFirstByInventoryIdAndAlertTypeAndResolvedYn(inventoryId, type, OPEN).ifPresent(this::close);
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<StockAlertResponse> listAlerts(String projectId, boolean openOnly) {
+        projectAccessService.requireProjectReadAccess(projectId);
+        List<StockAlert> alerts = openOnly
+            ? stockAlertRepository.findAllByProjectIdAndResolvedYnOrderByTriggeredAtDesc(projectId, OPEN)
+            : stockAlertRepository.findTop200ByProjectIdOrderByTriggeredAtDesc(projectId);
+        Map<String, Inventory> rows = byId(inventoryRepository.findAllById(ids(alerts.stream().map(StockAlert::getInventoryId))),
+            Inventory::getInventoryId);
+        Map<String, Item> items = byId(itemRepository.findAllById(ids(alerts.stream().map(StockAlert::getItemId))), Item::getItemId);
+        Map<String, String> lotNos = StreamSupport.stream(
+                lotMasterRepository.findAllById(ids(rows.values().stream().map(Inventory::getLotId))).spliterator(), false)
+            .collect(Collectors.toMap(LotMaster::getLotId, LotMaster::getLotNo, (first, second) -> first));
+        Map<String, String> units = StreamSupport.stream(
+                unitMasterRepository.findAllById(ids(items.values().stream().map(Item::getUnitId))).spliterator(), false)
+            .collect(Collectors.toMap(UnitMaster::getUnitId, UnitMaster::getUnitCode, (first, second) -> first));
+        return alerts.stream().map(alert -> {
+            Inventory row = rows.get(alert.getInventoryId());
+            Item item = items.get(alert.getItemId());
+            return new StockAlertResponse(
+                alert.getStockAlertId(),
+                alert.getProjectId(),
+                alert.getInventoryId(),
+                alert.getItemId(),
+                item == null ? null : item.getItemCode(),
+                item == null ? null : item.getItemName(),
+                row == null ? null : row.getLocation(),
+                row == null || row.getLotId() == null ? null : lotNos.get(row.getLotId()),
+                alert.getAlertType(),
+                alert.getSeverity(),
+                alert.getThresholdValue(),
+                alert.getActualValue(),
+                item == null ? null : units.get(item.getUnitId()),
+                alert.getAlertMessage(),
+                alert.isResolved(),
+                alert.getTriggeredAt(),
+                alert.getResolvedAt()
+            );
+        }).toList();
+    }
+
+    private void sync(Inventory inventory, String type, boolean breached, BigDecimal threshold, BigDecimal actual,
+                      String severity, String message) {
+        Optional<StockAlert> open = stockAlertRepository.findFirstByInventoryIdAndAlertTypeAndResolvedYn(
+            inventory.getInventoryId(), type, OPEN);
+        if (!breached) {
+            open.ifPresent(this::close);
+            return;
+        }
+        if (open.isPresent() && Objects.equals(open.get().getSeverity(), severity)
+            && sameAmount(open.get().getActualValue(), actual) && sameAmount(open.get().getThresholdValue(), threshold)) {
+            return;
+        }
+        StockAlert alert = open.orElseGet(() -> {
+            OffsetDateTime now = OffsetDateTime.now();
+            StockAlert created = new StockAlert();
+            created.setStockAlertId(idGenerator.generate());
+            created.setProjectId(inventory.getProjectId());
+            created.setInventoryId(inventory.getInventoryId());
+            created.setItemId(inventory.getItemId());
+            created.setAlertType(type);
+            created.setResolvedYn(OPEN);
+            created.setTriggeredAt(now);
+            created.setCreatedAt(now);
+            return created;
+        });
+        alert.setSeverity(severity);
+        alert.setThresholdValue(threshold);
+        alert.setActualValue(actual);
+        alert.setAlertMessage(message);
+        stockAlertRepository.save(alert);
+    }
+
+    private void close(StockAlert alert) {
+        alert.setResolvedYn("Y");
+        alert.setResolvedAt(OffsetDateTime.now());
+        alert.setResolvedBy(SYSTEM);
+        stockAlertRepository.save(alert);
+    }
+
+    private static boolean sameAmount(BigDecimal a, BigDecimal b) {
+        return a == null ? b == null : b != null && a.compareTo(b) == 0;
+    }
+
+    private static <T> Map<String, T> byId(Iterable<T> found, Function<T, String> id) {
+        return StreamSupport.stream(found.spliterator(), false).collect(Collectors.toMap(id, Function.identity(), (a, b) -> a));
+    }
+
+    private static Collection<String> ids(Stream<String> values) {
+        return values.filter(Objects::nonNull).collect(Collectors.toSet());
+    }
+
+    private static BigDecimal zeroIfNull(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private static String plain(BigDecimal value) {
+        return value == null ? "-" : value.stripTrailingZeros().toPlainString();
+    }
+}

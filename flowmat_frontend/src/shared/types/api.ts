@@ -40,6 +40,7 @@ export interface ProductionRunDto {
   productionRunId: string
   projectId: string
   workflowId: string
+  workflowRevisionId: string | null
   runNumber: string
   runType: string | null
   runStatus: string
@@ -50,6 +51,22 @@ export interface ProductionRunDto {
   /** BOM revision frozen onto the run at start, if any. */
   bomId: string | null
   bomVersion: number | null
+}
+
+export interface WorkflowRevisionDto {
+  workflowRevisionId: string
+  workflowId: string
+  revisionNo: number
+  status: 'published' | 'retired'
+  schemaVersion: number
+  publishedBy: string
+  publishedAt: string
+  retiredBy: string | null
+  retiredAt: string | null
+}
+
+export interface WorkflowRevisionDetailDto extends WorkflowRevisionDto {
+  snapshot: unknown
 }
 
 export type WorkOrderStatus = 'draft' | 'approved' | 'in_progress' | 'completed' | 'cancelled'
@@ -88,7 +105,10 @@ export interface ProductionRunItemDto {
   plannedQty: number
   actualQty: number | null
   unit: string
-  /** "manual" when recorded by hand, "bom" when planned from the BOM snapshot at run start. */
+  /**
+   * "manual" when recorded by hand, "bom" when planned from the BOM snapshot at run start, "correction" when added by a
+   * finished-run correction.
+   */
   quantitySource: string | null
   conversionRate: number | null
   lotId: string | null
@@ -97,6 +117,197 @@ export interface ProductionRunItemDto {
   cancelledBy: string | null
   cancelledAt: string | null
   cancelReason: string | null
+  /** The correction that added this recording. */
+  productionRunCorrectionId?: string | null
+  /** The correction that voided this recording (null when it was cancelled on the open run). */
+  cancelledByCorrectionId?: string | null
+}
+
+export type ReadinessCheckStatus = 'ok' | 'warn' | 'fail'
+
+/** Whether a work order can run now (docs/domain/work-order-readiness.md). Nothing is reserved by checking. */
+export interface WorkOrderReadinessDto {
+  workOrderId: string
+  /** No check failed; warnings do not block. */
+  ready: boolean
+  /** Target minus what finished runs produced; null without a target quantity. */
+  remainingQuantity: number | null
+  checks: { code: string; status: ReadinessCheckStatus; message: string }[]
+  materials: {
+    itemId: string
+    itemCode: string
+    itemName: string | null
+    requiredQuantity: number
+    unit: string
+    availableQuantity: number
+    shortageQuantity: number
+    lotTracked: boolean
+    usableLots: number
+  }[]
+}
+
+export type RunCorrectionStatus = 'pending_approval' | 'applied' | 'rejected'
+export type RunCorrectionKind = 'void_item' | 'add_item' | 'set_output_qty'
+
+export interface RunCorrectionLineDto {
+  lineNo: number
+  kind: RunCorrectionKind
+  targetRunItemId: string | null
+  direction: string | null
+  itemId: string | null
+  inventoryId: string | null
+  qty: number | null
+  unit: string | null
+  beforeQty: number | null
+  afterQty: number | null
+  createdRunItemId: string | null
+}
+
+/** A correction of a finished run (docs/domain/production-run-correction.md). */
+export interface RunCorrectionDto {
+  productionRunCorrectionId: string
+  productionRunId: string
+  correctionNo: number
+  status: RunCorrectionStatus
+  reason: string
+  requestedBy: string
+  requestedAt: string
+  decidedBy: string | null
+  decidedAt: string | null
+  decisionNote: string | null
+  appliedAt: string | null
+  lines: RunCorrectionLineDto[]
+}
+
+/** One change in a correction request. */
+export type RunCorrectionLineRequest =
+  | { kind: 'void_item'; targetRunItemId: string }
+  | { kind: 'add_item'; direction: 'input' | 'output'; itemId: string; inventoryId: string | null; qty: number; unit: string }
+  | { kind: 'set_output_qty'; afterQty: number }
+
+export type InspectionResult = 'pass' | 'fail'
+export type DefectSeverity = 'minor' | 'major' | 'critical'
+
+/** A recorded inspection (docs/domain/quality-inspection.md). Never edited; a new one follows a wrong one. */
+export interface QualityInspectionDto {
+  inspectionId: string
+  projectId: string
+  productionRunId: string | null
+  runNumber: string | null
+  itemId: string | null
+  itemCode: string | null
+  itemName: string | null
+  lotId: string | null
+  lotNo: string | null
+  /** The LOT's status now, not at inspection time. */
+  lotStatus: string | null
+  inspectionType: string
+  resultStatus: InspectionResult
+  measuredValue: number | null
+  standardMin: number | null
+  standardMax: number | null
+  unit: string | null
+  note: string | null
+  inspectedBy: string
+  inspectedAt: string
+}
+
+export interface QualityInspectionCreateRequest {
+  projectId: string
+  productionRunId?: string | null
+  lotId?: string | null
+  itemId?: string | null
+  inspectionType: string
+  /** Worked out by the server when a measured value and a limit are given. */
+  result?: InspectionResult | null
+  measuredValue?: number | null
+  standardMin?: number | null
+  standardMax?: number | null
+  unit?: string | null
+  note?: string | null
+  /** Failed inspections of a LOT only: quarantine the whole LOT in the same request. */
+  quarantineLot?: boolean
+}
+
+/** A logged defect; logging one moves no stock. */
+export interface DefectDto {
+  defectLogId: string
+  projectId: string
+  inspectionId: string | null
+  productionRunId: string | null
+  runNumber: string | null
+  itemId: string
+  itemCode: string | null
+  itemName: string | null
+  lotId: string | null
+  lotNo: string | null
+  defectType: string
+  quantity: number
+  /** The item's unit. */
+  unit: string | null
+  severity: DefectSeverity
+  reason: string | null
+  resolved: boolean
+  actionTaken: string | null
+  loggedBy: string
+  loggedAt: string
+  resolvedBy: string | null
+  resolvedAt: string | null
+}
+
+export interface DefectCreateRequest {
+  projectId: string
+  inspectionId?: string | null
+  productionRunId?: string | null
+  lotId?: string | null
+  itemId?: string | null
+  quantity: number
+  defectType: string
+  severity?: DefectSeverity
+  reason?: string | null
+}
+
+/** A BOM revision that uses an item as a line (where-used). */
+export interface BomWhereUsedDto {
+  bomId: string
+  bomName: string
+  bomVersion: number
+  bomStatus: string
+  targetItemId: string
+  targetItemCode: string | null
+  targetItemName: string | null
+  baseQuantity: number
+  baseUnit: string
+  bomLineId: string
+  lineQuantity: number
+  lineUnit: string
+  scrapRate: number | null
+}
+
+/** A stock row outside its thresholds (docs/domain/stock-alert.md); it closes by itself when the row is back inside. */
+export interface StockAlertDto {
+  stockAlertId: string
+  projectId: string
+  inventoryId: string
+  itemId: string
+  itemCode: string | null
+  itemName: string | null
+  location: string | null
+  lotNo: string | null
+  /**
+   * low: available below the minimum. over: on hand above the maximum. expiry: stock of a LOT expiring within the warning
+   * window (threshold = window in days, actual = days left, negative once expired).
+   */
+  alertType: 'low' | 'over' | 'expiry'
+  severity: 'critical' | 'warning' | 'info'
+  thresholdValue: number
+  /** The latest value while open. */
+  actualValue: number
+  unit: string | null
+  message: string | null
+  resolved: boolean
+  triggeredAt: string
+  resolvedAt: string | null
 }
 
 export interface InventoryDto {
@@ -182,6 +393,8 @@ export interface LotDto {
   productionRunId: string | null
   quantityOnHand: number
   quantityReserved: number
+  /** Past its expiry date today (docs/domain/lot-expiry.md): cannot go into production or be reserved. */
+  expired?: boolean
 }
 
 export interface LotTraceNodeDto {
@@ -302,6 +515,10 @@ export interface ProcessIoDto {
   colorScheme: string
   requiredYn: 'Y' | 'N'
   allowShortageYn: 'Y' | 'N'
+  role: string | null
+  resourceType: string
+  schemaJson: Record<string, unknown> | null
+  validationRule: string | null
 }
 
 export interface ProcessConnectionDto {
@@ -322,6 +539,9 @@ export interface ProcessConnectionDto {
   delayTimeSec: number | null
   lossRate: number | null
   priority: number | null
+  conditionExpr: string | null
+  capacity: number | null
+  failurePolicy: 'stop' | 'skip' | 'retry'
   version: number
   versionNonce: number
 }

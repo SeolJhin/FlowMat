@@ -8,6 +8,7 @@ import { useLotsQuery, useQuarantineMutation } from '../../../entities/inventory
 import { useReverseTransactionMutation } from '../../../entities/inventory/api/useStockMovements'
 import { canReverse, reversedIds } from '../model/stockModel'
 import { StockMovementForm } from './StockMovementForm'
+import { StockAlerts } from './StockAlerts'
 import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { InventoryDto, ItemDto } from '../../../shared/types/api'
@@ -150,6 +151,14 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>
       <section>
+        <StockAlerts
+          projectId={projectId}
+          onShowRow={(inventoryId) => {
+            setHistoryFor(inventoryId)
+            // The history sits below the table; bring it into view once it has rendered.
+            requestAnimationFrame(() => document.getElementById('stock-history')?.scrollIntoView({ block: 'start' }))
+          }}
+        />
         {inventoriesQuery.isLoading && <p>Loading stock...</p>}
         {inventoriesQuery.isError && (
           <p style={{ color: '#dc2626' }}>{errorMessage(inventoriesQuery.error, 'Failed to load stock.')}</p>
@@ -272,7 +281,7 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
         )}
 
         {historyFor && (
-          <div style={{ marginTop: 24 }}>
+          <div id="stock-history" style={{ marginTop: 24 }}>
             <h3 style={{ marginBottom: 8 }}>
               History — {historyInventory ? itemLabel.get(historyInventory.itemId) ?? historyInventory.itemId : historyFor}
             </h3>
@@ -369,7 +378,10 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
               <select value={form.lotId} onChange={(e) => setForm((f) => ({ ...f, lotId: e.target.value }))} required>
                 <option value="" disabled>Select LOT</option>
                 {selectableLots.map((lot) => (
-                  <option key={lot.lotId} value={lot.lotId}>{lot.lotNo}{lot.expiryDate ? ` (exp. ${lot.expiryDate})` : ''}</option>
+                  <option key={lot.lotId} value={lot.lotId}>
+                    {lot.lotNo}
+                    {lot.expiryDate ? ` (${lot.expired ? 'expired' : 'exp.'} ${lot.expiryDate})` : ''}
+                  </option>
                 ))}
               </select>
               {selectableLots.length === 0 && (

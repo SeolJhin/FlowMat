@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useWorkflowsQuery } from '../../../entities/workflow/api/useWorkflowsQuery'
+import { usePublishWorkflowRevisionMutation, useWorkflowRevisionsQuery } from '../../../entities/workflow/api/useWorkflowRevisions'
 import { useItemsQuery } from '../../../entities/catalog/api/useItemsQuery'
 import { useProductionRunsQuery } from '../../../entities/production/api/useProductionRunsQuery'
 import { useStartProductionRunMutation } from '../../../entities/production/api/useStartProductionRunMutation'
@@ -11,6 +12,7 @@ import { useBomsQuery } from '../../../entities/bom/api/useBoms'
 import { approvedRevision } from '../../inventory/model/bomModel'
 import { RunStatusBadge, formatQty } from './runDisplay'
 import { WorkOrdersPanel } from './WorkOrdersPanel'
+import { FlowRunsPanel } from './FlowRunsPanel'
 
 const RUN_TYPES = ['actual', 'simulation']
 
@@ -25,25 +27,34 @@ export function RunsRoute() {
   const itemsQuery = useItemsQuery(projectId)
   const workflows = workflowsQuery.data ?? []
   const workflowId = searchParams.get('workflowId') ?? workflows[0]?.workflowId ?? ''
-  const view = searchParams.get('view') === 'work-orders' ? 'work-orders' : 'runs'
+  const requestedView = searchParams.get('view')
+  const view = requestedView === 'work-orders' || requestedView === 'flow-runs' ? requestedView : 'runs'
 
   const runsQuery = useProductionRunsQuery(workflowId)
   const startMutation = useStartProductionRunMutation(workflowId)
+  const revisionsQuery = useWorkflowRevisionsQuery(workflowId)
+  const publishRevision = usePublishWorkflowRevisionMutation(workflowId)
+  const revisions = revisionsQuery.data ?? []
+  const publishedRevisions = revisions.filter((revision) => revision.status === 'published')
+  const revisionNumberById = new Map(revisions.map((revision) => [revision.workflowRevisionId, revision.revisionNo]))
   const workOrders = useWorkOrdersQuery(projectId).data ?? []
   const workOrderNumber = new Map(workOrders.map((order) => [order.workOrderId, order.workOrderNumber]))
   const selectableOrders = runnableWorkOrders(workOrders, workflowId)
 
-  const [form, setForm] = useState({ workOrderId: '', targetItemId: '', plannedOutputQty: '', runType: 'actual', useBom: true })
+  const [form, setForm] = useState({ workOrderId: '', targetItemId: '', plannedOutputQty: '', runType: 'actual', useBom: true, workflowRevisionId: '' })
+  const selectedRevisionId = publishedRevisions.some((revision) => revision.workflowRevisionId === form.workflowRevisionId)
+    ? form.workflowRevisionId
+    : publishedRevisions[0]?.workflowRevisionId ?? ''
   const boms = useBomsQuery(projectId).data ?? []
   // An order with a BOM always plans from it (the server uses the order's BOM), so the checkbox only applies without one.
   const orderBomId = workOrders.find((order) => order.workOrderId === form.workOrderId)?.bomId ?? null
   const orderBom = orderBomId ? boms.find((candidate) => candidate.bomId === orderBomId) : undefined
   const bom = !orderBomId && form.targetItemId ? approvedRevision(boms, form.targetItemId) : undefined
 
-  function setView(next: 'runs' | 'work-orders') {
+  function setView(next: 'runs' | 'work-orders' | 'flow-runs') {
     const params: Record<string, string> = {}
     if (searchParams.get('workflowId')) params.workflowId = searchParams.get('workflowId') as string
-    if (next === 'work-orders') params.view = next
+    if (next !== 'runs') params.view = next
     setSearchParams(params, { replace: true })
   }
 
@@ -66,9 +77,20 @@ export function RunsRoute() {
   const runs = runsQuery.data ?? []
 
   function selectWorkflow(nextWorkflowId: string) {
-    setSearchParams({ workflowId: nextWorkflowId }, { replace: true })
-    setForm((f) => ({ ...f, workOrderId: '' }))
+    setSearchParams(view === 'runs' ? { workflowId: nextWorkflowId }
+      : { workflowId: nextWorkflowId, view }, { replace: true })
+    setForm((f) => ({ ...f, workOrderId: '', workflowRevisionId: '' }))
     startMutation.reset()
+    publishRevision.reset()
+  }
+
+  async function handlePublish() {
+    try {
+      const revision = await publishRevision.mutateAsync()
+      setForm((current) => ({ ...current, workflowRevisionId: revision.workflowRevisionId }))
+    } catch {
+      // The mutation error is shown next to the publish control.
+    }
   }
 
   async function handleStart(e: FormEvent) {
@@ -77,6 +99,7 @@ export function RunsRoute() {
       const run = await startMutation.mutateAsync({
         projectId,
         workflowId,
+        workflowRevisionId: selectedRevisionId,
         targetItemId: form.targetItemId || undefined,
         plannedOutputQty: Number(form.plannedOutputQty),
         runType: form.runType,
@@ -95,7 +118,7 @@ export function RunsRoute() {
       <h1>Production</h1>
 
       <div role="tablist" style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', marginBottom: 20 }}>
-        {(['runs', 'work-orders'] as const).map((name) => (
+        {(['runs', 'flow-runs', 'work-orders'] as const).map((name) => (
           <button
             key={name}
             type="button"
@@ -112,13 +135,18 @@ export function RunsRoute() {
               opacity: view === name ? 1 : 0.65,
             }}
           >
-            {name === 'runs' ? 'Runs' : `Work Orders (${workOrders.length})`}
+            {name === 'runs' ? 'Runs' : name === 'flow-runs' ? 'Flow executions' : `Work Orders (${workOrders.length})`}
           </button>
         ))}
       </div>
 
       {view === 'work-orders' && (
         <WorkOrdersPanel projectId={projectId} workflows={workflows} items={itemsQuery.data ?? []} />
+      )}
+
+      {view === 'flow-runs' && (
+        <FlowRunsPanel key={workflowId} projectId={projectId} workflowId={workflowId}
+          workflows={workflows} revisions={revisions} onSelectWorkflow={selectWorkflow} />
       )}
 
       {view === 'runs' && workflowsQuery.isLoading && <p>Loading workflows...</p>}
@@ -155,6 +183,7 @@ export function RunsRoute() {
                   <thead>
                     <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left' }}>
                       <th style={cell}>Run</th>
+                      <th style={cell}>Workflow revision</th>
                       <th style={cell}>Status</th>
                       <th style={cell}>Type</th>
                       <th style={cell}>Target item</th>
@@ -178,6 +207,11 @@ export function RunsRoute() {
                             </div>
                           )}
                         </td>
+                        <td style={cell}>
+                          {run.workflowRevisionId
+                            ? `v${revisionNumberById.get(run.workflowRevisionId) ?? '?'}`
+                            : 'Legacy draft'}
+                        </td>
                         <td style={cell}><RunStatusBadge status={run.runStatus} /></td>
                         <td style={{ ...cell, opacity: 0.7 }}>{run.runType ?? '-'}</td>
                         <td style={{ ...cell, opacity: 0.7 }}>
@@ -195,6 +229,39 @@ export function RunsRoute() {
             <section style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 18 }}>
               <h3 style={{ marginTop: 0 }}>Start Run</h3>
               <form onSubmit={(e) => void handleStart(e)} style={{ display: 'grid', gap: 10 }}>
+                <label style={{ display: 'grid', gap: 4 }}>
+                  <span>Workflow revision *</span>
+                  <select
+                    value={selectedRevisionId}
+                    onChange={(e) => setForm((current) => ({ ...current, workflowRevisionId: e.target.value }))}
+                    disabled={publishedRevisions.length === 0}
+                  >
+                    {publishedRevisions.length === 0 && <option value="">No published revision</option>}
+                    {publishedRevisions.map((revision) => (
+                      <option key={revision.workflowRevisionId} value={revision.workflowRevisionId}>
+                        v{revision.revisionNo} · {new Date(revision.publishedAt).toLocaleString()}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button type="button" onClick={() => void handlePublish()} disabled={!workflowId || publishRevision.isPending}>
+                  {publishRevision.isPending ? 'Publishing...' : 'Publish current workflow'}
+                </button>
+                {revisionsQuery.isError && (
+                  <p style={{ color: '#dc2626', fontSize: 12, margin: 0 }}>
+                    {errorMessage(revisionsQuery.error, 'Failed to load workflow revisions.')}
+                  </p>
+                )}
+                {publishRevision.isError && (
+                  <p style={{ color: '#dc2626', fontSize: 12, margin: 0 }}>
+                    {errorMessage(publishRevision.error, 'Failed to publish workflow.')}
+                  </p>
+                )}
+                {!revisionsQuery.isLoading && publishedRevisions.length === 0 && (
+                  <p className="inspector-hint" style={{ fontSize: 12, margin: 0 }}>
+                    Publish this workflow before starting a versioned run.
+                  </p>
+                )}
                 <label style={{ display: 'grid', gap: 4 }}>
                   <span>Work order</span>
                   <select value={form.workOrderId} onChange={(e) => selectWorkOrder(e.target.value)}>
@@ -256,7 +323,7 @@ export function RunsRoute() {
                     {RUN_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
                   </select>
                 </label>
-                <button type="submit" disabled={startMutation.isPending || !workflowId} style={{ marginTop: 4 }}>
+                <button type="submit" disabled={startMutation.isPending || !selectedRevisionId} style={{ marginTop: 4 }}>
                   {startMutation.isPending ? 'Starting...' : 'Start'}
                 </button>
                 {startMutation.isError && (

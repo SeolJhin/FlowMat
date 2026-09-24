@@ -1,31 +1,49 @@
 import { useState, type FormEvent } from 'react'
-import { useStockMovementMutation } from '../../../entities/inventory/api/useStockMovements'
+import { useStockMovementMutation, useStockTransferMutation } from '../../../entities/inventory/api/useStockMovements'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { InventoryDto } from '../../../shared/types/api'
 import { MOVEMENT_LABELS, MOVEMENT_TYPES, type MovementType } from '../model/stockModel'
 
+type Action = MovementType | 'move'
+
 /**
  * Records one movement against a stock record through the command API: the server keeps the stock invariants
  * (nothing below zero, reservations within what is on hand) and writes the history row in the same transaction.
+ * "Move" sends a transfer to another place instead (docs/domain/stock-transfer.md).
  */
 export function StockMovementForm({ projectId, inventory }: { projectId: string; inventory: InventoryDto }) {
   const movement = useStockMovementMutation(projectId)
-  const [type, setType] = useState<MovementType>('receipt')
+  const transfer = useStockTransferMutation(projectId)
+  const [action, setAction] = useState<Action>('receipt')
   const [direction, setDirection] = useState<'increase' | 'decrease'>('increase')
   const [quantity, setQuantity] = useState('')
+  const [toLocation, setToLocation] = useState('')
   const [note, setNote] = useState('')
+  const moving = action === 'move'
+  const pending = movement.isPending || transfer.isPending
+  const failure = moving ? transfer : movement
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     try {
-      await movement.mutateAsync({
-        inventoryId: inventory.inventoryId,
-        transactionType: type,
-        quantity: Number(quantity),
-        direction: type === 'adjustment' ? direction : undefined,
-        note: note.trim() || undefined,
-      })
+      if (moving) {
+        await transfer.mutateAsync({
+          fromInventoryId: inventory.inventoryId,
+          toLocation: toLocation.trim(),
+          quantity: Number(quantity),
+          note: note.trim() || undefined,
+        })
+        setToLocation('')
+      } else {
+        await movement.mutateAsync({
+          inventoryId: inventory.inventoryId,
+          transactionType: action,
+          quantity: Number(quantity),
+          direction: action === 'adjustment' ? direction : undefined,
+          note: note.trim() || undefined,
+        })
+      }
       setQuantity('')
       setNote('')
     } catch {
@@ -43,20 +61,41 @@ export function StockMovementForm({ projectId, inventory }: { projectId: string;
     >
       <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
         <span>Movement</span>
-        <select value={type} onChange={(e) => setType(e.target.value as MovementType)}>
+        <select
+          value={action}
+          onChange={(e) => {
+            setAction(e.target.value as Action)
+            movement.reset()
+            transfer.reset()
+          }}
+        >
           {MOVEMENT_TYPES.map((value) => <option key={value} value={value}>{MOVEMENT_LABELS[value]}</option>)}
+          <option value="move">Move to another place</option>
         </select>
       </label>
       <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
         <span>Quantity</span>
         <input type="number" min="0" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} required />
       </label>
-      <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
-        <span>Note</span>
-        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. delivery 2026-09-24 / cycle count" />
-      </label>
-      <button type="submit" disabled={movement.isPending}>{movement.isPending ? 'Saving...' : 'Record'}</button>
-      {type === 'adjustment' && (
+      {moving ? (
+        <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+          <span>To location</span>
+          <input
+            value={toLocation}
+            maxLength={100}
+            onChange={(e) => setToLocation(e.target.value)}
+            placeholder={`from ${inventory.location ?? 'no location'}, e.g. WH-B / Rack 2`}
+            required
+          />
+        </label>
+      ) : (
+        <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+          <span>Note</span>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. delivery 2026-09-24 / cycle count" />
+        </label>
+      )}
+      <button type="submit" disabled={pending}>{pending ? 'Saving...' : moving ? 'Move' : 'Record'}</button>
+      {action === 'adjustment' && (
         <div role="radiogroup" aria-label="Adjustment direction" style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, fontSize: 12 }}>
           {(['increase', 'decrease'] as const).map((value) => (
             <label key={value} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -68,11 +107,12 @@ export function StockMovementForm({ projectId, inventory }: { projectId: string;
       )}
       <span style={{ gridColumn: '1 / -1', fontSize: 11, opacity: 0.65 }}>
         {formatQty(inventory.availableQuantity)} available · {formatQty(inventory.reservedQuantity)} reserved
-        {quarantined ? ' · quarantined: issue and reserve are refused until released' : ''}
+        {quarantined ? ' · quarantined: issue, reserve and move are refused until released' : ''}
+        {moving ? ' · reserved stock stays here; the stock joins the record of the same item and LOT at the new place' : ''}
       </span>
-      {movement.isError && (
+      {failure.isError && (
         <p style={{ gridColumn: '1 / -1', color: '#dc2626', fontSize: 12, margin: 0 }}>
-          {errorMessage(movement.error, 'The movement was refused.')}
+          {errorMessage(failure.error, moving ? 'The move was refused.' : 'The movement was refused.')}
         </p>
       )}
     </form>

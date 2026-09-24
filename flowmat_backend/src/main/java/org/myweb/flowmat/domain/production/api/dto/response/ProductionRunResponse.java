@@ -6,6 +6,7 @@ public record ProductionRunResponse(
     String productionRunId,
     String projectId,
     String workflowId,
+    String workflowRevisionId,
     String runNumber,
     String runType,
     String runStatus,

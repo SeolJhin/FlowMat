@@ -11,6 +11,7 @@ import type { BomDto, ItemDto, UnitDto } from '../../../shared/types/api'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import { BOM_ACTION_LABELS, bomActions, groupByTarget, isEditable } from '../model/bomModel'
+import { BomWhereUsed } from './BomWhereUsed'
 
 const STATUS_COLORS: Record<BomDto['bomStatus'], string> = {
   draft: '#64748b',
@@ -70,6 +71,7 @@ export function BomPanel({ projectId, items, units }: { projectId: string; items
             </table>
           </div>
         ))}
+        <BomWhereUsed projectId={projectId} items={items} onOpen={setSelectedId} />
       </section>
 
       <section style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 18 }}>

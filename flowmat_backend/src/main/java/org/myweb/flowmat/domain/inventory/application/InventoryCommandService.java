@@ -1,6 +1,7 @@
 package org.myweb.flowmat.domain.inventory.application;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,7 @@ public class InventoryCommandService {
     private final InventoryTransactionRepository inventoryTransactionRepository;
     private final LotMasterRepository lotMasterRepository;
     private final IdGenerator idGenerator;
+    private final StockAlertService stockAlertService;
 
     /** Applies the movement if it keeps every stock invariant, and records it. */
     @Transactional
@@ -46,11 +48,16 @@ public class InventoryCommandService {
         BigDecimal reservedDelta = zeroIfNull(movement.reservedDelta());
 
         if (before.getLotId() != null) {
-            lotMasterRepository.findById(before.getLotId())
-                .filter(lot -> "closed".equals(lot.getLotStatus()))
-                .ifPresent(lot -> {
-                    throw new BusinessException(ErrorCode.CONFLICT, "LOT " + lot.getLotNo() + " is closed.");
-                });
+            LotMaster lot = lotMasterRepository.findById(before.getLotId()).orElse(null);
+            if (lot != null && "closed".equals(lot.getLotStatus())) {
+                throw new BusinessException(ErrorCode.CONFLICT, "LOT " + lot.getLotNo() + " is closed.");
+            }
+            // Expired stock can still be issued or adjusted away, but not used in production or held for it.
+            if (lot != null && (type == InventoryTransactionType.PRODUCTION_INPUT || type == InventoryTransactionType.RESERVE)
+                && lot.isExpiredOn(LocalDate.now())) {
+                throw new BusinessException(ErrorCode.CONFLICT, "LOT " + lot.getLotNo() + " expired on " + lot.getExpiryDate()
+                    + "; it cannot be used or reserved. Issue it to scrap it.");
+            }
         }
 
         if (type.changesStatusOnly()) {
@@ -112,7 +119,19 @@ public class InventoryCommandService {
         transaction.setRequestId(trimToNull(requestId));
         transaction.setCreatedBy(actorUserId);
         // Flush now so a duplicate requestId or second reversal fails here, inside the caller's transaction.
-        return inventoryTransactionRepository.saveAndFlush(transaction);
+        InventoryTransaction saved = inventoryTransactionRepository.saveAndFlush(transaction);
+        // The movement still holds the row lock, so the alert check sees numbers nobody else can change meanwhile.
+        stockAlertService.evaluate(inventory);
+        return saved;
+    }
+
+    /**
+     * Re-checks a row's stock alerts after a change that is not a movement: new thresholds, or the row being deleted.
+     * The caller has just written the row, so it holds the row lock.
+     */
+    @Transactional
+    public void refreshAlerts(Inventory inventory) {
+        stockAlertService.evaluate(inventory);
     }
 
     /**

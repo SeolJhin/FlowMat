@@ -30,8 +30,14 @@ public class ProductionRunItem {
     private BigDecimal actualQty;
     private String unit;
 
-    /** "manual" when recorded by hand, "bom" when planned from a BOM snapshot. */
+    /** "manual" when recorded by hand, "bom" when planned from a BOM snapshot, "correction" when added by a correction. */
     private String quantitySource;
+
+    /** The correction that added this recording (docs/domain/production-run-correction.md). */
+    private String productionRunCorrectionId;
+
+    /** The correction that voided this recording; null when it was cancelled on the open run (or not at all). */
+    private String cancelledByCorrectionId;
 
     /** BOM snapshot: factor from the BOM line unit to the item unit, fixed when the run starts. */
     private BigDecimal conversionRate;

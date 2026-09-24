@@ -10,6 +10,7 @@ import org.myweb.flowmat.domain.bom.api.dto.request.BomLineCreateRequest;
 import org.myweb.flowmat.domain.bom.api.dto.request.BomUpdateRequest;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomResponse;
+import org.myweb.flowmat.domain.bom.api.dto.response.BomWhereUsedResponse;
 import org.myweb.flowmat.domain.bom.application.BomApprovalService;
 import org.myweb.flowmat.domain.bom.application.BomService;
 import org.myweb.flowmat.global.response.ApiResponse;
@@ -38,6 +39,15 @@ public class BomController {
         @RequestParam(value = "targetItemId", required = false) String targetItemId
     ) {
         return ApiResponse.ok(bomService.listBoms(projectId, targetItemId));
+    }
+
+    /** The BOM revisions that use an item as a line. */
+    @GetMapping("/where-used")
+    public ApiResponse<List<BomWhereUsedResponse>> whereUsed(
+        @RequestParam("projectId") String projectId,
+        @RequestParam("itemId") String itemId
+    ) {
+        return ApiResponse.ok(bomService.whereUsed(projectId, itemId));
     }
 
     @PostMapping

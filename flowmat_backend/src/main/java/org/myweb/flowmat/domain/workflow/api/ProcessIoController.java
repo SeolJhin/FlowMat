@@ -43,7 +43,7 @@ public class ProcessIoController {
     @PutMapping("/{processIoId}")
     public ApiResponse<ProcessIoResponse> updateProcessIo(
         @PathVariable("processIoId") String processIoId,
-        @RequestBody ProcessIoUpdateRequest request
+        @Valid @RequestBody ProcessIoUpdateRequest request
     ) {
         return ApiResponse.ok(processIoService.updateProcessIo(processIoId, request));
     }

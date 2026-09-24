@@ -3,7 +3,11 @@ package org.myweb.flowmat.domain.bom.application;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.bom.api.dto.request.BomCreateRequest;
 import org.myweb.flowmat.domain.bom.api.dto.request.BomLineCreateRequest;
@@ -11,6 +15,7 @@ import org.myweb.flowmat.domain.bom.api.dto.request.BomUpdateRequest;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomLineResponse;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomResponse;
+import org.myweb.flowmat.domain.bom.api.dto.response.BomWhereUsedResponse;
 import org.myweb.flowmat.domain.bom.domain.entity.BomHeader;
 import org.myweb.flowmat.domain.bom.domain.entity.BomLine;
 import org.myweb.flowmat.domain.bom.domain.enums.BomStatus;
@@ -55,6 +60,58 @@ public class BomServiceImpl implements BomService {
             : bomHeaderRepository.findAllByProjectIdAndTargetItemIdAndDeletedYnOrderByBomVersionDesc(
                 projectId.trim(), targetItemId.trim(), NOT_DELETED);
         return headers.stream().map(this::toResponse).toList();
+    }
+
+    @Override
+    public List<BomWhereUsedResponse> whereUsed(String projectId, String itemId) {
+        if (projectId == null || projectId.isBlank() || itemId == null || itemId.isBlank()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "projectId and itemId are required.");
+        }
+        String project = projectId.trim();
+        projectAccessService.requireProjectReadAccess(project);
+        List<BomLine> lines = bomLineRepository.findAllByChildItemId(itemId.trim());
+        Map<String, BomHeader> headers = bomHeaderRepository.findAllById(lines.stream().map(BomLine::getBomId).distinct().toList())
+            .stream()
+            .filter(header -> project.equals(header.getProjectId()) && NOT_DELETED.equals(header.getDeletedYn()))
+            .collect(Collectors.toMap(BomHeader::getBomId, Function.identity()));
+        Map<String, Item> targets = itemRepository.findAllById(headers.values().stream().map(BomHeader::getTargetItemId).distinct().toList())
+            .stream()
+            .collect(Collectors.toMap(Item::getItemId, Function.identity()));
+        return lines.stream()
+            .filter(line -> headers.containsKey(line.getBomId()))
+            .map(line -> {
+                BomHeader header = headers.get(line.getBomId());
+                Item target = targets.get(header.getTargetItemId());
+                return new BomWhereUsedResponse(
+                    header.getBomId(),
+                    header.getBomName(),
+                    header.getBomVersion(),
+                    header.getBomStatus(),
+                    header.getTargetItemId(),
+                    target == null ? null : target.getItemCode(),
+                    target == null ? null : target.getItemName(),
+                    header.getBaseQuantity(),
+                    header.getBaseUnit(),
+                    line.getBomLineId(),
+                    line.getQuantity(),
+                    line.getUnit(),
+                    line.getScrapRate()
+                );
+            })
+            .sorted(Comparator.comparingInt((BomWhereUsedResponse used) -> statusRank(used.bomStatus()))
+                .thenComparing(used -> used.targetItemCode() == null ? "" : used.targetItemCode())
+                .thenComparing(BomWhereUsedResponse::bomVersion, Comparator.nullsLast(Comparator.reverseOrder())))
+            .toList();
+    }
+
+    /** Approved revisions matter most for impact; retired ones are history. */
+    private static int statusRank(String status) {
+        return switch (BomStatus.fromCode(status)) {
+            case APPROVED -> 0;
+            case PENDING_APPROVAL -> 1;
+            case DRAFT -> 2;
+            case RETIRED -> 3;
+        };
     }
 
     @Override

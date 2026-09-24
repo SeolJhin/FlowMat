@@ -33,4 +33,12 @@ public class LotMaster extends BaseTimeEntity {
 
     /** {@link org.myweb.flowmat.domain.inventory.domain.enums.LotStatus} code. */
     private String lotStatus;
+
+    /**
+     * Past its expiry date: usable through the expiry date itself, expired from the next day (docs/domain/lot-expiry.md).
+     * Expiry is worked out from the date, never stored as a status.
+     */
+    public boolean isExpiredOn(LocalDate today) {
+        return expiryDate != null && expiryDate.isBefore(today);
+    }
 }

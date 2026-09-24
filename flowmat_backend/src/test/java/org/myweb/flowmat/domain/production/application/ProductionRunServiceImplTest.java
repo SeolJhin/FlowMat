@@ -37,11 +37,14 @@ import org.myweb.flowmat.domain.production.repository.WorkOrderRepository;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunStartRequest;
 import org.myweb.flowmat.domain.production.domain.entity.WorkOrder;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
+import org.myweb.flowmat.domain.workflow.domain.entity.Process;
+import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.rule.application.FlowRuleEngineService;
 import org.myweb.flowmat.domain.workflow.repository.ProcessIoRepository;
 import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
 import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
+import org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
@@ -53,6 +56,7 @@ class ProductionRunServiceImplTest {
     @Mock private ProductionRunItemRepository productionRunItemRepository;
     @Mock private ProjectAccessService projectAccessService;
     @Mock private WorkflowRepository workflowRepository;
+    @Mock private WorkflowRevisionRepository workflowRevisionRepository;
     @Mock private ProcessRepository processRepository;
     @Mock private ProcessIoRepository processIoRepository;
     @Mock private ItemRepository itemRepository;
@@ -64,6 +68,7 @@ class ProductionRunServiceImplTest {
     @Mock private UnitConverter unitConverter;
     @Mock private BomService bomService;
     @Mock private org.myweb.flowmat.domain.inventory.application.LotService lotService;
+    @Mock private ProductionFlowRunAdapter productionFlowRunAdapter;
 
     @InjectMocks
     private ProductionRunServiceImpl productionRunService;
@@ -102,6 +107,24 @@ class ProductionRunServiceImplTest {
             new ProductionRunItemRecordRequest(null, null, "inv-1", "item-1", "input", BigDecimal.ONE, null, "kg")));
 
         assertEquals("The selected stock record holds a different item.", exception.getMessage());
+        verify(productionRunItemRepository, never()).save(any());
+    }
+
+    @Test
+    void legacyRunRejectsAnIoFromAnotherWorkflowWhenProcessIdIsOmitted() {
+        givenRun("running");
+        givenItem();
+        ProcessIo io = new ProcessIo();
+        io.setProcessIoId("foreign-io");
+        io.setProcessId("foreign-process");
+        Process process = new Process();
+        process.setProcessId("foreign-process");
+        process.setWorkflowId("foreign-workflow");
+        when(processIoRepository.findByProcessIoIdAndDeletedYn("foreign-io", "N")).thenReturn(Optional.of(io));
+        when(processRepository.findByProcessIdAndDeletedYn("foreign-process", "N")).thenReturn(Optional.of(process));
+
+        assertThrows(BusinessException.class, () -> productionRunService.recordRunItem("run-1",
+            new ProductionRunItemRecordRequest(null, "foreign-io", null, "item-1", "input", BigDecimal.ONE, null, "kg")));
         verify(productionRunItemRepository, never()).save(any());
     }
 
@@ -179,7 +202,7 @@ class ProductionRunServiceImplTest {
     }
 
     private static ProductionRunStartRequest startRequest(String workOrderId) {
-        return new ProductionRunStartRequest("project-1", "workflow-1", null, BigDecimal.TEN, null, null, workOrderId, null);
+        return new ProductionRunStartRequest("project-1", "workflow-1", null, BigDecimal.TEN, null, null, workOrderId, null, null);
     }
 
     @Test

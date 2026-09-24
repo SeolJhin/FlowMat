@@ -9,14 +9,25 @@ import { useMyPermissionsQuery } from '../../../entities/auth/api/useMyPermissio
 import type { ItemDto } from '../../../shared/types/api'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { StockPanel } from './StockPanel'
+import { CountPanel } from './CountPanel'
+import { LedgerPanel } from './LedgerPanel'
 import { UnitsPanel } from './UnitsPanel'
 import { LotPanel } from './LotPanel'
 import { BomPanel } from './BomPanel'
 import { EquipmentPanel } from './EquipmentPanel'
 
-const TABS = ['items', 'stock', 'lots', 'boms', 'units', 'equipment'] as const
+const TABS = ['items', 'stock', 'count', 'movements', 'lots', 'boms', 'units', 'equipment'] as const
 type Tab = (typeof TABS)[number]
-const TAB_LABELS: Record<Tab, string> = { items: 'Items', stock: 'Stock', lots: 'LOTs', boms: 'BOMs', units: 'Units', equipment: 'Equipment' }
+const TAB_LABELS: Record<Tab, string> = {
+  items: 'Items',
+  stock: 'Stock',
+  count: 'Count',
+  movements: 'Movements',
+  lots: 'LOTs',
+  boms: 'BOMs',
+  units: 'Units',
+  equipment: 'Equipment',
+}
 
 const ITEM_TYPE_SUGGESTIONS = ['generic', 'raw_material', 'component', 'semi_finished', 'finished_good', 'consumable']
 
@@ -143,6 +154,8 @@ export function InventoryRoute() {
       </div>
 
       {tab === 'stock' && <StockPanel projectId={projectId} items={items} />}
+      {tab === 'count' && <CountPanel projectId={projectId} items={items} />}
+      {tab === 'movements' && <LedgerPanel projectId={projectId} items={items} />}
       {tab === 'lots' && <LotPanel projectId={projectId} items={items} />}
       {tab === 'boms' && <BomPanel projectId={projectId} items={items} units={units} />}
       {tab === 'units' && <UnitsPanel canManage={canManageMasterData} />}
@@ -153,6 +166,11 @@ export function InventoryRoute() {
         <section>
           {itemsQuery.isLoading && <p>Loading items...</p>}
           {itemsQuery.isError && <p style={{ color: '#dc2626' }}>Failed to load items.</p>}
+          {deleteMutation.isError && (
+            <p role="alert" style={{ color: '#dc2626', fontSize: 13 }}>
+              {errorMessage(deleteMutation.error, 'The item could not be deleted.')}
+            </p>
+          )}
           {!itemsQuery.isLoading && items.length === 0 && (
             <p className="inspector-hint">No items found. Add one from the form on the right.</p>
           )}

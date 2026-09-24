@@ -20,6 +20,9 @@ public record ProcessConnectionResponse(
     BigDecimal delayTimeSec,
     BigDecimal lossRate,
     Integer priority,
+    String conditionExpr,
+    BigDecimal capacity,
+    String failurePolicy,
     int version,
     int versionNonce
 ) {

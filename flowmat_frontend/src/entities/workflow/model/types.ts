@@ -18,6 +18,10 @@ export interface CanvasPortViewModel {
   name: string
   direction: 'input' | 'output'
   ioType: string
+  role: string | null
+  resourceType: string
+  schemaJson: Record<string, unknown> | null
+  validationRule: string | null
   quantity: string
   unit: string | null
   formula: string | null
@@ -69,6 +73,9 @@ export interface CanvasEdgeViewModel {
   delayTimeSec: number | null
   lossRate: number | null
   priority: number | null
+  conditionExpr: string | null
+  capacity: number | null
+  failurePolicy: 'stop' | 'skip' | 'retry'
   version: number
   versionNonce: number
 }
@@ -134,6 +141,10 @@ export interface CreateProcessIoInput {
   ioName: string
   direction: 'input' | 'output'
   ioType: string
+  role?: string
+  resourceType?: string
+  schemaJson?: Record<string, unknown>
+  validationRule?: string
   quantity: number
   unit: string
   formula?: string
@@ -155,6 +166,10 @@ export interface UpdateProcessConnectionInput {
   delayTimeSec?: number | null
   lossRate?: number | null
   priority?: number | null
+  conditionExpr?: string | null
+  capacity?: number | null
+  clearCapacity?: boolean
+  failurePolicy?: 'stop' | 'skip' | 'retry'
 }
 
 export type CanvasMode = 'select' | 'connect'

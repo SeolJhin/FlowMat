@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useItemsQuery } from '../../../entities/catalog/api/useItemsQuery'
 import { useProductionRunQuery } from '../../../entities/production/api/useProductionRunQuery'
+import { useWorkflowRevisionsQuery } from '../../../entities/workflow/api/useWorkflowRevisions'
 import { useProductionRunItemsQuery } from '../../../entities/production/api/useProductionRunItemsQuery'
 import { useRecordRunItemMutation } from '../../../entities/production/api/useRecordRunItemMutation'
 import { useCancelRunItemMutation } from '../../../entities/production/api/useCancelRunItemMutation'
@@ -10,7 +11,9 @@ import { useInventoriesQuery } from '../../../entities/inventory/api/useInventor
 import { useUnitsQuery } from '../../../entities/catalog/api/useUnitsQuery'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import type { ProductionRunItemDto } from '../../../shared/types/api'
-import { recordedAgainstPlan, remainingOfPlan } from '../model/runPlan'
+import { cancelSummary, recordedAgainstPlan, remainingOfPlan } from '../model/runPlan'
+import { RunCorrectionsPanel } from './RunCorrectionsPanel'
+import { RunQualityPanel } from './RunQualityPanel'
 import { RunStatusBadge, formatQty, isRunOpen } from './runDisplay'
 
 const cell = { padding: '8px 6px' } as const
@@ -63,6 +66,10 @@ export function RunDetailRoute() {
   const [actualOutputQty, setActualOutputQty] = useState('')
 
   const run = runQuery.data
+  const revisionsQuery = useWorkflowRevisionsQuery(run?.workflowId ?? '')
+  const workflowRevision = revisionsQuery.data?.find(
+    (revision) => revision.workflowRevisionId === run?.workflowRevisionId,
+  )
   const runItems = runItemsQuery.data ?? []
   const inventories = inventoriesQuery.data ?? []
   const itemLabel = useMemo(
@@ -152,6 +159,9 @@ export function RunDetailRoute() {
           >
             {[
               ['Type', run.runType ?? '-'],
+              ['Workflow revision', run.workflowRevisionId
+                ? `v${workflowRevision?.revisionNo ?? '?'} (fixed at start)`
+                : 'Legacy draft'],
               ['Target item', run.targetItemId ? itemLabel.get(run.targetItemId) ?? run.targetItemId : '-'],
               ['Planned output', formatQty(run.plannedOutputQty)],
               ['Actual output', formatQty(run.actualOutputQty)],
@@ -197,7 +207,7 @@ export function RunDetailRoute() {
                     {runItems.map((item) => (
                       <tr
                         key={item.productionRunItemId}
-                        title={item.cancelled ? `Cancelled by ${item.cancelledBy ?? '?'}: ${item.cancelReason ?? ''}` : undefined}
+                        title={cancelSummary(item) ?? undefined}
                         style={{
                           borderBottom: '1px solid var(--border)',
                           ...(item.cancelled ? { opacity: 0.45, textDecoration: 'line-through' } : {}),
@@ -214,6 +224,14 @@ export function RunDetailRoute() {
                               style={{ marginLeft: 6, fontSize: 10, padding: '1px 6px', borderRadius: 999, background: 'var(--accent-bg)' }}
                             >
                               BOM
+                            </span>
+                          )}
+                          {item.quantitySource === 'correction' && (
+                            <span
+                              title="Added by a correction of this finished run"
+                              style={{ marginLeft: 6, fontSize: 10, padding: '1px 6px', borderRadius: 999, background: 'var(--accent-bg)' }}
+                            >
+                              correction
                             </span>
                           )}
                         </td>
@@ -401,8 +419,31 @@ export function RunDetailRoute() {
                   </section>
                 </>
               ) : (
-                <p className="inspector-hint">This run is {run.runStatus}; no further items can be recorded.</p>
+                <>
+                  <p className="inspector-hint">This run is {run.runStatus}; no further items can be recorded.</p>
+                  {run.runStatus === 'finished' && (
+                    <RunCorrectionsPanel
+                      projectId={projectId}
+                      run={run}
+                      runItems={runItems}
+                      items={itemsQuery.data ?? []}
+                      inventories={inventories}
+                      itemLabel={(itemId) => itemLabel.get(itemId) ?? itemId}
+                      inventoryLabel={(inventoryId) => inventoryLabel.get(inventoryId) ?? inventoryId}
+                      itemUnitCode={(itemId) => {
+                        const unitId = (itemsQuery.data ?? []).find((item) => item.itemId === itemId)?.unitId
+                        return unitId ? unitCodeById.get(unitId) : undefined
+                      }}
+                    />
+                  )}
+                </>
               )}
+              <RunQualityPanel
+                projectId={projectId}
+                run={run}
+                runItems={runItems}
+                itemLabel={(itemId) => itemLabel.get(itemId) ?? itemId}
+              />
             </div>
           </div>
         </>

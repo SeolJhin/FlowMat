@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { Fragment, useMemo, useState, type FormEvent } from 'react'
 import {
   useSaveWorkOrderMutation,
   useWorkOrderTransitionMutation,
@@ -11,6 +11,7 @@ import type { ItemDto, WorkflowDto, WorkOrderDto } from '../../../shared/types/a
 import { availableWorkOrderActions, isWorkOrderEditable, workOrderProgress } from '../model/workOrderActions'
 import { useBomsQuery } from '../../../entities/bom/api/useBoms'
 import { approvedRevision } from '../../inventory/model/bomModel'
+import { WorkOrderReadiness } from './WorkOrderReadiness'
 
 const PRIORITIES = ['low', 'normal', 'high', 'urgent']
 
@@ -91,6 +92,7 @@ export function WorkOrdersPanel({
 
   const [editing, setEditing] = useState<WorkOrderDto | null>(null)
   const [form, setForm] = useState<OrderForm>(EMPTY_FORM)
+  const [readinessFor, setReadinessFor] = useState<string | null>(null)
 
   const orders = ordersQuery.data ?? []
   const itemLabel = useMemo(() => new Map(items.map((item) => [item.itemId, `${item.itemCode} · ${item.itemName}`])), [items])
@@ -188,8 +190,8 @@ export function WorkOrdersPanel({
                 const colors = STATUS_COLORS[order.workOrderStatus] ?? STATUS_COLORS.draft
                 const progress = workOrderProgress(order)
                 return (
+                  <Fragment key={order.workOrderId}>
                   <tr
-                    key={order.workOrderId}
                     style={{
                       borderBottom: '1px solid var(--border)',
                       background: editing?.workOrderId === order.workOrderId ? 'var(--accent-bg)' : undefined,
@@ -268,8 +270,26 @@ export function WorkOrdersPanel({
                           {ACTION_LABELS[action]}
                         </button>
                       ))}
+                      {order.workOrderStatus !== 'completed' && order.workOrderStatus !== 'cancelled' && (
+                        <button
+                          type="button"
+                          aria-expanded={readinessFor === order.workOrderId}
+                          onClick={() => setReadinessFor((current) => (current === order.workOrderId ? null : order.workOrderId))}
+                          style={{ fontSize: 12 }}
+                        >
+                          Readiness
+                        </button>
+                      )}
                     </td>
                   </tr>
+                  {readinessFor === order.workOrderId && (
+                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td colSpan={6} style={{ ...cell, background: 'var(--accent-bg)' }}>
+                        <WorkOrderReadiness workOrderId={order.workOrderId} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 )
               })}
             </tbody>

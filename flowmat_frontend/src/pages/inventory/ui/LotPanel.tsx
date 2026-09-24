@@ -1,5 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { useCloseLotMutation, useCreateLotMutation, useLotTraceQuery, useLotsQuery } from '../../../entities/inventory/api/useLots'
+import { useInventoriesQuery } from '../../../entities/inventory/api/useInventoriesQuery'
+import { QualitySection } from '../../../entities/quality/ui/QualitySection'
 import type { ItemDto, LotDto, LotStatus } from '../../../shared/types/api'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
@@ -58,7 +60,10 @@ export function LotPanel({ projectId, items }: { projectId: string; items: ItemD
                   <td style={cell}>{itemLabel.get(lot.itemId) ?? lot.itemId}</td>
                   <td style={{ ...cell, textAlign: 'right' }}>{formatQty(lot.quantityOnHand)}</td>
                   <td style={{ ...cell, textAlign: 'right' }}>{formatQty(lot.quantityReserved)}</td>
-                  <td style={cell}>{lot.expiryDate ?? '-'}</td>
+                  <td style={{ ...cell, color: lot.expired ? '#b91c1c' : undefined }}>
+                    {lot.expiryDate ?? '-'}
+                    {lot.expired && <strong style={{ marginLeft: 6, fontSize: 11 }}>expired</strong>}
+                  </td>
                   <td style={{ ...cell, color: STATUS_COLORS[lot.lotStatus], fontWeight: 600 }}>{lot.lotStatus}</td>
                 </tr>
               ))}
@@ -146,6 +151,7 @@ function LotDetail({
   const [direction, setDirection] = useState<'backward' | 'forward'>('backward')
   const traceQuery = useLotTraceQuery(lot.lotId, direction)
   const closeMutation = useCloseLotMutation(projectId)
+  const inventoriesQuery = useInventoriesQuery(projectId)
 
   return (
     <>
@@ -161,6 +167,7 @@ function LotDetail({
         {formatQty(lot.quantityOnHand)} on hand, {formatQty(lot.quantityReserved)} reserved
         {lot.productionRunId ? ' · produced by a run' : ''}
         {lot.lotStatus === 'quarantined' ? ' · release it from the Stock tab' : ''}
+        {lot.expired ? ` · expired ${lot.expiryDate}: it cannot go into production or be reserved; issue it to scrap it` : ''}
       </p>
 
       {lot.lotStatus !== 'closed' && (
@@ -213,6 +220,20 @@ function LotDetail({
           </li>
         ))}
       </ul>
+
+      <section aria-label="LOT quality" style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+        <h4 style={{ margin: '0 0 4px' }}>Quality</h4>
+        <QualitySection
+          projectId={projectId}
+          filter={{ lotId: lot.lotId }}
+          targets={[{ key: `lot:${lot.lotId}`, itemId: lot.itemId, lotId: lot.lotId, direction: 'lot' }]}
+          targetLabel={() => lot.lotNo}
+          productionRunId={null}
+          itemLabel={(itemId) => itemLabel.get(itemId) ?? itemId}
+          emptyHint=""
+          stock={inventoriesQuery.data ?? []}
+        />
+      </section>
     </>
   )
 }

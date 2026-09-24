@@ -2,6 +2,7 @@ package org.myweb.flowmat.domain.workflow.application;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
@@ -33,6 +34,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
 
     private static final String NOT_DELETED = "N";
     private static final String DELETED = "Y";
+    private static final Set<String> FAILURE_POLICIES = Set.of("stop", "skip", "retry");
 
     private final ProcessConnectionRepository processConnectionRepository;
     private final WorkflowRepository workflowRepository;
@@ -66,14 +68,18 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         connection.setWorkflowId(workflow.getWorkflowId());
         connection.setFromProcessId(fromProcess.getProcessId());
         connection.setToProcessId(toProcess.getProcessId());
-        connection.setFromIoId(validateProcessIo(request.fromIoId(), fromProcess.getProcessId()));
-        connection.setToIoId(validateProcessIo(request.toIoId(), toProcess.getProcessId()));
+        connection.setFromIoId(validateProcessIo(request.fromIoId(), fromProcess.getProcessId(), "output"));
+        connection.setToIoId(validateProcessIo(request.toIoId(), toProcess.getProcessId(), "input"));
+        validatePortCompatibility(connection.getFromIoId(), connection.getToIoId());
         connection.setItemId(validateItem(request.itemId(), workflow.getProjectId()));
         connection.setSourceHandle(resolveHandle(request.sourceHandle(), connection.getFromIoId(), "out"));
         connection.setTargetHandle(resolveHandle(request.targetHandle(), connection.getToIoId(), "in"));
         connection.setConnectionType(defaultIfBlank(request.connectionType(), "material"));
         connection.setConnectionLabel(trimToNull(request.connectionLabel()));
         connection.setFlowRate(request.flowRate());
+        connection.setConditionExpr(trimToNull(request.conditionExpr()));
+        connection.setCapacity(requireNonNegativeCapacity(request.capacity()));
+        connection.setFailurePolicy(normalizeFailurePolicy(request.failurePolicy()));
         connection.setUnit(trimToNull(request.unit()));
         connection.setDelayTimeSec(defaultIfNull(request.delayTimeSec(), BigDecimal.ZERO));
         connection.setLossRate(defaultIfNull(request.lossRate(), BigDecimal.ZERO));
@@ -99,10 +105,13 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         Process toProcess = projectAccessService.requireProcessWriteAccess(connection.getToProcessId());
 
         if (request.fromIoId() != null) {
-            connection.setFromIoId(validateProcessIo(request.fromIoId(), fromProcess.getProcessId()));
+            connection.setFromIoId(validateProcessIo(request.fromIoId(), fromProcess.getProcessId(), "output"));
         }
         if (request.toIoId() != null) {
-            connection.setToIoId(validateProcessIo(request.toIoId(), toProcess.getProcessId()));
+            connection.setToIoId(validateProcessIo(request.toIoId(), toProcess.getProcessId(), "input"));
+        }
+        if (request.fromIoId() != null || request.toIoId() != null) {
+            validatePortCompatibility(connection.getFromIoId(), connection.getToIoId());
         }
         if (request.itemId() != null) {
             connection.setItemId(validateItem(request.itemId(), connection.getProjectId()));
@@ -123,6 +132,17 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         connection.setConnectionLabel(trimToNull(request.connectionLabel()));
         if (request.flowRate() != null) {
             connection.setFlowRate(request.flowRate());
+        }
+        if (request.conditionExpr() != null) {
+            connection.setConditionExpr(trimToNull(request.conditionExpr()));
+        }
+        if (Boolean.TRUE.equals(request.clearCapacity())) {
+            connection.setCapacity(null);
+        } else if (request.capacity() != null) {
+            connection.setCapacity(requireNonNegativeCapacity(request.capacity()));
+        }
+        if (request.failurePolicy() != null) {
+            connection.setFailurePolicy(normalizeFailurePolicy(request.failurePolicy()));
         }
         if (request.unit() != null) {
             connection.setUnit(trimToNull(request.unit()));
@@ -153,7 +173,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         graphSyncService.broadcast(Type.CONNECTION_DELETED, workflowId, connectionId);
     }
 
-    private String validateProcessIo(String processIoId, String processId) {
+    private String validateProcessIo(String processIoId, String processId, String direction) {
         if (!hasText(processIoId)) {
             return null;
         }
@@ -162,7 +182,27 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         if (!processId.equals(processIo.getProcessId())) {
             throw new BusinessException(ErrorCode.BAD_REQUEST);
         }
+        if (!direction.equalsIgnoreCase(processIo.getDirection())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "Connection source must be an output port and target must be an input port.");
+        }
         return processIo.getProcessIoId();
+    }
+
+    private void validatePortCompatibility(String fromIoId, String toIoId) {
+        if (fromIoId == null || toIoId == null) {
+            return;
+        }
+        ProcessIo source = processIoRepository.findByProcessIoIdAndDeletedYn(fromIoId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        ProcessIo target = processIoRepository.findByProcessIoIdAndDeletedYn(toIoId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        String sourceType = defaultIfBlank(source.getResourceType(), source.getIoType());
+        String targetType = defaultIfBlank(target.getResourceType(), target.getIoType());
+        if (!sourceType.equals(targetType)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "Connected ports must use the same resource type.");
+        }
     }
 
     private String validateItem(String itemId, String projectId) {
@@ -203,6 +243,9 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
             connection.getDelayTimeSec(),
             connection.getLossRate(),
             connection.getPriority(),
+            connection.getConditionExpr(),
+            connection.getCapacity(),
+            connection.getFailurePolicy(),
             connection.getVersion(),
             connection.getVersionNonce()
         );
@@ -222,6 +265,21 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
 
     private static BigDecimal defaultIfNull(BigDecimal value, BigDecimal defaultValue) {
         return value != null ? value : defaultValue;
+    }
+
+    private static BigDecimal requireNonNegativeCapacity(BigDecimal capacity) {
+        if (capacity != null && capacity.signum() < 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Connection capacity cannot be negative.");
+        }
+        return capacity;
+    }
+
+    private static String normalizeFailurePolicy(String value) {
+        String normalized = defaultIfBlank(value, "stop");
+        if (!FAILURE_POLICIES.contains(normalized)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Unknown connection failure policy.");
+        }
+        return normalized;
     }
 
     private static String resolveHandle(String requestedHandle, String ioId, String defaultPrefix) {

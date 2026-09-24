@@ -173,12 +173,16 @@
 | # | 일 | 입력 자료 |
 |---|---|---|
 | D1 | 협업 충돌 모델 결정 (전체 문서 저장 유지 / 요소별 patch / Yjs 시제품) | C5, A6 |
-| D2 | `docs/domain/inventory-bom-lot-contract.md`의 `[구현 결정]` 승인·수정 | 계약서 |
+| D2 | ~~`docs/domain/inventory-bom-lot-contract.md`의 `[구현 결정]` 승인·수정~~ **대부분 결정(2026-09-24)** — 계약서 머리의 "구현 결정 검토 현황" 표 참고. 남은 것: revision 자동 retire·draft 제한, 새 LOT `available` 시작(검토 대기), `NOT VALID`의 `VALIDATE` 계획(D4와 연결) | 계약서 |
 | D3 | 권한 매트릭스 확정 | C4 |
 | D4 | Flyway 체크섬 해결 방식 선택과 각 DB 적용, 운영 DB 전환·`VALIDATE CONSTRAINT` | G, C6, B |
 | D5 | 협업·STOMP 독립 보안 검토 | A |
 | D6 | 브라우저 실사용·다중 사용자·부하·사용성 검증 | 전체 |
 | D7 | 실행 단계(노드 인스턴스) 모델 채택 여부와 범위, 외부 워크플로 엔진 도입 여부 결정 | I1 |
+
+세션 간 전달 문서:
+- 인증 담당: [같은 브라우저 안의 refresh 경합](reports/auth-refresh-race.md). 실 API E2E의 `workers: 1`은 이 문제가 해결될 때까지 유지합니다.
+- workflow revision 작업 세션: [V21은 이미 dev DB에 적용됨. 그대로 커밋](reports/flyway-v21-notice.md)
 
 ---
 

@@ -105,6 +105,7 @@ test('a run links its input and output LOTs, and the LOTs tab traces both ways',
   const inputRow = page.getByRole('row', { name: new RegExp(`LOT ${RAW_LOT}`) })
   await inputRow.getByRole('button', { name: 'Cancel' }).click()
   await expect(inputRow).toContainText('cancelled')
+  await expect(inputRow).toHaveAttribute('title', /^Cancelled by demo-owner on .+: Wrong LOT picked$/)
 
   await page.goto(`/projects/${PROJECT}/inventory?tab=lots`)
   await expect(page.getByRole('row', { name: new RegExp(RAW_LOT) })).toContainText('40')

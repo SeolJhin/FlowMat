@@ -18,6 +18,16 @@ export function recordedAgainstPlan(planned: ProductionRunItemDto, items: Produc
     .reduce((sum, item) => sum + Number(item.actualQty ?? item.plannedQty ?? 0), 0)
 }
 
+/** Who cancelled a recording, when and why, for its row on the run screen; null when it was not cancelled. */
+export function cancelSummary(
+  item: ProductionRunItemDto,
+  formatTime: (iso: string) => string = (iso) => new Date(iso).toLocaleString(),
+): string | null {
+  if (!item.cancelled) return null
+  const when = item.cancelledAt ? ` on ${formatTime(item.cancelledAt)}` : ''
+  return `Cancelled by ${item.cancelledBy ?? '?'}${when}: ${item.cancelReason ?? ''}`
+}
+
 /** What is still to record for a planned line; never negative. */
 export function remainingOfPlan(planned: ProductionRunItemDto, items: ProductionRunItemDto[]): number {
   return Math.max(0, Number(planned.plannedQty) - recordedAgainstPlan(planned, items))

@@ -14,7 +14,7 @@ public record ProductionRunItemResponse(
     BigDecimal plannedQty,
     BigDecimal actualQty,
     String unit,
-    /** "manual" or "bom" (planned from the BOM snapshot at run start). */
+    /** "manual", "bom" (planned from the BOM snapshot at run start) or "correction" (added by a finished-run correction). */
     String quantitySource,
     BigDecimal conversionRate,
     /** LOT consumed or produced; set from the chosen stock record. */
@@ -22,6 +22,10 @@ public record ProductionRunItemResponse(
     boolean cancelled,
     String cancelledBy,
     OffsetDateTime cancelledAt,
-    String cancelReason
+    String cancelReason,
+    /** The correction that added this recording. */
+    String productionRunCorrectionId,
+    /** The correction that voided this recording; null when it was cancelled on the open run. */
+    String cancelledByCorrectionId
 ) {
 }

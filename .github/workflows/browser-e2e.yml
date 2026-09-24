@@ -91,15 +91,15 @@ jobs:
         working-directory: flowmat_frontend
         run: npx playwright install --with-deps chromium
 
-      - name: Run browser E2E
-        working-directory: flowmat_frontend
-        run: npm run test:e2e
-
       - name: Run real backend contract E2E
         working-directory: flowmat_frontend
         env:
           REAL_API_E2E: '1'
         run: npm run test:e2e -- e2e/backend-contract.spec.ts
+
+      - name: Run browser E2E
+        working-directory: flowmat_frontend
+        run: npm run test:e2e
 
       - name: Run real BOM and LOT E2E
         working-directory: flowmat_frontend

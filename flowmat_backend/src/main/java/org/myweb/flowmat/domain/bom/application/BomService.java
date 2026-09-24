@@ -7,11 +7,15 @@ import org.myweb.flowmat.domain.bom.api.dto.request.BomLineCreateRequest;
 import org.myweb.flowmat.domain.bom.api.dto.request.BomUpdateRequest;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomResponse;
+import org.myweb.flowmat.domain.bom.api.dto.response.BomWhereUsedResponse;
 
 /** BOM revisions and their materials (docs/domain/inventory-bom-lot-contract.md §5). */
 public interface BomService {
 
     List<BomResponse> listBoms(String projectId, String targetItemId);
+
+    /** BOM revisions of the project that use the item as a line: approved first, then drafts, then retired. */
+    List<BomWhereUsedResponse> whereUsed(String projectId, String itemId);
 
     BomResponse getBom(String bomId);
 

@@ -6,6 +6,7 @@ import type { ApiEnvelope, ProductionRunDto } from '../../../shared/types/api'
 export interface StartRunInput {
   projectId: string
   workflowId: string
+  workflowRevisionId?: string
   targetItemId?: string
   plannedOutputQty: number
   runType?: string

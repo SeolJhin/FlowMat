@@ -1,6 +1,7 @@
 package org.myweb.flowmat.domain.inventory.application;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -245,7 +246,8 @@ public class LotServiceImpl implements LotService {
             lot.getExpiryDate(),
             lot.getProductionRunId(),
             sum(stock, Inventory::getQuantity),
-            sum(stock, Inventory::getReservedQuantity)
+            sum(stock, Inventory::getReservedQuantity),
+            lot.isExpiredOn(LocalDate.now())
         );
     }
 

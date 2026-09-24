@@ -2,6 +2,7 @@ package org.myweb.flowmat;
 
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -182,6 +183,48 @@ class LotIntegrationTest extends IntegrationTestSupport {
         call(get("/lots/" + productLot + "/trace")).andExpect(jsonPath("$.data.nodes.length()").value(0));
 
         cancel(runId, inputId, "again").andExpect(status().isConflict());
+    }
+
+    @Test
+    void cancellingOneOfSeveralRecordingsKeepsTheRestOfTheGenealogy() throws Exception {
+        String raw = item("unit_kg", true);
+        String product = item("unit_kg", true);
+        String lotA = createLot(raw, "MA-" + suffix());
+        String lotB = createLot(raw, "MB-" + suffix());
+        String lotX = createLot(product, "MX-" + suffix());
+        String lotY = createLot(product, "MY-" + suffix());
+        String stockA = id(createStock(raw, lotA, "20"), "inventoryId");
+        String stockB = id(createStock(raw, lotB, "20"), "inventoryId");
+        String stockX = id(createStock(product, lotX, "0"), "inventoryId");
+        String stockY = id(createStock(product, lotY, "0"), "inventoryId");
+
+        // A + B -> X + Y: four edges.
+        String runId = startRun();
+        String inputA = id(recordRunItem(runId, stockA, raw, "input", "5", "kg").andExpect(status().isOk()), "productionRunItemId");
+        recordRunItem(runId, stockB, raw, "input", "3", "kg").andExpect(status().isOk());
+        recordRunItem(runId, stockX, product, "output", "4", "kg").andExpect(status().isOk());
+        String outputY = id(recordRunItem(runId, stockY, product, "output", "2", "kg").andExpect(status().isOk()),
+            "productionRunItemId");
+        call(get("/lots/" + lotX + "/trace")).andExpect(jsonPath("$.data.nodes[*].lot.lotId").value(containsInAnyOrder(lotA, lotB)));
+
+        // Cancelling input A leaves B -> X and B -> Y, with B's recorded quantity.
+        cancel(runId, inputA, "Wrong LOT").andExpect(status().isOk());
+        call(get("/lots/" + lotX + "/trace"))
+            .andExpect(jsonPath("$.data.nodes[*].lot.lotId").value(containsInAnyOrder(lotB)))
+            .andExpect(jsonPath("$.data.nodes[0].consumedQty").value(3.0));
+        call(get("/lots/" + lotY + "/trace")).andExpect(jsonPath("$.data.nodes[*].lot.lotId").value(containsInAnyOrder(lotB)));
+        call(get("/lots/" + lotB + "/trace").param("direction", "forward"))
+            .andExpect(jsonPath("$.data.nodes[*].lot.lotId").value(containsInAnyOrder(lotX, lotY)));
+
+        // Cancelling output Y leaves B -> X; only Y loses its "produced by this run" mark.
+        cancel(runId, outputY, "Counted twice").andExpect(status().isOk());
+        call(get("/lots/" + lotB + "/trace").param("direction", "forward"))
+            .andExpect(jsonPath("$.data.nodes[*].lot.lotId").value(containsInAnyOrder(lotX)));
+        call(get("/lots/" + lotY + "/trace")).andExpect(jsonPath("$.data.nodes.length()").value(0));
+        call(get("/lots/" + lotX)).andExpect(jsonPath("$.data.productionRunId").value(runId));
+        call(get("/lots/" + lotY)).andExpect(jsonPath("$.data.productionRunId").value(nullValue()));
+        call(get("/inventories/" + stockA)).andExpect(jsonPath("$.data.quantity").value(20));
+        call(get("/inventories/" + stockY)).andExpect(jsonPath("$.data.quantity").value(0));
     }
 
     @Test

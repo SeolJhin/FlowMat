@@ -24,9 +24,14 @@ public class ProcessIo extends CreatedUpdatedAuditEntity {
     private String ioName;
     private String direction;
     private String ioType;
+    private String role;
+    private String resourceType;
     private BigDecimal quantity;
     private String unit;
     private String formula;
+    @JdbcTypeCode(SqlTypes.JSON)
+    private String schemaJson;
+    private String validationRule;
     private String colorScheme;
     @JdbcTypeCode(SqlTypes.CHAR)
     private String requiredYn;

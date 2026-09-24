@@ -43,7 +43,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     public List<ProcessIoResponse> listProcessIos(String processId) {
         projectAccessService.requireProcessReadAccess(processId);
         return processIoRepository.findAllByProcessIdAndDeletedYnOrderByCreatedAtAsc(processId, NOT_DELETED).stream()
-            .map(ProcessIoServiceImpl::toResponse)
+            .map(ProcessIoResponse::from)
             .toList();
     }
 
@@ -61,21 +61,25 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         processIo.setIoName(trimToNull(request.ioName()));
         processIo.setDirection(request.direction().trim().toLowerCase());
         processIo.setIoType(defaultIfBlank(request.ioType(), "material"));
+        processIo.setRole(trimToNull(request.role()));
+        processIo.setResourceType(defaultIfBlank(request.resourceType(), processIo.getIoType()));
         processIo.setQuantity(defaultIfNull(request.quantity(), BigDecimal.ZERO));
         processIo.setUnit(request.unit().trim());
         processIo.setFormula(trimToNull(request.formula()));
+        processIo.setSchemaJson(writeSchema(request.schemaJson()));
+        processIo.setValidationRule(trimToNull(request.validationRule()));
         processIo.setColorScheme(defaultColorScheme(request.colorScheme(), request.direction()));
         processIo.setRequiredYn(defaultYn(request.requiredYn(), "Y"));
         processIo.setAllowShortageYn(defaultYn(request.allowShortageYn(), "N"));
         processIo.setDeletedYn(NOT_DELETED);
-        ProcessIoResponse response = toResponse(processIoRepository.save(processIo));
+        ProcessIoResponse response = ProcessIoResponse.from(processIoRepository.save(processIo));
         graphSyncService.broadcast(Type.PORT_CREATED, process.getWorkflowId(), response.processIoId());
         return response;
     }
 
     @Override
     public ProcessIoResponse getProcessIo(String processIoId) {
-        return toResponse(projectAccessService.requireProcessIoReadAccess(processIoId));
+        return ProcessIoResponse.from(projectAccessService.requireProcessIoReadAccess(processIoId));
     }
 
     @Override
@@ -98,6 +102,12 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         if (hasText(request.ioType())) {
             processIo.setIoType(request.ioType().trim().toLowerCase());
         }
+        if (request.role() != null) {
+            processIo.setRole(trimToNull(request.role()));
+        }
+        if (hasText(request.resourceType())) {
+            processIo.setResourceType(request.resourceType().trim().toLowerCase());
+        }
         if (request.quantity() != null) {
             processIo.setQuantity(request.quantity());
         }
@@ -106,6 +116,12 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         }
         if (request.formula() != null) {
             processIo.setFormula(trimToNull(request.formula()));
+        }
+        if (request.schemaJson() != null) {
+            processIo.setSchemaJson(writeSchema(request.schemaJson()));
+        }
+        if (request.validationRule() != null) {
+            processIo.setValidationRule(trimToNull(request.validationRule()));
         }
         if (request.colorScheme() != null) {
             processIo.setColorScheme(normalizeColorScheme(request.colorScheme()));
@@ -121,7 +137,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         ProcessIo saved = processIoRepository.save(processIo);
         Process parentProcess = projectAccessService.requireProcessWriteAccess(saved.getProcessId());
         graphSyncService.broadcast(Type.PORT_UPDATED, parentProcess.getWorkflowId(), saved.getProcessIoId());
-        return toResponse(saved);
+        return ProcessIoResponse.from(saved);
     }
 
     @Override
@@ -140,21 +156,17 @@ public class ProcessIoServiceImpl implements ProcessIoService {
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
-    private static ProcessIoResponse toResponse(ProcessIo processIo) {
-        return new ProcessIoResponse(
-            processIo.getProcessIoId(),
-            processIo.getProcessId(),
-            processIo.getItemId(),
-            processIo.getIoName(),
-            processIo.getDirection(),
-            processIo.getIoType(),
-            processIo.getQuantity(),
-            processIo.getUnit(),
-            processIo.getFormula(),
-            processIo.getColorScheme(),
-            processIo.getRequiredYn(),
-            processIo.getAllowShortageYn()
-        );
+    private static String writeSchema(com.fasterxml.jackson.databind.JsonNode schema) {
+        if (schema == null) {
+            return null;
+        }
+        if (!schema.isObject()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Port schema must be a JSON object.");
+        }
+        if (schema.toString().length() > 65536) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Port schema is too large.");
+        }
+        return schema.toString();
     }
 
     private static void validateSameProject(String processProjectId, String itemProjectId) {

@@ -20,7 +20,10 @@ public enum InventoryTransactionType {
     ADJUSTMENT("adjustment", 0, 0, true, false, true),
     REVERSAL("reversal", 0, 0, false, false, false),
     QUARANTINE("quarantine", 0, 0, true, false, false),
-    UNQUARANTINE("unquarantine", 0, 0, true, false, false);
+    UNQUARANTINE("unquarantine", 0, 0, true, false, false),
+    // The two legs of POST /inventory-transfers, written together; a transfer is undone by a transfer back.
+    TRANSFER_OUT("transfer_out", -1, 0, false, true, false),
+    TRANSFER_IN("transfer_in", 1, 0, false, false, false);
 
     private final String code;
     private final int quantitySign;

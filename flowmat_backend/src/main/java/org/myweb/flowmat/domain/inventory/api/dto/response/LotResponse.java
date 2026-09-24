@@ -17,6 +17,8 @@ public record LotResponse(
     String productionRunId,
     /** Summed over every active stock record of this LOT. */
     BigDecimal quantityOnHand,
-    BigDecimal quantityReserved
+    BigDecimal quantityReserved,
+    /** Past its expiry date today; expired stock cannot go into production or be reserved. */
+    boolean expired
 ) {
 }

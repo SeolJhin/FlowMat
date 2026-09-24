@@ -1,6 +1,7 @@
 package org.myweb.flowmat.domain.catalog.application;
 
 import java.util.List;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.api.dto.request.ItemCreateRequest;
 import org.myweb.flowmat.domain.catalog.api.dto.request.ItemUpdateRequest;
@@ -29,6 +30,8 @@ public class ItemServiceImpl implements ItemService {
     private final ProjectAccessService projectAccessService;
     private final UnitMasterRepository unitMasterRepository;
     private final InventoryRepository inventoryRepository;
+    /** Other domains that still rely on an item; see {@link ItemUsageCheck}. */
+    private final List<ItemUsageCheck> itemUsageChecks;
 
     /** Blank clears the unit; otherwise it must reference an active unit_master row. */
     private String requireActiveUnit(String unitId) {
@@ -119,6 +122,14 @@ public class ItemServiceImpl implements ItemService {
     public void deleteItem(String itemId) {
         Item item = findActiveItem(itemId);
         projectAccessService.requireProjectOwnerAccess(item.getProjectId());
+        List<String> reasons = itemUsageChecks.stream()
+            .map(check -> check.whyInUse(item))
+            .flatMap(Optional::stream)
+            .toList();
+        if (!reasons.isEmpty()) {
+            throw new BusinessException(ErrorCode.CONFLICT,
+                item.getItemCode() + " cannot be deleted: " + String.join("; and ", reasons) + ".");
+        }
         item.setDeletedYn(DELETED);
         item.setItemStatus("deleted");
         itemRepository.save(item);

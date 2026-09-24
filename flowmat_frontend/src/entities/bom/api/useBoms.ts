@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
-import type { ApiEnvelope, BomDto, BomRequirementDto } from '../../../shared/types/api'
+import type { ApiEnvelope, BomDto, BomRequirementDto, BomWhereUsedDto } from '../../../shared/types/api'
 
 /** Mirrors BomCreateRequest. */
 export interface BomCreateInput {
@@ -23,6 +23,20 @@ export interface BomLineInput {
 export type BomAction = 'submit' | 'approve' | 'reject' | 'retire' | 'revisions'
 
 const path = (bomId: string) => `/boms/${encodeURIComponent(bomId)}`
+
+/** BOM revisions that use the item as a line, approved first (GET /boms/where-used). */
+export function useBomWhereUsedQuery(projectId: string, itemId: string | null) {
+  return useQuery<BomWhereUsedDto[]>({
+    queryKey: ['boms', projectId, 'where-used', itemId],
+    queryFn: async () =>
+      unwrapApiResponse(
+        await httpClient.get<ApiEnvelope<BomWhereUsedDto[]>>(
+          `/boms/where-used?projectId=${encodeURIComponent(projectId)}&itemId=${encodeURIComponent(itemId ?? '')}`,
+        ),
+      ),
+    enabled: Boolean(projectId && itemId),
+  })
+}
 
 export function useBomsQuery(projectId: string) {
   return useQuery<BomDto[]>({

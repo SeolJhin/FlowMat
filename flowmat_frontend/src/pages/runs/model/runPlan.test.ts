@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProductionRunItemDto } from '../../../shared/types/api'
-import { recordedAgainstPlan, remainingOfPlan } from './runPlan'
+import { cancelSummary, recordedAgainstPlan, remainingOfPlan } from './runPlan'
 
 function row(overrides: Partial<ProductionRunItemDto>): ProductionRunItemDto {
   return {
@@ -48,5 +48,23 @@ describe('plan vs recorded', () => {
 
   it('never reports a negative remainder', () => {
     expect(remainingOfPlan(plan, [plan, row({ actualQty: 60 })])).toBe(0)
+  })
+})
+
+describe('cancel summary', () => {
+  it('says who cancelled, when and why', () => {
+    const cancelled = row({
+      cancelled: true,
+      cancelledBy: 'demo-owner',
+      cancelledAt: '2026-09-24T08:30:00Z',
+      cancelReason: 'Wrong LOT picked',
+    })
+    expect(cancelSummary(cancelled, (iso) => `<${iso}>`)).toBe(
+      'Cancelled by demo-owner on <2026-09-24T08:30:00Z>: Wrong LOT picked',
+    )
+  })
+
+  it('is empty for a recording that stands', () => {
+    expect(cancelSummary(row({}))).toBeNull()
   })
 })

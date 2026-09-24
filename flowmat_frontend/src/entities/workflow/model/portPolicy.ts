@@ -7,6 +7,10 @@ export interface PortFormState {
   ioName: string
   direction: 'input' | 'output'
   ioType: string
+  role: string
+  resourceType: string
+  schemaJson: string
+  validationRule: string
   quantity: string
   unit: string
   formula: string
@@ -29,6 +33,10 @@ export function createDefaultPortFormState(direction: PortFormState['direction']
     ioName: '',
     direction,
     ioType: DEFAULT_IO_TYPE,
+    role: '',
+    resourceType: DEFAULT_IO_TYPE,
+    schemaJson: '',
+    validationRule: '',
     quantity: '0',
     unit: '',
     formula: '',
@@ -45,6 +53,10 @@ export function toPortFormState(port: CanvasPortViewModel): PortFormState {
     ioName: port.name,
     direction: port.direction,
     ioType: port.ioType,
+    role: port.role ?? '',
+    resourceType: port.resourceType,
+    schemaJson: port.schemaJson ? JSON.stringify(port.schemaJson, null, 2) : '',
+    validationRule: port.validationRule ?? '',
     quantity: port.quantity || '0',
     unit: port.unit ?? '',
     formula: port.formula ?? '',
@@ -71,6 +83,10 @@ export function toCreateProcessIoInput(processId: string, state: PortFormState):
     ioName: state.ioName.trim(),
     direction: state.direction,
     ioType: state.ioType.trim().toLowerCase(),
+    role: normalizeOptionalText(state.role),
+    resourceType: state.resourceType.trim().toLowerCase(),
+    schemaJson: parseSchemaJson(state.schemaJson),
+    validationRule: normalizeOptionalText(state.validationRule),
     quantity: normalizeQuantity(state.quantity),
     unit: state.unit.trim(),
     formula: normalizeOptionalText(state.formula),
@@ -87,6 +103,10 @@ export function toUpdateProcessIoInput(state: PortFormState): UpdateProcessIoInp
     ioName: state.ioName.trim(),
     direction: state.direction,
     ioType: state.ioType.trim().toLowerCase(),
+    role: normalizeOptionalText(state.role),
+    resourceType: state.resourceType.trim().toLowerCase(),
+    schemaJson: parseSchemaJson(state.schemaJson),
+    validationRule: normalizeOptionalText(state.validationRule),
     quantity: normalizeQuantity(state.quantity),
     unit: state.unit.trim(),
     formula: normalizeOptionalText(state.formula),
@@ -97,7 +117,27 @@ export function toUpdateProcessIoInput(state: PortFormState): UpdateProcessIoInp
 }
 
 export function hasValidPortSelection(state: PortFormState): boolean {
-  return Boolean(state.itemId.trim()) && Boolean(state.unit.trim()) && !Number.isNaN(Number(state.quantity))
+  return Boolean(state.itemId.trim()) && Boolean(state.unit.trim()) && Boolean(state.resourceType.trim())
+    && !Number.isNaN(Number(state.quantity)) && isValidSchemaJson(state.schemaJson)
+}
+
+export function isValidSchemaJson(value: string): boolean {
+  if (!value.trim()) return true
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+  } catch {
+    return false
+  }
+}
+
+function parseSchemaJson(value: string): Record<string, unknown> | undefined {
+  if (!value.trim()) return undefined
+  const parsed: unknown = JSON.parse(value)
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('Port schema must be a JSON object.')
+  }
+  return parsed as Record<string, unknown>
 }
 
 function normalizeQuantity(value: string): number {

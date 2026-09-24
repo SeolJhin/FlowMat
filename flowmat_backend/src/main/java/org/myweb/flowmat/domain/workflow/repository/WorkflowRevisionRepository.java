@@ -12,4 +12,6 @@ public interface WorkflowRevisionRepository extends JpaRepository<WorkflowRevisi
     Optional<WorkflowRevision> findTopByWorkflowIdOrderByRevisionNoDesc(String workflowId);
 
     Optional<WorkflowRevision> findByWorkflowRevisionIdAndWorkflowId(String revisionId, String workflowId);
+
+    Optional<WorkflowRevision> findTopByWorkflowIdAndStatusOrderByRevisionNoDesc(String workflowId, String status);
 }

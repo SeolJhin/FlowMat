@@ -102,20 +102,7 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
     }
 
     public static ProcessIoResponse toProcessIoResponse(ProcessIo processIo) {
-        return new ProcessIoResponse(
-            processIo.getProcessIoId(),
-            processIo.getProcessId(),
-            processIo.getItemId(),
-            processIo.getIoName(),
-            processIo.getDirection(),
-            processIo.getIoType(),
-            processIo.getQuantity(),
-            processIo.getUnit(),
-            processIo.getFormula(),
-            processIo.getColorScheme(),
-            processIo.getRequiredYn(),
-            processIo.getAllowShortageYn()
-        );
+        return ProcessIoResponse.from(processIo);
     }
 
     public static ProcessConnectionResponse toConnectionResponse(ProcessConnection connection) {
@@ -137,6 +124,9 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
             connection.getDelayTimeSec(),
             connection.getLossRate(),
             connection.getPriority(),
+            connection.getConditionExpr(),
+            connection.getCapacity(),
+            connection.getFailurePolicy(),
             connection.getVersion(),
             connection.getVersionNonce()
         );

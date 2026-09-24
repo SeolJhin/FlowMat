@@ -5,6 +5,7 @@ import {
   applyItemDefaults,
   createDefaultPortFormState,
   hasValidPortSelection,
+  isValidSchemaJson,
   toCreateProcessIoInput,
   toPortFormState,
   toUpdateProcessIoInput,
@@ -296,7 +297,11 @@ export function NodeInspector({
 
             <label style={{ display: 'grid', gap: '4px' }}>
               <span>I/O Type</span>
-              <select value={portForm.ioType} onChange={(event) => setPortForm((current) => ({ ...current, ioType: event.target.value }))}>
+              <select value={portForm.ioType} onChange={(event) => setPortForm((current) => ({
+                ...current,
+                ioType: event.target.value,
+                resourceType: current.resourceType === current.ioType ? event.target.value : current.resourceType,
+              }))}>
                 {IO_TYPE_OPTIONS.map((option) => (
                   <option key={option} value={option}>
                     {option}
@@ -304,6 +309,17 @@ export function NodeInspector({
                 ))}
               </select>
             </label>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <label style={{ display: 'grid', gap: '4px' }}>
+                <span>Role</span>
+                <input value={portForm.role} onChange={(event) => setPortForm((current) => ({ ...current, role: event.target.value }))} placeholder="feed, product..." />
+              </label>
+              <label style={{ display: 'grid', gap: '4px' }}>
+                <span>Resource Type</span>
+                <input value={portForm.resourceType} onChange={(event) => setPortForm((current) => ({ ...current, resourceType: event.target.value }))} />
+              </label>
+            </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
               <label style={{ display: 'grid', gap: '4px' }}>
@@ -325,6 +341,17 @@ export function NodeInspector({
             <label style={{ display: 'grid', gap: '4px' }}>
               <span>Formula</span>
               <input value={portForm.formula} onChange={(event) => setPortForm((current) => ({ ...current, formula: event.target.value }))} />
+            </label>
+
+            <label style={{ display: 'grid', gap: '4px' }}>
+              <span>Data schema (JSON metadata)</span>
+              <textarea value={portForm.schemaJson} onChange={(event) => setPortForm((current) => ({ ...current, schemaJson: event.target.value }))} rows={4} aria-invalid={!isValidSchemaJson(portForm.schemaJson)} />
+              {!isValidSchemaJson(portForm.schemaJson) && <small role="alert">Enter a valid JSON object.</small>}
+            </label>
+
+            <label style={{ display: 'grid', gap: '4px' }}>
+              <span>Validation rule (metadata)</span>
+              <input value={portForm.validationRule} onChange={(event) => setPortForm((current) => ({ ...current, validationRule: event.target.value }))} />
             </label>
 
             <label style={{ display: 'grid', gap: '4px' }}>

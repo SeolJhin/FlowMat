@@ -19,6 +19,7 @@ public class ProductionRun extends CreatedUpdatedAuditEntity {
 
     private String projectId;
     private String workflowId;
+    private String workflowRevisionId;
     private String workOrderId;
     private String bomId;
 

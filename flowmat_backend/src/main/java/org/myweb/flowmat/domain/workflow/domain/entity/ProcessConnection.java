@@ -30,6 +30,9 @@ public class ProcessConnection extends CreatedUpdatedAuditEntity {
     private String connectionType;
     private String connectionLabel;
     private BigDecimal flowRate;
+    private String conditionExpr;
+    private BigDecimal capacity;
+    private String failurePolicy;
     private String unit;
     private BigDecimal delayTimeSec;
     private BigDecimal lossRate;

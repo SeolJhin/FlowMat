@@ -25,7 +25,16 @@ Get-Content .env | Where-Object { $_ -match '^[A-Z][A-Z0-9_]*=' } | ForEach-Obje
 .\gradlew.bat bootRun --args='--spring.profiles.active=dev'
 ```
 
-준비 상태는 `http://localhost:8080/api/actuator/health/readiness`로 확인한다. 새 dev DB에는 데모 계정 `demo-owner` / `demo1234`와 프로젝트 `prj_demo_main`이 생성된다. 기존 DB에서 데이터가 보이지 않는다면 시드 실행 여부를 확인한다.
+준비 상태는 `http://localhost:8080/api/actuator/health/readiness`로 확인한다. 새 dev DB에는 데모 계정 `demo-owner` / `demo1234`와 프로젝트 `prj_demo_main`이 생성된다.
+
+기존 dev DB에서 프로젝트가 보이지 않으면 `flowmat_backend` 디렉터리에서 다음 읽기 전용 조회로 V18 적용 이력과 프로젝트 존재 여부를 확인한다. 아래 사용자명과 DB명은 `.env.example` 기본값이며, `.env`에서 바꿨다면 함께 바꾼다.
+
+```powershell
+docker compose exec postgres psql -U flowmat_dev -d flowmat -c "SELECT version, description, success FROM flyway_schema_history WHERE version IN ('2', '18') ORDER BY installed_rank;"
+docker compose exec postgres psql -U flowmat_dev -d flowmat -c "SELECT project_id, owner_id FROM project WHERE project_id = 'prj_demo_main';"
+```
+
+V18이 이미 데모 시드를 삭제한 DB에서는 dev 설정을 고쳐도 적용된 마이그레이션이 다시 실행되지 않아 프로젝트가 복원되지 않는다. 기존 데이터를 보존해야 한다면 별도로 검토한 복구 절차를 마련한다. 기존 개발 DB 볼륨을 삭제하거나 Flyway `repair`로 시드 복원을 시도하지 않는다.
 
 ## 프론트엔드
 

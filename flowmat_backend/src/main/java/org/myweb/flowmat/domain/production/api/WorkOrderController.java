@@ -5,7 +5,9 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.production.api.dto.request.WorkOrderCreateRequest;
 import org.myweb.flowmat.domain.production.api.dto.request.WorkOrderUpdateRequest;
+import org.myweb.flowmat.domain.production.api.dto.response.WorkOrderReadinessResponse;
 import org.myweb.flowmat.domain.production.api.dto.response.WorkOrderResponse;
+import org.myweb.flowmat.domain.production.application.WorkOrderReadinessService;
 import org.myweb.flowmat.domain.production.application.WorkOrderService;
 import org.myweb.flowmat.global.response.ApiResponse;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,10 +25,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class WorkOrderController {
 
     private final WorkOrderService workOrderService;
+    private final WorkOrderReadinessService workOrderReadinessService;
 
     @GetMapping
     public ApiResponse<List<WorkOrderResponse>> listWorkOrders(@RequestParam("projectId") String projectId) {
         return ApiResponse.ok(workOrderService.listWorkOrders(projectId));
+    }
+
+    /** Whether the order can run now: status, workflow, BOM and materials for what is still to produce. */
+    @GetMapping("/{workOrderId}/readiness")
+    public ApiResponse<WorkOrderReadinessResponse> getReadiness(@PathVariable("workOrderId") String workOrderId) {
+        return ApiResponse.ok(workOrderReadinessService.check(workOrderId));
     }
 
     @PostMapping

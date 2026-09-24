@@ -38,6 +38,28 @@ export function useStockMovementMutation(projectId: string) {
   })
 }
 
+/**
+ * Moves stock to another place (docs/domain/stock-transfer.md): out of this record, into the record of the same item and
+ * LOT at the destination (created when there is none). Both records' histories change, so every history is refreshed.
+ */
+export function useStockTransferMutation(projectId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: { fromInventoryId: string; toLocation: string; quantity: number; note?: string }) =>
+      unwrapApiResponse(
+        await httpClient.post<ApiEnvelope<{ transferId: string; out: InventoryTransactionDto; in: InventoryTransactionDto }>>(
+          '/inventory-transfers',
+          { ...input, requestId: newRequestId() },
+        ),
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['inventories', projectId] })
+      void queryClient.invalidateQueries({ queryKey: ['lots', projectId] })
+      void queryClient.invalidateQueries({ queryKey: ['inventory-transactions'] })
+    },
+  })
+}
+
 /** Adds the opposite of a transaction (§3). The server allows one reversal per transaction and re-checks stock. */
 export function useReverseTransactionMutation(projectId: string) {
   const onSuccess = useInvalidateStock(projectId)

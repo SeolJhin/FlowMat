@@ -1,9 +1,13 @@
 package org.myweb.flowmat.domain.production.application;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -40,9 +44,11 @@ import org.myweb.flowmat.domain.rule.application.RuleTarget;
 import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
+import org.myweb.flowmat.domain.workflow.domain.entity.WorkflowRevision;
 import org.myweb.flowmat.domain.workflow.repository.ProcessIoRepository;
 import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
 import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
+import org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
@@ -62,6 +68,8 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     private final ProductionRunItemRepository productionRunItemRepository;
     private final ProjectAccessService projectAccessService;
     private final WorkflowRepository workflowRepository;
+    private final WorkflowRevisionRepository workflowRevisionRepository;
+    private final ObjectMapper objectMapper;
     private final ProcessRepository processRepository;
     private final ProcessIoRepository processIoRepository;
     private final ItemRepository itemRepository;
@@ -73,6 +81,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     private final UnitConverter unitConverter;
     private final BomService bomService;
     private final LotService lotService;
+    private final ProductionFlowRunAdapter productionFlowRunAdapter;
 
     @Override
     public List<ProductionRunResponse> listRuns(String workflowId) {
@@ -89,6 +98,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         projectAccessService.requireProjectWriteAccess(request.projectId());
         Workflow workflow = findActiveWorkflow(request.workflowId());
         validateSameProject(request.projectId(), workflow.getProjectId());
+        WorkflowRevision workflowRevision = resolveWorkflowRevision(workflow.getWorkflowId(), request.workflowRevisionId());
         WorkOrder workOrder = findRunnableWorkOrder(request.workOrderId(), request.projectId(), workflow);
         String targetItemId = trimToNull(request.targetItemId());
         if (targetItemId == null && workOrder != null) {
@@ -124,6 +134,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         run.setProductionRunId(idGenerator.generate());
         run.setProjectId(request.projectId().trim());
         run.setWorkflowId(workflow.getWorkflowId());
+        run.setWorkflowRevisionId(workflowRevision != null ? workflowRevision.getWorkflowRevisionId() : null);
         run.setRunNumber(generateRunNumber());
         run.setRunType(defaultIfBlank(request.runType(), "actual"));
         run.setRunStatus("running");
@@ -140,6 +151,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             run.setBomBaseQuantity(bom.baseQuantity());
         }
         ProductionRun savedRun = productionRunRepository.save(run);
+        productionFlowRunAdapter.onStarted(savedRun);
 
         if (bom != null) {
             for (BomRequirementResponse.Line line : bom.lines()) {
@@ -184,21 +196,9 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         Item item = findActiveItem(request.itemId());
         validateSameProject(run.getProjectId(), item.getProjectId());
         Inventory inventory = null;
-        Process process = null;
-        ProcessIo processIo = null;
-
-        if (request.processId() != null && !request.processId().isBlank()) {
-            process = findActiveProcess(request.processId());
-            validateSameWorkflow(run.getWorkflowId(), process.getWorkflowId());
-        }
-        if (request.processIoId() != null && !request.processIoId().isBlank()) {
-            processIo = findActiveProcessIo(request.processIoId());
-            if (request.processId() != null && !request.processId().isBlank()) {
-                if (!request.processId().equals(processIo.getProcessId())) {
-                    throw new BusinessException(ErrorCode.BAD_REQUEST);
-                }
-            }
-        }
+        RunProcessSelection selection = resolveRunProcessSelection(run, request);
+        Process process = selection.process();
+        ProcessIo processIo = selection.processIo();
         if (request.inventoryId() != null && !request.inventoryId().isBlank()) {
             inventory = findActiveInventory(request.inventoryId());
             validateSameProject(run.getProjectId(), inventory.getProjectId());
@@ -222,8 +222,8 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         ProductionRunItem runItem = new ProductionRunItem();
         runItem.setProductionRunItemId(idGenerator.generate());
         runItem.setProductionRunId(run.getProductionRunId());
-        runItem.setProcessId(trimToNull(request.processId()));
-        runItem.setProcessIoId(trimToNull(request.processIoId()));
+        runItem.setProcessId(process != null ? process.getProcessId() : null);
+        runItem.setProcessIoId(processIo != null ? processIo.getProcessIoId() : null);
         runItem.setInventoryId(trimToNull(request.inventoryId()));
         runItem.setItemId(item.getItemId());
         runItem.setDirection(request.direction().trim().toLowerCase());
@@ -281,8 +281,16 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         return toItemResponse(saved);
     }
 
-    /** Drops the run's genealogy and links the remaining (not cancelled) input and output LOTs again. */
     private void rebuildLotGenealogy(ProductionRun run, ProductionRunItem cancelled) {
+        rebuildLotGenealogy(run, "output".equals(cancelled.getDirection()) ? List.of(cancelled.getLotId()) : List.of());
+    }
+
+    /**
+     * Drops the run's genealogy and links the remaining (not cancelled) input and output LOTs again. LOTs the run used to
+     * produce lose their "produced by this run" mark when no remaining output makes them.
+     */
+    @Transactional
+    public void rebuildLotGenealogy(ProductionRun run, Collection<String> formerOutputLotIds) {
         lotService.clearRunTrace(run.getProductionRunId());
         List<ProductionRunItem> active = productionRunItemRepository
             .findAllByProductionRunIdOrderByProductionRunItemIdAsc(run.getProductionRunId()).stream()
@@ -293,11 +301,99 @@ public class ProductionRunServiceImpl implements ProductionRunService {
                 linkLotGenealogy(run, output);
             }
         }
-        boolean stillProduced = active.stream()
-            .anyMatch(candidate -> "output".equals(candidate.getDirection()) && candidate.getLotId().equals(cancelled.getLotId()));
-        if ("output".equals(cancelled.getDirection()) && !stillProduced) {
-            lotService.clearProducedBy(cancelled.getLotId(), run.getProductionRunId());
+        for (String lotId : formerOutputLotIds) {
+            boolean stillProduced = active.stream()
+                .anyMatch(candidate -> "output".equals(candidate.getDirection()) && candidate.getLotId().equals(lotId));
+            if (!stillProduced) {
+                lotService.clearProducedBy(lotId, run.getProductionRunId());
+            }
         }
+    }
+
+    // ---- Finished-run corrections (ProductionRunCorrectionServiceImpl, docs/domain/production-run-correction.md) ----
+
+    /**
+     * Checks an add_item correction line like a recording (item, stock record, LOT, unit) without saving anything. Flow
+     * rules are not evaluated for corrections (§9 Q7).
+     */
+    public void validateCorrectionRecording(ProductionRun run, String direction, String itemId, String inventoryId, BigDecimal qty,
+        String unit) {
+        resolveCorrectionRecording(run, direction, itemId, inventoryId, qty, unit);
+    }
+
+    /** Records an add_item line as a new run item (quantity_source = correction) and moves its stock. */
+    @Transactional
+    public ProductionRunItem recordCorrectionItem(ProductionRun run, String correctionId, String direction, String itemId,
+        String inventoryId, BigDecimal qty, String unit) {
+        CorrectionRecording resolved = resolveCorrectionRecording(run, direction, itemId, inventoryId, qty, unit);
+        ProductionRunItem runItem = new ProductionRunItem();
+        runItem.setProductionRunItemId(idGenerator.generate());
+        runItem.setProductionRunId(run.getProductionRunId());
+        runItem.setInventoryId(resolved.inventory() != null ? resolved.inventory().getInventoryId() : null);
+        runItem.setItemId(resolved.item().getItemId());
+        runItem.setDirection(direction.trim().toLowerCase());
+        runItem.setPlannedQty(qty);
+        runItem.setActualQty(qty);
+        runItem.setUnit(unit.trim());
+        runItem.setQuantitySource("correction");
+        runItem.setProductionRunCorrectionId(correctionId);
+        runItem.setLotId(resolved.inventory() != null ? resolved.inventory().getLotId() : null);
+        ProductionRunItem saved = productionRunItemRepository.save(runItem);
+        if (resolved.inventory() != null) {
+            applyInventoryEffect(run, saved, resolved.inventory(), resolved.conversion());
+        }
+        return saved;
+    }
+
+    /** Voids a recording for a correction: reverses its stock movement and marks it cancelled by that correction. */
+    @Transactional
+    public void voidForCorrection(ProductionRun run, ProductionRunItem item, String correctionId, int correctionNo, String reason,
+        String actor) {
+        inventoryCommandService.reverseMovementsOf("production_run_item", item.getProductionRunItemId(),
+            "Run " + run.getRunNumber() + " correction #" + correctionNo + ": " + reason, actor);
+        item.setCancelledYn("Y");
+        item.setCancelledBy(actor);
+        item.setCancelledAt(OffsetDateTime.now());
+        item.setCancelReason("Correction #" + correctionNo + ": " + reason);
+        item.setCancelledByCorrectionId(correctionId);
+        productionRunItemRepository.save(item);
+    }
+
+    private record CorrectionRecording(Item item, Inventory inventory, UnitConverter.Conversion conversion) {
+    }
+
+    private CorrectionRecording resolveCorrectionRecording(ProductionRun run, String direction, String itemId,
+        String inventoryId, BigDecimal qty, String unit) {
+        if (direction == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "direction must be 'input' or 'output'.");
+        }
+        requireKnownDirection(direction);
+        if (qty == null || qty.signum() <= 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "The corrected quantity must be greater than 0.");
+        }
+        if (unit == null || unit.isBlank()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Give the unit of the corrected quantity.");
+        }
+        if (itemId == null || itemId.isBlank()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Choose the item to record.");
+        }
+        Item item = findActiveItem(itemId.trim());
+        validateSameProject(run.getProjectId(), item.getProjectId());
+        Inventory inventory = null;
+        if (inventoryId != null && !inventoryId.isBlank()) {
+            inventory = findActiveInventory(inventoryId.trim());
+            validateSameProject(run.getProjectId(), inventory.getProjectId());
+            if (!item.getItemId().equals(inventory.getItemId())) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "The selected stock record holds a different item.");
+            }
+        }
+        if ("Y".equals(item.getLotManageYn()) && inventory == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                item.getItemCode() + " is LOT-tracked; choose the stock record (LOT) this " + direction.trim().toLowerCase()
+                    + " uses.");
+        }
+        UnitConverter.Conversion conversion = unitConverter.toItemUnit(qty, unit.trim(), item.getUnitId());
+        return new CorrectionRecording(item, inventory, conversion);
     }
 
     /**
@@ -348,7 +444,9 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             run.setActualOutputQty(request.actualOutputQty());
         }
         run.setFinishedBy(projectAccessService.requireCurrentUserId());
-        return toResponse(productionRunRepository.save(run));
+        ProductionRun savedRun = productionRunRepository.save(run);
+        productionFlowRunAdapter.onFinished(savedRun);
+        return toResponse(savedRun);
     }
 
     private Workflow findActiveWorkflow(String workflowId) {
@@ -364,6 +462,73 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     private ProcessIo findActiveProcessIo(String processIoId) {
         return processIoRepository.findByProcessIoIdAndDeletedYn(processIoId, NOT_DELETED)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+    }
+
+    private RunProcessSelection resolveRunProcessSelection(ProductionRun run, ProductionRunItemRecordRequest request) {
+        String processId = trimToNull(request.processId());
+        String processIoId = trimToNull(request.processIoId());
+        if (processId == null && processIoId == null) {
+            return new RunProcessSelection(null, null);
+        }
+        if (run.getWorkflowRevisionId() == null) {
+            ProcessIo io = processIoId != null ? findActiveProcessIo(processIoId) : null;
+            if (io != null && processId != null && !processId.equals(io.getProcessId())) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Process I/O belongs to a different process.");
+            }
+            Process process = findActiveProcess(processId != null ? processId : io.getProcessId());
+            validateSameWorkflow(run.getWorkflowId(), process.getWorkflowId());
+            return new RunProcessSelection(process, io);
+        }
+
+        WorkflowRevision revision = workflowRevisionRepository
+            .findByWorkflowRevisionIdAndWorkflowId(run.getWorkflowRevisionId(), run.getWorkflowId())
+            .orElseThrow(() -> new IllegalStateException("Run refers to a missing workflow revision."));
+        JsonNode snapshot;
+        try {
+            snapshot = objectMapper.readTree(revision.getSnapshotJson());
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Stored workflow revision snapshot is invalid.", exception);
+        }
+        JsonNode ioNode = processIoId == null ? null : findSnapshotEntry(snapshot.path("processIos"), "processIoId", processIoId);
+        if (processIoId != null && ioNode == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Process I/O is not part of this run's workflow revision.");
+        }
+        if (ioNode != null) {
+            String ioProcessId = ioNode.path("processId").asText();
+            if (processId != null && !processId.equals(ioProcessId)) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Process I/O belongs to a different process.");
+            }
+            if (!request.itemId().equals(ioNode.path("itemId").asText())
+                || !request.direction().trim().equalsIgnoreCase(ioNode.path("direction").asText())) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Process I/O item or direction differs from the published revision.");
+            }
+            processId = ioProcessId;
+        }
+        JsonNode processNode = findSnapshotEntry(snapshot.path("processes"), "processId", processId);
+        if (processNode == null || !run.getWorkflowId().equals(processNode.path("workflowId").asText())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Process is not part of this run's workflow revision.");
+        }
+        try {
+            return new RunProcessSelection(objectMapper.treeToValue(processNode, Process.class),
+                ioNode != null ? objectMapper.treeToValue(ioNode, ProcessIo.class) : null);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Stored workflow revision process is invalid.", exception);
+        }
+    }
+
+    private static JsonNode findSnapshotEntry(JsonNode entries, String idField, String id) {
+        if (id == null || !entries.isArray()) {
+            return null;
+        }
+        for (JsonNode entry : entries) {
+            if (id.equals(entry.path(idField).asText())) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    private record RunProcessSelection(Process process, ProcessIo processIo) {
     }
 
     private Item findActiveItem(String itemId) {
@@ -406,6 +571,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             run.getProductionRunId(),
             run.getProjectId(),
             run.getWorkflowId(),
+            run.getWorkflowRevisionId(),
             run.getRunNumber(),
             run.getRunType(),
             run.getRunStatus(),
@@ -416,6 +582,23 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             run.getBomId(),
             run.getBomVersion()
         );
+    }
+
+    private WorkflowRevision resolveWorkflowRevision(String workflowId, String requestedRevisionId) {
+        if (requestedRevisionId == null || requestedRevisionId.isBlank()) {
+            return workflowRevisionRepository
+                .findTopByWorkflowIdAndStatusOrderByRevisionNoDesc(workflowId, "published")
+                .orElse(null);
+        }
+        WorkflowRevision revision = workflowRevisionRepository
+            .findByWorkflowRevisionIdAndWorkflowId(requestedRevisionId.trim(), workflowId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
+                "Workflow revision was not found for this workflow."));
+        if (!"published".equals(revision.getStatus())) {
+            throw new BusinessException(ErrorCode.CONFLICT,
+                "Retired workflow revisions cannot start new runs.");
+        }
+        return revision;
     }
 
     private static ProductionRunItemResponse toItemResponse(ProductionRunItem item) {
@@ -436,7 +619,9 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             item.isCancelled(),
             item.getCancelledBy(),
             item.getCancelledAt(),
-            item.getCancelReason()
+            item.getCancelReason(),
+            item.getProductionRunCorrectionId(),
+            item.getCancelledByCorrectionId()
         );
     }
 

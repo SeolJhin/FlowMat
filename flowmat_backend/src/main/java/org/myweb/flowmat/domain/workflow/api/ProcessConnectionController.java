@@ -45,7 +45,7 @@ public class ProcessConnectionController {
     @PutMapping("/{connectionId}")
     public ApiResponse<ProcessConnectionResponse> updateConnection(
         @PathVariable("connectionId") String connectionId,
-        @RequestBody ProcessConnectionUpdateRequest request
+        @Valid @RequestBody ProcessConnectionUpdateRequest request
     ) {
         return ApiResponse.ok(processConnectionService.updateConnection(connectionId, request));
     }

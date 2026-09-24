@@ -103,3 +103,12 @@ management:
 # GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
 # KAKAO_CLIENT_ID / KAKAO_CLIENT_SECRET
 # GOOGLE_REDIRECT_URI / KAKAO_REDIRECT_URI
+
+---
+spring:
+  config:
+    activate:
+      on-profile: "dev & !prod"
+  flyway:
+    init-sqls:
+      - SET flowmat.demo_seed_enabled = 'true'

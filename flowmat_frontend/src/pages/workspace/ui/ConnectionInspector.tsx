@@ -36,6 +36,9 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
   const [delayTimeSec, setDelayTimeSec] = useState('')
   const [lossRate, setLossRate] = useState('')
   const [priority, setPriority] = useState('')
+  const [conditionExpr, setConditionExpr] = useState('')
+  const [capacity, setCapacity] = useState('')
+  const [failurePolicy, setFailurePolicy] = useState<'stop' | 'skip' | 'retry'>('stop')
 
   useEffect(() => {
     if (focusLabel) setTimeout(() => labelRef.current?.focus(), 50)
@@ -50,6 +53,9 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
     setDelayTimeSec(edge.delayTimeSec !== null ? String(edge.delayTimeSec) : '')
     setLossRate(edge.lossRate !== null ? String(edge.lossRate) : '')
     setPriority(edge.priority !== null ? String(edge.priority) : '')
+    setConditionExpr(edge.conditionExpr ?? '')
+    setCapacity(edge.capacity !== null ? String(edge.capacity) : '')
+    setFailurePolicy(edge.failurePolicy)
   }, [edge])
 
   if (!edge) return null
@@ -66,6 +72,10 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
       delayTimeSec: delayTimeSec !== '' ? Number(delayTimeSec) : null,
       lossRate: lossRate !== '' ? Number(lossRate) : null,
       priority: priority !== '' ? Number(priority) : null,
+      conditionExpr: conditionExpr.trim(),
+      capacity: capacity !== '' ? Number(capacity) : null,
+      clearCapacity: capacity === '',
+      failurePolicy,
     })
   }
 
@@ -154,6 +164,26 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
               onChange={(e) => setPriority(e.target.value)}
               placeholder="0"
             />
+          </label>
+        </div>
+
+        <label style={{ display: 'grid', gap: '4px' }}>
+          <span>Condition expression (metadata)</span>
+          <input value={conditionExpr} onChange={(e) => setConditionExpr(e.target.value)} />
+        </label>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+          <label style={{ display: 'grid', gap: '4px' }}>
+            <span>Capacity</span>
+            <input type="number" min="0" step="0.01" value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="optional" />
+          </label>
+          <label style={{ display: 'grid', gap: '4px' }}>
+            <span>Failure policy (metadata)</span>
+            <select value={failurePolicy} onChange={(e) => setFailurePolicy(e.target.value as 'stop' | 'skip' | 'retry')}>
+              <option value="stop">stop</option>
+              <option value="skip">skip</option>
+              <option value="retry">retry</option>
+            </select>
           </label>
         </div>
 

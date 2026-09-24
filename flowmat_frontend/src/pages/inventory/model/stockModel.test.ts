@@ -45,6 +45,9 @@ describe('canReverse', () => {
     expect(canReverse(tx({ transactionType: 'quarantine' }), [])).toBe(false)
     expect(canReverse(tx({ transactionType: 'production_input' }), [])).toBe(false)
     expect(canReverse(tx({ transactionType: 'production_output' }), [])).toBe(false)
+    // A transfer is undone by moving the stock back.
+    expect(canReverse(tx({ transactionType: 'transfer_out' }), [])).toBe(false)
+    expect(canReverse(tx({ transactionType: 'transfer_in' }), [])).toBe(false)
   })
 })
 
