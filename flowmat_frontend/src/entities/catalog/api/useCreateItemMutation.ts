@@ -13,6 +13,11 @@ export interface CreateItemInput {
   itemStatus?: string
   /** "Y": stock and production of this item must name a LOT. */
   lotManageYn?: 'Y' | 'N'
+  /** Stock to keep across all records; omitted or 0 means not watched. */
+  safetyStockQty?: number
+  leadTimeDays?: number
+  /** Cost of one unit in the item's own unit. */
+  unitCost?: number
 }
 
 async function createItem(input: CreateItemInput): Promise<ItemDto> {

@@ -58,7 +58,7 @@ async function recordRunItem(page: Page, direction: 'input' | 'output', itemCode
   const lotSelect = page.getByLabel('LOT *')
   const value = await lotSelect.locator('option', { hasText: `LOT ${lotNo}` }).getAttribute('value')
   await lotSelect.selectOption(value ?? '')
-  await page.getByRole('button', { name: 'Record' }).click()
+  await page.getByRole('button', { name: 'Record', exact: true }).click()
   await expect(page.getByRole('row', { name: new RegExp(`LOT ${lotNo}`) })).toBeVisible()
 }
 
@@ -81,6 +81,9 @@ test('a run links its input and output LOTs, and the LOTs tab traces both ways',
   // Run: 10 kg of the raw LOT in, 12 kg of the dough LOT out.
   await page.goto(`/projects/${PROJECT}/runs`)
   await page.getByRole('spinbutton', { name: 'Planned output qty *' }).fill('12')
+  // Runs start from a published workflow revision.
+  await page.getByRole('button', { name: 'Publish current workflow' }).click()
+  await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: 'Start' }).click()
   await expect(page.getByRole('heading', { name: /RUN-/ })).toBeVisible()
   const runUrl = page.url()

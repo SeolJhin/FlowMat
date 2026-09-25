@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: './e2e',
   testIgnore: [
     ...(process.env.STAGING_OAUTH_CALLBACK_URL ? [] : ['**/staging-oauth.spec.ts']),
-    ...(process.env.REAL_API_E2E ? [] : ['**/backend-contract.spec.ts', '**/bom-lot-flow.spec.ts', '**/lot-genealogy.spec.ts']),
+    ...(process.env.REAL_API_E2E ? [] : ['**/backend-contract.spec.ts', '**/bom-lot-flow.spec.ts', '**/lot-genealogy.spec.ts', '**/inventory-reports.spec.ts']),
   ],
   fullyParallel: true,
   // Real-API specs all log in as demo-owner against one backend; concurrent logins of the same user currently knock

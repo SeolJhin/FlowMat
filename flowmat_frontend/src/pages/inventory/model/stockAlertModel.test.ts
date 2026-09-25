@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StockAlertDto } from '../../../shared/types/api'
-import { describeAlert, orderAlerts } from './stockAlertModel'
+import { describeAlert, orderAlerts, suggestedOrder } from './stockAlertModel'
 
 function alert(id: string, patch: Partial<StockAlertDto> = {}): StockAlertDto {
   return {
@@ -48,5 +48,17 @@ describe('stock alerts', () => {
     expect(describeAlert(alert('e', { ...expiry, actualValue: -1 }))).toBe(
       'FLOUR · Flour (LOT L2): expired 1 day ago; scrap it, it cannot go into production',
     )
+  })
+})
+
+describe('suggestedOrder', () => {
+  it('adds what is used during the lead time to the shortfall', () => {
+    expect(suggestedOrder({ shortageQuantity: 5, leadTimeDays: 10 }, 2)).toBe(25)
+  })
+
+  it('is the shortfall without a daily use or a lead time', () => {
+    expect(suggestedOrder({ shortageQuantity: 5, leadTimeDays: null }, 2)).toBe(5)
+    expect(suggestedOrder({ shortageQuantity: 5, leadTimeDays: 10 }, 0)).toBe(5)
+    expect(suggestedOrder({ shortageQuantity: 5, leadTimeDays: 10 }, undefined)).toBe(5)
   })
 })

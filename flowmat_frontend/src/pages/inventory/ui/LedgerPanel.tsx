@@ -1,24 +1,36 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useInventoriesQuery } from '../../../entities/inventory/api/useInventoriesQuery'
-import { useProjectTransactionsQuery } from '../../../entities/inventory/api/useProjectTransactionsQuery'
+import { fetchLedgerPage, useLedgerSearchQuery } from '../../../entities/inventory/api/useLedgerSearch'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
-import type { ItemDto } from '../../../shared/types/api'
-import { EMPTY_LEDGER_FILTER, filterLedger, ledgerCsv, ledgerTypes, type LedgerFilter } from '../model/ledgerModel'
+import type { InventoryTransactionDto, ItemDto } from '../../../shared/types/api'
+import { EMPTY_LEDGER_FILTER, LEDGER_TYPES, ledgerCsv, toSearchParams, type LedgerFilter } from '../model/ledgerModel'
 
 const cell = { padding: '6px 6px' } as const
 const num = { ...cell, textAlign: 'right' } as const
-const PAGE = 200
+const CSV_PAGE = 500
+const CSV_MAX_ROWS = 25_000
 
 /**
- * Every stock movement of the project in one list (docs/domain/stock-ledger.md): narrowed by type, item, dates and text,
- * and downloadable as CSV exactly as filtered.
+ * Every stock movement of the project, filtered and paged on the server (docs/domain/stock-ledger.md): narrowed by type,
+ * item, dates and text, and downloadable as CSV exactly as filtered.
  */
 export function LedgerPanel({ projectId, items }: { projectId: string; items: ItemDto[] }) {
-  const transactionsQuery = useProjectTransactionsQuery(projectId)
   const inventoriesQuery = useInventoriesQuery(projectId)
   const [filter, setFilter] = useState<LedgerFilter>(EMPTY_LEDGER_FILTER)
-  const [shown, setShown] = useState(PAGE)
+  const [textInput, setTextInput] = useState('')
+  const [exporting, setExporting] = useState(false)
+  const [exportNote, setExportNote] = useState<string | null>(null)
+
+  // Search once typing pauses instead of on every key.
+  useEffect(() => {
+    const timer = setTimeout(() => setFilter((current) => (current.text === textInput ? current : { ...current, text: textInput })), 300)
+    return () => clearTimeout(timer)
+  }, [textInput])
+
+  const params = useMemo(() => toSearchParams(filter), [filter])
+  const ledgerQuery = useLedgerSearchQuery(projectId, params)
+  const rows = ledgerQuery.data?.pages.flatMap((page) => page.items) ?? []
 
   const itemLabel = useMemo(() => {
     const labels = new Map(items.map((item) => [item.itemId, `${item.itemCode} · ${item.itemName}`]))
@@ -31,23 +43,34 @@ export function LedgerPanel({ projectId, items }: { projectId: string; items: It
     return (inventoryId: string) => places.get(inventoryId) ?? ''
   }, [inventoriesQuery.data])
 
-  const all = transactionsQuery.data ?? []
-  const rows = filterLedger(all, filter)
-  const types = ledgerTypes(all)
-
   function update(patch: Partial<LedgerFilter>) {
     setFilter((current) => ({ ...current, ...patch }))
-    setShown(PAGE)
   }
 
-  function download() {
-    const blob = new Blob([ledgerCsv(rows, itemLabel, place)], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `stock-movements-${new Date().toISOString().slice(0, 10)}.csv`
-    link.click()
-    URL.revokeObjectURL(url)
+  async function download() {
+    setExporting(true)
+    setExportNote(null)
+    try {
+      const all: InventoryTransactionDto[] = []
+      let cursor: string | null = null
+      do {
+        const page = await fetchLedgerPage(projectId, params, cursor, CSV_PAGE)
+        all.push(...page.items)
+        cursor = page.nextCursor
+      } while (cursor && all.length < CSV_MAX_ROWS)
+      if (cursor) setExportNote(`Only the newest ${all.length} movements were exported; narrow the filter for the rest.`)
+      const blob = new Blob([ledgerCsv(all, itemLabel, place)], { type: 'text/csv;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `stock-movements-${new Date().toISOString().slice(0, 10)}.csv`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      setExportNote(errorMessage(error, 'The export failed.'))
+    } finally {
+      setExporting(false)
+    }
   }
 
   return (
@@ -57,7 +80,7 @@ export function LedgerPanel({ projectId, items }: { projectId: string; items: It
           <span>Type</span>
           <select value={filter.type} onChange={(e) => update({ type: e.target.value })}>
             <option value="">All types</option>
-            {types.map((type) => <option key={type} value={type}>{type}</option>)}
+            {LEDGER_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
           </select>
         </label>
         <label style={{ display: 'grid', gap: 4 }}>
@@ -77,17 +100,26 @@ export function LedgerPanel({ projectId, items }: { projectId: string; items: It
         </label>
         <label style={{ display: 'grid', gap: 4, flex: 1, minWidth: 160 }}>
           <span>Search</span>
-          <input value={filter.text} onChange={(e) => update({ text: e.target.value })} placeholder="note, reference or who" />
+          <input value={textInput} onChange={(e) => setTextInput(e.target.value)} placeholder="note, reference or who" />
         </label>
-        <button type="button" onClick={() => update(EMPTY_LEDGER_FILTER)}>Clear</button>
-        <button type="button" disabled={rows.length === 0} onClick={download}>Download CSV ({rows.length})</button>
+        <button
+          type="button"
+          onClick={() => {
+            setTextInput('')
+            setFilter(EMPTY_LEDGER_FILTER)
+          }}
+        >
+          Clear
+        </button>
+        <button type="button" disabled={rows.length === 0 || exporting} onClick={() => void download()}>
+          {exporting ? 'Preparing CSV...' : 'Download CSV'}
+        </button>
       </div>
+      {exportNote && <p role="status" style={{ margin: 0, fontSize: 12 }}>{exportNote}</p>}
 
-      {transactionsQuery.isLoading && <p>Loading movements...</p>}
-      {transactionsQuery.isError && (
-        <p style={{ color: '#dc2626' }}>{errorMessage(transactionsQuery.error, 'Failed to load movements.')}</p>
-      )}
-      {!transactionsQuery.isLoading && rows.length === 0 && <p className="inspector-hint">No movements match.</p>}
+      {ledgerQuery.isLoading && <p>Loading movements...</p>}
+      {ledgerQuery.isError && <p style={{ color: '#dc2626' }}>{errorMessage(ledgerQuery.error, 'Failed to load movements.')}</p>}
+      {!ledgerQuery.isLoading && rows.length === 0 && <p className="inspector-hint">No movements match.</p>}
       {rows.length > 0 && (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
@@ -104,7 +136,7 @@ export function LedgerPanel({ projectId, items }: { projectId: string; items: It
             </tr>
           </thead>
           <tbody>
-            {rows.slice(0, shown).map((row) => (
+            {rows.map((row) => (
               <tr key={row.inventoryTransactionId} style={{ borderBottom: '1px solid var(--border)' }}>
                 <td style={cell}>{row.createdAt ? new Date(row.createdAt).toLocaleString() : '-'}</td>
                 <td style={cell}>{row.transactionType}</td>
@@ -124,9 +156,9 @@ export function LedgerPanel({ projectId, items }: { projectId: string; items: It
           </tbody>
         </table>
       )}
-      {rows.length > shown && (
-        <button type="button" onClick={() => setShown((n) => n + PAGE)}>
-          Show more ({rows.length - shown} left)
+      {ledgerQuery.hasNextPage && (
+        <button type="button" disabled={ledgerQuery.isFetchingNextPage} onClick={() => void ledgerQuery.fetchNextPage()}>
+          {ledgerQuery.isFetchingNextPage ? 'Loading...' : 'Show more'}
         </button>
       )}
     </section>

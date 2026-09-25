@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import type { ProductionRunItemDto, RunCorrectionLineDto } from '../../../shared/types/api'
+import type { InventoryDto, LotDto, ProductionRunItemDto, RunCorrectionLineDto } from '../../../shared/types/api'
 import {
   buildCorrectionRequest,
   describeCorrectionLine,
+  orderStockForPick,
   voidableRecordings,
   type CorrectionDraft,
 } from './correctionModel'
@@ -107,5 +108,19 @@ describe('correction lines', () => {
     expect(describeCorrectionLine(line({ kind: 'add_item', direction: 'input', itemId: 'salt', qty: 1, unit: 'kg' }), items, label, qty))
       .toBe('Add input SALT 1 kg')
     expect(describeCorrectionLine(line({ kind: 'set_output_qty', beforeQty: 4, afterQty: 6 }), items, label, qty)).toBe('Output 4 → 6')
+  })
+})
+
+describe('stock offered for an added recording', () => {
+  const inv = (id: string, lotId: string | null) => ({ inventoryId: id, lotId }) as unknown as InventoryDto
+  const lot = (lotId: string, expiryDate: string | null, expired = false) => ({ lotId, expiryDate, expired }) as unknown as LotDto
+
+  it('puts the first-expiring LOT first, undated next and expired LOTs last', () => {
+    const picks = orderStockForPick(
+      [inv('none', null), inv('late', 'L2'), inv('gone', 'L3'), inv('soon', 'L1'), inv('undated', 'L4')],
+      [lot('L1', '2026-10-01'), lot('L2', '2026-12-01'), lot('L3', '2026-09-01', true), lot('L4', null)],
+    )
+    expect(picks.map((pick) => pick.inventory.inventoryId)).toEqual(['soon', 'late', 'none', 'undated', 'gone'])
+    expect(picks[4]).toMatchObject({ expired: true, expiryDate: '2026-09-01' })
   })
 })

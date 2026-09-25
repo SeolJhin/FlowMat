@@ -366,8 +366,21 @@ function BomDetail({
                         <span style={{ opacity: 0.6 }}> ({formatQty(r.requiredQuantity)} {r.lineUnit})</span>
                       )}
                     </td>
+                    <td style={{ ...cell, textAlign: 'right', opacity: r.lineCost == null ? 0.5 : 1 }}>
+                      {r.lineCost == null ? 'no cost' : formatQty(r.lineCost)}
+                    </td>
                   </tr>
                 ))}
+                <tr>
+                  <td style={cell}><strong>Material cost</strong></td>
+                  <td style={cell} />
+                  <td style={{ ...cell, textAlign: 'right' }}>
+                    <strong>{formatQty(requirementsQuery.data.materialCost ?? 0)}</strong>
+                    {requirementsQuery.data.costComplete === false && (
+                      <span style={{ display: 'block', fontSize: 11, color: '#b45309' }}>some materials have no unit cost</span>
+                    )}
+                  </td>
+                </tr>
               </tbody>
             </table>
           )}

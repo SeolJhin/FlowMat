@@ -1,4 +1,4 @@
-import type { InventoryTransactionDto } from '../../../shared/types/api'
+import type { InventoryDto, InventoryTransactionDto, ItemDto } from '../../../shared/types/api'
 
 /** Movements a user can send from the Stock tab (docs/domain/inventory-bom-lot-contract.md §2). */
 export const MOVEMENT_TYPES = ['receipt', 'issue', 'reserve', 'release', 'adjustment'] as const
@@ -46,4 +46,21 @@ export function reversedIds(history: InventoryTransactionDto[]): Set<string> {
       .filter((tx) => tx.transactionType === 'reversal' && tx.referenceType === 'inventory_transaction' && tx.referenceId)
       .map((tx) => tx.referenceId as string),
   )
+}
+
+/**
+ * What the stock on hand is worth at the items' unit costs (docs/domain/material-cost.md). Records of items without a
+ * unit cost are counted separately rather than as zero, so a low total is not mistaken for a complete one.
+ */
+export function stockValue(inventories: InventoryDto[], items: ItemDto[]): { total: number; uncosted: number } {
+  const costById = new Map(items.map((item) => [item.itemId, item.unitCost ?? 0]))
+  let total = 0
+  let uncosted = 0
+  for (const row of inventories) {
+    if (row.quantity === 0) continue
+    const cost = costById.get(row.itemId) ?? 0
+    if (cost > 0) total += row.quantity * cost
+    else uncosted += 1
+  }
+  return { total: Math.round(total * 10_000) / 10_000, uncosted }
 }

@@ -131,7 +131,59 @@ class StockAlertIntegrationTest extends IntegrationTestSupport {
         assertThat(alertsOf(past, true)).isEmpty();
     }
 
+    @Test
+    void theReorderListCountsOnlyUsableStockAgainstSafetyStock() throws Exception {
+        // Safety stock and lead time go through the items API; negatives are refused.
+        String code = "RO-" + suffix().substring(0, 8);
+        call(post("/items"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"itemCode\":\"" + code + "X\",\"itemName\":\"x\","
+            + "\"safetyStockQty\":-1}").andExpect(status().isBadRequest());
+        JsonNode created = objectMapper.readTree(call(post("/items"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"itemCode\":\"" + code
+            + "\",\"itemName\":\"reorder salt\",\"unitId\":\"unit_kg\",\"safetyStockQty\":20,\"leadTimeDays\":3}")
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
+        String salt = created.path("itemId").asText();
+        assertThat(created.path("safetyStockQty").decimalValue()).isEqualByComparingTo("20");
+
+        // 8 usable + 5 quarantined: only 8 counts.
+        id(call(post("/inventories"), stock(salt, "8", "0", null)), "inventoryId");
+        String held = id(call(post("/inventories"), stock(salt, "5", "0", null)), "inventoryId");
+        call(post("/inventory-transactions"), "{\"inventoryId\":\"" + held + "\",\"transactionType\":\"quarantine\",\"requestId\":\""
+            + UUID.randomUUID() + "\"}").andExpect(status().isOk());
+
+        // A LOT item whose only stock has expired has nothing usable.
+        String milk = item("Y");
+        setSafety(milk, "10");
+        lotStock(milk, LocalDate.now().minusDays(1), "30");
+
+        // Enough stock: not listed.
+        String sugar = item();
+        setSafety(sugar, "5");
+        id(call(post("/inventories"), stock(sugar, "10", "0", null)), "inventoryId");
+
+        List<JsonNode> lines = new ArrayList<>();
+        JsonNode body = objectMapper.readTree(call(get("/stock-alerts/reorder?projectId=" + DEMO_PROJECT))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
+        body.forEach(line -> {
+            String itemId = line.path("itemId").asText();
+            if (itemId.equals(salt) || itemId.equals(milk) || itemId.equals(sugar)) {
+                lines.add(line);
+            }
+        });
+        // Milk is short by all of its safety stock (100%), salt by 60%.
+        assertThat(lines).extracting(line -> line.path("itemId").asText()).containsExactly(milk, salt);
+        assertThat(lines.get(1).path("availableQuantity").decimalValue()).isEqualByComparingTo("8");
+        assertThat(lines.get(1).path("shortageQuantity").decimalValue()).isEqualByComparingTo("12");
+        assertThat(lines.get(1).path("leadTimeDays").asInt()).isEqualTo(3);
+        assertThat(lines.get(1).path("unit").asText()).isEqualTo("kg");
+        assertThat(lines.get(0).path("availableQuantity").decimalValue()).isEqualByComparingTo("0");
+    }
+
     // ---- helpers ----
+
+    private void setSafety(String itemId, String quantity) {
+        Item item = itemRepository.findById(itemId).orElseThrow();
+        item.setSafetyStockQty(new BigDecimal(quantity));
+        itemRepository.save(item);
+    }
 
     private String lotStock(String itemId, LocalDate expiryDate, String quantity) throws Exception {
         String lotId = id(call(post("/lots"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"itemId\":\"" + itemId

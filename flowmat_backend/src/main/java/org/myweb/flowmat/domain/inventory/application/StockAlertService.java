@@ -18,6 +18,7 @@ import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.domain.entity.UnitMaster;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
+import org.myweb.flowmat.domain.inventory.api.dto.response.ReorderLineResponse;
 import org.myweb.flowmat.domain.inventory.api.dto.response.StockAlertResponse;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
@@ -44,6 +45,7 @@ public class StockAlertService {
 
     static final String SYSTEM = "system";
     private static final String OPEN = "N";
+    private static final String NOT_DELETED = "N";
 
     private final StockAlertRepository stockAlertRepository;
     private final InventoryRepository inventoryRepository;
@@ -134,6 +136,51 @@ public class StockAlertService {
                 alert.getResolvedAt()
             );
         }).toList();
+    }
+
+    /**
+     * Items whose usable stock over all their records is below their safety stock, the biggest shortfall (as a share of
+     * the safety stock) first. Usable is what could go into production: not quarantined, and not of a closed or expired
+     * LOT. Worked out when asked, so nothing is stored.
+     */
+    @Transactional(readOnly = true)
+    public List<ReorderLineResponse> reorderList(String projectId) {
+        projectAccessService.requireProjectReadAccess(projectId);
+        List<Item> watched = itemRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(projectId, NOT_DELETED).stream()
+            .filter(item -> item.getSafetyStockQty() != null && item.getSafetyStockQty().signum() > 0)
+            .toList();
+        if (watched.isEmpty()) {
+            return List.of();
+        }
+        List<Inventory> rows = inventoryRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(projectId, NOT_DELETED);
+        LocalDate today = LocalDate.now();
+        Map<String, LotMaster> lots = byId(lotMasterRepository.findAllById(ids(rows.stream().map(Inventory::getLotId))), LotMaster::getLotId);
+        Map<String, BigDecimal> usable = new java.util.HashMap<>();
+        for (Inventory row : rows) {
+            if ("quarantined".equals(row.getInventoryStatus())) {
+                continue;
+            }
+            LotMaster lot = row.getLotId() == null ? null : lots.get(row.getLotId());
+            if (lot != null && ("closed".equals(lot.getLotStatus()) || lot.isExpiredOn(today))) {
+                continue;
+            }
+            usable.merge(row.getItemId(), zeroIfNull(row.getAvailableQuantity()), BigDecimal::add);
+        }
+        Map<String, String> units = StreamSupport.stream(
+                unitMasterRepository.findAllById(ids(watched.stream().map(Item::getUnitId))).spliterator(), false)
+            .collect(Collectors.toMap(UnitMaster::getUnitId, UnitMaster::getUnitCode, (first, second) -> first));
+        return watched.stream()
+            .map(item -> {
+                BigDecimal available = usable.getOrDefault(item.getItemId(), BigDecimal.ZERO);
+                return new ReorderLineResponse(item.getItemId(), item.getItemCode(), item.getItemName(), units.get(item.getUnitId()),
+                    item.getSafetyStockQty(), available, item.getSafetyStockQty().subtract(available), item.getLeadTimeDays());
+            })
+            .filter(line -> line.shortageQuantity().signum() > 0)
+            .sorted(java.util.Comparator.comparing(
+                    (ReorderLineResponse line) -> line.shortageQuantity().divide(line.safetyStockQty(), 6, java.math.RoundingMode.HALF_UP))
+                .reversed()
+                .thenComparing(ReorderLineResponse::itemCode))
+            .toList();
     }
 
     private void sync(Inventory inventory, String type, boolean breached, BigDecimal threshold, BigDecimal actual,

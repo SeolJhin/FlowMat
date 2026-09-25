@@ -1,6 +1,7 @@
 package org.myweb.flowmat.domain.catalog.api.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
+import java.math.BigDecimal;
 
 public record ItemCreateRequest(
     @NotBlank String projectId,
@@ -12,6 +13,11 @@ public record ItemCreateRequest(
     String unitId,
     String itemStatus,
     /** "Y": stock, receipts and production of this item must name a LOT. Defaults to "N". */
-    String lotManageYn
+    String lotManageYn,
+    /** Stock to keep across all records; 0 or empty means not watched. */
+    BigDecimal safetyStockQty,
+    Integer leadTimeDays,
+    /** Cost of one unit in the item's unit; omitted means not known. */
+    BigDecimal unitCost
 ) {
 }

@@ -10,20 +10,24 @@ import type { ItemDto } from '../../../shared/types/api'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { StockPanel } from './StockPanel'
 import { CountPanel } from './CountPanel'
-import { LedgerPanel } from './LedgerPanel'
+import { MovementsTab } from './MovementsTab'
 import { UnitsPanel } from './UnitsPanel'
 import { LotPanel } from './LotPanel'
 import { BomPanel } from './BomPanel'
 import { EquipmentPanel } from './EquipmentPanel'
+import { QualityPanel } from './QualityPanel'
+import { StockAnalysisPanel } from './StockAnalysisPanel'
 
-const TABS = ['items', 'stock', 'count', 'movements', 'lots', 'boms', 'units', 'equipment'] as const
+const TABS = ['items', 'stock', 'count', 'movements', 'analysis', 'lots', 'quality', 'boms', 'units', 'equipment'] as const
 type Tab = (typeof TABS)[number]
 const TAB_LABELS: Record<Tab, string> = {
   items: 'Items',
   stock: 'Stock',
   count: 'Count',
   movements: 'Movements',
+  analysis: 'Analysis',
   lots: 'LOTs',
+  quality: 'Quality',
   boms: 'BOMs',
   units: 'Units',
   equipment: 'Equipment',
@@ -59,6 +63,9 @@ export function InventoryRoute() {
     unitId: '',
     itemStatus: 'active',
     lotManageYn: false,
+    safetyStockQty: '',
+    leadTimeDays: '',
+    unitCost: '',
   }
   const [form, setForm] = useState(EMPTY_ITEM_FORM)
 
@@ -79,7 +86,22 @@ export function InventoryRoute() {
       unitId: item.unitId ?? '',
       itemStatus: item.itemStatus,
       lotManageYn: item.lotManageYn === 'Y',
+      safetyStockQty: item.safetyStockQty ? String(item.safetyStockQty) : '',
+      leadTimeDays: item.leadTimeDays != null ? String(item.leadTimeDays) : '',
+      unitCost: item.unitCost ? String(item.unitCost) : '',
     })
+  }
+
+  /** Blank safety stock or unit cost means "none" (0 when editing); blank lead time is left out. */
+  function reorderFields(creating: boolean) {
+    const safety = form.safetyStockQty.trim()
+    const lead = form.leadTimeDays.trim()
+    const cost = form.unitCost.trim()
+    return {
+      safetyStockQty: safety ? Number(safety) : creating ? undefined : 0,
+      leadTimeDays: lead ? Number(lead) : undefined,
+      unitCost: cost ? Number(cost) : creating ? undefined : 0,
+    }
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -95,6 +117,7 @@ export function InventoryRoute() {
           unitId: form.unitId,
           itemStatus: form.itemStatus,
           lotManageYn: form.lotManageYn ? 'Y' : 'N',
+          ...reorderFields(false),
         })
       } else {
         await createMutation.mutateAsync({
@@ -106,6 +129,7 @@ export function InventoryRoute() {
           unitId: form.unitId || undefined,
           itemStatus: form.itemStatus,
           lotManageYn: form.lotManageYn ? 'Y' : 'N',
+          ...reorderFields(true),
         })
       }
       resetForm()
@@ -155,8 +179,10 @@ export function InventoryRoute() {
 
       {tab === 'stock' && <StockPanel projectId={projectId} items={items} />}
       {tab === 'count' && <CountPanel projectId={projectId} items={items} />}
-      {tab === 'movements' && <LedgerPanel projectId={projectId} items={items} />}
+      {tab === 'movements' && <MovementsTab projectId={projectId} items={items} />}
+      {tab === 'analysis' && <StockAnalysisPanel projectId={projectId} />}
       {tab === 'lots' && <LotPanel projectId={projectId} items={items} />}
+      {tab === 'quality' && <QualityPanel projectId={projectId} items={items} />}
       {tab === 'boms' && <BomPanel projectId={projectId} items={items} units={units} />}
       {tab === 'units' && <UnitsPanel canManage={canManageMasterData} />}
       {tab === 'equipment' && <EquipmentPanel projectId={projectId} />}
@@ -282,6 +308,34 @@ export function InventoryRoute() {
                 onChange={(e) => setForm((f) => ({ ...f, lotManageYn: e.target.checked }))}
               />
               <span>Track stock per LOT</span>
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span>Safety stock</span>
+                <input
+                  inputMode="decimal"
+                  value={form.safetyStockQty}
+                  placeholder="not watched"
+                  onChange={(e) => setForm((f) => ({ ...f, safetyStockQty: e.target.value }))}
+                />
+              </label>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span>Lead time (days)</span>
+                <input
+                  inputMode="numeric"
+                  value={form.leadTimeDays}
+                  onChange={(e) => setForm((f) => ({ ...f, leadTimeDays: e.target.value }))}
+                />
+              </label>
+            </div>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span>Unit cost</span>
+              <input
+                inputMode="decimal"
+                value={form.unitCost}
+                placeholder="per unit of this item"
+                onChange={(e) => setForm((f) => ({ ...f, unitCost: e.target.value }))}
+              />
             </label>
             <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
               <button type="submit" disabled={isPending}>

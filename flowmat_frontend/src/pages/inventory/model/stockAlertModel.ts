@@ -1,4 +1,4 @@
-import type { StockAlertDto } from '../../../shared/types/api'
+import type { ReorderLineDto, StockAlertDto } from '../../../shared/types/api'
 
 const SEVERITY_ORDER: Record<StockAlertDto['severity'], number> = { critical: 0, warning: 1, info: 2 }
 
@@ -34,4 +34,16 @@ function expiryText(daysLeft: number): string {
   if (daysLeft < 0) return `expired ${-daysLeft} day${daysLeft === -1 ? '' : 's'} ago; scrap it, it cannot go into production`
   if (daysLeft === 0) return 'expires today'
   return `expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`
+}
+
+/**
+ * How much to order to get back to safety stock once the order arrives: the shortfall now plus what will be used
+ * while waiting for it (daily use × lead time). Without a known daily use or lead time it is just the shortfall.
+ */
+export function suggestedOrder(
+  line: Pick<ReorderLineDto, 'shortageQuantity' | 'leadTimeDays'>,
+  dailyUse: number | null | undefined,
+): number {
+  const duringLeadTime = dailyUse && line.leadTimeDays ? dailyUse * line.leadTimeDays : 0
+  return Math.max(0, line.shortageQuantity + duringLeadTime)
 }

@@ -1,6 +1,7 @@
 package org.myweb.flowmat;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalToIgnoringCase;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
@@ -12,6 +13,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
@@ -217,6 +220,57 @@ class QualityIntegrationTest extends IntegrationTestSupport {
         callAs(VIEWER, post("/defects/" + defectId + "/resolve"), "{\"actionTaken\":\"Polished\"}").andExpect(status().isForbidden());
         callAs(OUTSIDER, get("/defects?projectId=" + DEMO_PROJECT), null).andExpect(status().isForbidden());
         callAs(EDITOR, post("/defects/" + defectId + "/resolve"), "{\"actionTaken\":\"Polished\"}").andExpect(status().isOk());
+    }
+
+    @Test
+    void theSummaryCountsInspectionsAndDefectsInTheWindow() throws Exception {
+        String from = OffsetDateTime.now(ZoneOffset.UTC).truncatedTo(ChronoUnit.MICROS).toString();
+        String loose = item(false);
+        String tag = suffix().substring(0, 6);
+        String moisture = "Moist-" + tag;
+        String crack = "Crack-" + tag;
+
+        inspect("{\"itemId\":\"" + loose + "\",\"inspectionType\":\"" + moisture + "\",\"measuredValue\":5,\"standardMax\":4}")
+            .andExpect(status().isOk());
+        inspect("{\"itemId\":\"" + loose + "\",\"inspectionType\":\"" + moisture.toUpperCase() + "\",\"result\":\"fail\"}")
+            .andExpect(status().isOk());
+        for (int i = 0; i < 2; i++) {
+            inspect("{\"itemId\":\"" + loose + "\",\"inspectionType\":\"Visual-" + tag + "\",\"result\":\"pass\"}")
+                .andExpect(status().isOk());
+        }
+        String fixed = id(defect("{\"itemId\":\"" + loose + "\",\"quantity\":2,\"defectType\":\"" + crack + "\"}")
+            .andExpect(status().isOk()), "defectLogId");
+        defect("{\"itemId\":\"" + loose + "\",\"quantity\":1,\"defectType\":\"" + crack.toLowerCase() + "\"}")
+            .andExpect(status().isOk());
+        defect("{\"itemId\":\"" + loose + "\",\"quantity\":3,\"defectType\":\"Burn-" + tag + "\"}").andExpect(status().isOk());
+        call(post("/defects/" + fixed + "/resolve"), "{\"actionTaken\":\"Reworked\"}").andExpect(status().isOk());
+
+        // Names are grouped ignoring case; checks that never failed are left out of the failures.
+        call(get("/quality/summary").param("projectId", DEMO_PROJECT).param("from", from))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.inspections").value(4))
+            .andExpect(jsonPath("$.data.passed").value(2))
+            .andExpect(jsonPath("$.data.failed").value(2))
+            .andExpect(jsonPath("$.data.passRate").value(0.5))
+            .andExpect(jsonPath("$.data.openDefects").value(2))
+            .andExpect(jsonPath("$.data.resolvedDefects").value(1))
+            .andExpect(jsonPath("$.data.defectsByType[0].defectType").value(equalToIgnoringCase(crack)))
+            .andExpect(jsonPath("$.data.defectsByType[0].count").value(2))
+            .andExpect(jsonPath("$.data.defectsByType[0].open").value(1))
+            .andExpect(jsonPath("$.data.defectsByType[1].count").value(1))
+            .andExpect(jsonPath("$.data.failuresByCheck.length()").value(1))
+            .andExpect(jsonPath("$.data.failuresByCheck[0].inspectionType").value(equalToIgnoringCase(moisture)))
+            .andExpect(jsonPath("$.data.failuresByCheck[0].inspections").value(2))
+            .andExpect(jsonPath("$.data.failuresByCheck[0].failed").value(2));
+
+        // A window with nothing in it has no pass rate.
+        call(get("/quality/summary").param("projectId", DEMO_PROJECT).param("to", from))
+            .andExpect(status().isOk());
+        call(get("/quality/summary").param("projectId", DEMO_PROJECT).param("from", from).param("to", from))
+            .andExpect(jsonPath("$.data.inspections").value(0))
+            .andExpect(jsonPath("$.data.passRate").value(nullValue()))
+            .andExpect(jsonPath("$.data.defectsByType.length()").value(0));
+        callAs(OUTSIDER, get("/quality/summary").param("projectId", DEMO_PROJECT), null).andExpect(status().isForbidden());
     }
 
     // ---- helpers ----

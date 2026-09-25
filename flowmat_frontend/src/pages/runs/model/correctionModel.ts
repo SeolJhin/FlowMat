@@ -1,4 +1,6 @@
 import type {
+  InventoryDto,
+  LotDto,
   ProductionRunItemDto,
   RunCorrectionLineDto,
   RunCorrectionLineRequest,
@@ -100,4 +102,30 @@ export function correctionStatusLabel(status: RunCorrectionStatus): string {
     case 'rejected':
       return 'rejected'
   }
+}
+
+/** A stock record offered for an added recording, with what its LOT's expiry means today. */
+export interface StockPick {
+  inventory: InventoryDto
+  expiryDate: string | null
+  expired: boolean
+}
+
+/**
+ * Stock records to offer for an added recording, first-expiring LOT first (FEFO): records whose LOT has no expiry date
+ * come after, and expired LOTs last, since the server refuses them as inputs. Otherwise the given order is kept.
+ */
+export function orderStockForPick(stock: InventoryDto[], lots: LotDto[]): StockPick[] {
+  const lotById = new Map(lots.map((lot) => [lot.lotId, lot]))
+  const picks = stock.map((inventory, index) => {
+    const lot = inventory.lotId ? lotById.get(inventory.lotId) : undefined
+    return { inventory, expiryDate: lot?.expiryDate ?? null, expired: Boolean(lot?.expired), index }
+  })
+  const rank = (pick: (typeof picks)[number]) => (pick.expired ? 2 : pick.expiryDate ? 0 : 1)
+  return picks
+    .sort(
+      (a, b) =>
+        rank(a) - rank(b) || (a.expiryDate && b.expiryDate ? a.expiryDate.localeCompare(b.expiryDate) : 0) || a.index - b.index,
+    )
+    .map(({ inventory, expiryDate, expired }) => ({ inventory, expiryDate, expired }))
 }

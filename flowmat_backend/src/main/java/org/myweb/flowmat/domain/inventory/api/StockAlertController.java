@@ -2,6 +2,7 @@ package org.myweb.flowmat.domain.inventory.api;
 
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.inventory.api.dto.response.ReorderLineResponse;
 import org.myweb.flowmat.domain.inventory.api.dto.response.StockAlertResponse;
 import org.myweb.flowmat.domain.inventory.application.StockAlertService;
 import org.myweb.flowmat.global.response.ApiResponse;
@@ -24,5 +25,11 @@ public class StockAlertController {
         @RequestParam(value = "openOnly", defaultValue = "true") boolean openOnly
     ) {
         return ApiResponse.ok(stockAlertService.listAlerts(projectId, openOnly));
+    }
+
+    /** Items below their safety stock over all their records, biggest shortfall first. */
+    @GetMapping("/reorder")
+    public ApiResponse<List<ReorderLineResponse>> reorderList(@RequestParam("projectId") String projectId) {
+        return ApiResponse.ok(stockAlertService.reorderList(projectId));
     }
 }

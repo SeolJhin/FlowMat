@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { InventoryTransactionDto } from '../../../shared/types/api'
-import { EMPTY_LEDGER_FILTER, filterLedger, ledgerCsv, ledgerTypes } from './ledgerModel'
+import { EMPTY_LEDGER_FILTER, LEDGER_TYPES, ledgerCsv, toSearchParams } from './ledgerModel'
 
 function tx(id: string, patch: Partial<InventoryTransactionDto> = {}): InventoryTransactionDto {
   return {
@@ -26,31 +26,21 @@ function tx(id: string, patch: Partial<InventoryTransactionDto> = {}): Inventory
   }
 }
 
-const noonLocal = (day: string) => new Date(`${day}T12:00:00`).toISOString()
-
 describe('movement ledger', () => {
-  const rows = [
-    tx('a', { transactionType: 'issue', createdAt: noonLocal('2026-09-20'), note: 'To line 2' }),
-    tx('b', { itemId: 'salt', createdAt: noonLocal('2026-09-22'), referenceType: 'inventory_count', referenceId: 'count-9' }),
-    tx('c', { transactionType: 'transfer_out', createdAt: noonLocal('2026-09-24'), createdBy: 'kim' }),
-    tx('d', { createdAt: null }),
-  ]
-
-  it('narrows by type, item, date range and text', () => {
-    const ids = (filter: Partial<typeof EMPTY_LEDGER_FILTER>) =>
-      filterLedger(rows, { ...EMPTY_LEDGER_FILTER, ...filter }).map((row) => row.inventoryTransactionId)
-    expect(ids({})).toEqual(['a', 'b', 'c', 'd'])
-    expect(ids({ type: 'issue' })).toEqual(['a'])
-    expect(ids({ itemId: 'salt' })).toEqual(['b'])
-    expect(ids({ from: '2026-09-21', to: '2026-09-23' })).toEqual(['b'])
-    expect(ids({ from: '2026-09-24' })).toEqual(['c'])
-    expect(ids({ text: 'COUNT' })).toEqual(['b'])
-    expect(ids({ text: 'kim' })).toEqual(['c'])
-    expect(ids({ text: 'line 2' })).toEqual(['a'])
+  it('sends only what is set, with local days as a whole-day range of instants', () => {
+    expect(toSearchParams(EMPTY_LEDGER_FILTER)).toEqual({})
+    const params = toSearchParams({ type: 'issue', itemId: 'flour', from: '2026-09-20', to: '2026-09-22', text: '  urgent ' })
+    expect(params.type).toBe('issue')
+    expect(params.itemId).toBe('flour')
+    expect(params.text).toBe('urgent')
+    expect(params.from).toBe(new Date(2026, 8, 20).toISOString())
+    // "to" is the next local midnight, exclusive on the server: the 22nd counts whole.
+    expect(params.to).toBe(new Date(2026, 8, 23).toISOString())
   })
 
-  it('lists the types present', () => {
-    expect(ledgerTypes(rows)).toEqual(['issue', 'receipt', 'transfer_out'])
+  it('offers every movement type, including transfers', () => {
+    expect(LEDGER_TYPES).toContain('transfer_out')
+    expect(LEDGER_TYPES).toContain('production_input')
   })
 
   it('writes CSV with quoting and a byte order mark', () => {

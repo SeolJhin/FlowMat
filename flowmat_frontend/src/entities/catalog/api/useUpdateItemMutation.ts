@@ -14,6 +14,12 @@ export interface UpdateItemInput {
   itemStatus?: string
   /** Can only change while the item has no stock records (409 otherwise). */
   lotManageYn?: 'Y' | 'N'
+  /** Omitted: unchanged. 0 stops watching. */
+  safetyStockQty?: number
+  /** Omitted: unchanged. */
+  leadTimeDays?: number
+  /** Omitted: unchanged. */
+  unitCost?: number
 }
 
 async function updateItem({ itemId, projectId: _pid, ...payload }: UpdateItemInput): Promise<ItemDto> {

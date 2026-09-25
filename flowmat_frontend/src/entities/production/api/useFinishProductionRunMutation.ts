@@ -24,6 +24,8 @@ export function useFinishProductionRunMutation() {
     onSuccess: (run) => {
       queryClient.setQueryData(['production-run', run.productionRunId], run)
       void queryClient.invalidateQueries({ queryKey: ['production-runs', run.workflowId] })
+      // The output quantity is what cost per unit and the BOM usage standard are worked out for.
+      void queryClient.invalidateQueries({ queryKey: ['production-run-items', run.productionRunId] })
       if (run.workOrderId) {
         // Finished output counts toward the work order's produced quantity.
         void queryClient.invalidateQueries({ queryKey: ['work-orders'] })

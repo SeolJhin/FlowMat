@@ -6,9 +6,10 @@ import { useDeleteInventoryMutation } from '../../../entities/inventory/api/useD
 import { useInventoryTransactionsQuery } from '../../../entities/inventory/api/useInventoryTransactionsQuery'
 import { useLotsQuery, useQuarantineMutation } from '../../../entities/inventory/api/useLots'
 import { useReverseTransactionMutation } from '../../../entities/inventory/api/useStockMovements'
-import { canReverse, reversedIds } from '../model/stockModel'
+import { canReverse, reversedIds, stockValue } from '../model/stockModel'
 import { StockMovementForm } from './StockMovementForm'
 import { StockAlerts } from './StockAlerts'
+import { ReorderList } from './ReorderList'
 import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { InventoryDto, ItemDto } from '../../../shared/types/api'
@@ -151,6 +152,7 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>
       <section>
+        <ReorderList projectId={projectId} />
         <StockAlerts
           projectId={projectId}
           onShowRow={(inventoryId) => {
@@ -166,6 +168,7 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
         {!inventoriesQuery.isLoading && inventories.length === 0 && (
           <p className="inspector-hint">No stock records yet. Add one to track quantities and let runs consume it.</p>
         )}
+        {inventories.length > 0 && <StockValue value={stockValue(inventories, items)} />}
         {inventories.some((inv) => inv.stockLevel === 'low') && (
           <p style={{ color: '#b91c1c', fontSize: 13, marginTop: 0 }}>
             {inventories.filter((inv) => inv.stockLevel === 'low').length} stock record(s) are below their minimum.
@@ -485,5 +488,19 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
         </form>
       </section>
     </div>
+  )
+}
+
+/** The stock on hand priced at unit cost; records of items without a cost are called out rather than counted as 0. */
+function StockValue({ value }: { value: { total: number; uncosted: number } }) {
+  return (
+    <p style={{ fontSize: 13, margin: '0 0 8px' }}>
+      Stock value <strong>{formatQty(value.total)}</strong>
+      {value.uncosted > 0 && (
+        <span style={{ opacity: 0.7 }}>
+          {' '}· {value.uncosted} record{value.uncosted === 1 ? '' : 's'} not counted (item has no unit cost)
+        </span>
+      )}
+    </p>
   )
 }

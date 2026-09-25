@@ -7,6 +7,7 @@ import type {
   DefectDto,
   QualityInspectionCreateRequest,
   QualityInspectionDto,
+  QualitySummaryDto,
 } from '../../../shared/types/api'
 
 /** Narrows quality records to one run and/or one LOT. */
@@ -46,6 +47,19 @@ export function useDefectsQuery(projectId: string, filter: QualityFilter, openOn
   })
 }
 
+/** Counts over the project's inspections and defects; {@code from} inclusive, ISO date-times (docs/domain/quality-inspection.md). */
+export function useQualitySummaryQuery(projectId: string, from: string | null) {
+  return useQuery<QualitySummaryDto>({
+    queryKey: ['quality-summary', projectId, from],
+    queryFn: async () => {
+      const params = new URLSearchParams({ projectId })
+      if (from) params.set('from', from)
+      return unwrapApiResponse(await httpClient.get<ApiEnvelope<QualitySummaryDto>>(`/quality/summary?${params.toString()}`))
+    },
+    enabled: Boolean(projectId),
+  })
+}
+
 /** A failed inspection can quarantine its LOT in the same request, so stock views refresh too when it asked to. */
 export function useRecordInspectionMutation(projectId: string) {
   const queryClient = useQueryClient()
@@ -56,6 +70,7 @@ export function useRecordInspectionMutation(projectId: string) {
       ),
     onSuccess: (_data, body) => {
       void queryClient.invalidateQueries({ queryKey: ['quality-inspections', projectId] })
+      void queryClient.invalidateQueries({ queryKey: ['quality-summary', projectId] })
       if (body.quarantineLot) {
         void queryClient.invalidateQueries({ queryKey: ['inventories', projectId] })
         void queryClient.invalidateQueries({ queryKey: ['lots', projectId] })
@@ -72,6 +87,7 @@ export function useLogDefectMutation(projectId: string) {
       unwrapApiResponse(await httpClient.post<ApiEnvelope<DefectDto>>('/defects', { projectId, ...body })),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['defects', projectId] })
+      void queryClient.invalidateQueries({ queryKey: ['quality-summary', projectId] })
     },
   })
 }
@@ -92,6 +108,7 @@ export function useResolveDefectMutation(projectId: string) {
       ),
     onSuccess: (_data, input) => {
       void queryClient.invalidateQueries({ queryKey: ['defects', projectId] })
+      void queryClient.invalidateQueries({ queryKey: ['quality-summary', projectId] })
       if (input.scrapInventoryId) {
         void queryClient.invalidateQueries({ queryKey: ['inventories', projectId] })
         void queryClient.invalidateQueries({ queryKey: ['lots', projectId] })

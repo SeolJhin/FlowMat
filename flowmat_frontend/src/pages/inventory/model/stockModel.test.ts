@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { InventoryTransactionDto } from '../../../shared/types/api'
-import { canReverse, reversedIds } from './stockModel'
+import type { InventoryDto, InventoryTransactionDto, ItemDto } from '../../../shared/types/api'
+import { canReverse, reversedIds, stockValue } from './stockModel'
 
 function tx(overrides: Partial<InventoryTransactionDto>): InventoryTransactionDto {
   return {
@@ -58,5 +58,23 @@ describe('reversedIds', () => {
       tx({ inventoryTransactionId: 't3', transactionType: 'issue', referenceType: 'production_run_item', referenceId: 'x' }),
     ]
     expect([...reversedIds(history)]).toEqual(['t1'])
+  })
+})
+
+describe('stockValue', () => {
+  it('prices stock on hand at unit cost and counts records it cannot price', () => {
+    const items = [
+      { itemId: 'flour', unitCost: 1.5 },
+      { itemId: 'salt', unitCost: 0 },
+      { itemId: 'sugar', unitCost: null },
+    ] as unknown as ItemDto[]
+    const rows = [
+      { itemId: 'flour', quantity: 10 },
+      { itemId: 'flour', quantity: 2.5 },
+      { itemId: 'salt', quantity: 3 },
+      { itemId: 'sugar', quantity: 0 },
+      { itemId: 'unknown', quantity: 1 },
+    ] as unknown as InventoryDto[]
+    expect(stockValue(rows, items)).toEqual({ total: 18.75, uncosted: 2 })
   })
 })

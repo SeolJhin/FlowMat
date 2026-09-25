@@ -17,6 +17,7 @@ import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
+import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
 import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
 import org.myweb.flowmat.domain.production.api.dto.response.WorkOrderReadinessResponse;
@@ -31,6 +32,7 @@ import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
@@ -54,6 +56,10 @@ public class WorkOrderReadinessService {
     private final ItemRepository itemRepository;
     private final InventoryRepository inventoryRepository;
     private final LotMasterRepository lotMasterRepository;
+
+    /** LOTs expiring within this many days are called out (same setting as the stock alerts). */
+    @Value("${app.stock-alert.expiry-warning-days:7}")
+    private int expiryWarningDays;
     private final ProjectAccessService projectAccessService;
 
     public WorkOrderReadinessResponse check(String workOrderId) {
@@ -132,13 +138,17 @@ public class WorkOrderReadinessService {
         });
         Map<String, String> lotStatus = new HashMap<>();
         Set<String> expiredLots = new HashSet<>();
+        Map<String, LotMaster> lotsById = new HashMap<>();
         LocalDate today = LocalDate.now();
         lotMasterRepository.findAllById(lotIds).forEach(lot -> {
+            lotsById.put(lot.getLotId(), lot);
             lotStatus.put(lot.getLotId(), lot.getLotStatus() == null ? "" : lot.getLotStatus());
             if (lot.isExpiredOn(today)) {
                 expiredLots.add(lot.getLotId());
             }
         });
+        // Usable LOTs that expire within the warning window: counted, but worth using first.
+        Map<String, String> expiringSoon = new java.util.LinkedHashMap<>();
 
         List<Material> materials = new ArrayList<>();
         List<String> shortages = new ArrayList<>();
@@ -159,6 +169,11 @@ public class WorkOrderReadinessService {
                     available = available.add(free);
                     if (row.getLotId() != null) {
                         usableLots.add(row.getLotId());
+                        LotMaster lot = lotsById.get(row.getLotId());
+                        if (lot != null && lot.getExpiryDate() != null && !lot.getExpiryDate().isAfter(today.plusDays(expiryWarningDays))) {
+                            expiringSoon.putIfAbsent(lot.getLotId(), "LOT " + lot.getLotNo() + " of "
+                                + (item != null ? item.getItemCode() : line.childItemId()) + " expires on " + lot.getExpiryDate());
+                        }
                     }
                 }
             }
@@ -174,6 +189,15 @@ public class WorkOrderReadinessService {
         checks.add(shortages.isEmpty()
             ? new Check("materials", OK, "Materials for " + plain(remaining) + " are in stock.")
             : new Check("materials", FAIL, "Short of " + String.join(", ", shortages) + "."));
+        if (!expiringSoon.isEmpty()) {
+            List<String> soon = new ArrayList<>(expiringSoon.values());
+            String listed = String.join("; ", soon.subList(0, Math.min(3, soon.size())))
+                + (soon.size() > 3 ? "; and " + (soon.size() - 3) + " more" : "");
+            checks.add(new Check("expiry", WARN, listed + ". Use these first."));
+        }
+        // What the remaining quantity's materials cost at today's unit costs (docs/domain/material-cost.md).
+        checks.add(new Check("cost", OK, "Estimated material cost: " + plain(requirement.materialCost())
+            + (requirement.costComplete() ? "." : " (some materials have no unit cost, so they are left out).")));
         return materials;
     }
 

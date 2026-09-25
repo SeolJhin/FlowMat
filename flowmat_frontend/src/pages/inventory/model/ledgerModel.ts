@@ -7,44 +7,49 @@ export interface LedgerFilter {
   /** Inclusive local dates, yyyy-mm-dd. */
   from: string
   to: string
-  /** Matched against the note, the reference and who recorded it. */
+  /** Matched by the server against the note, the reference and who recorded it. */
   text: string
 }
 
 export const EMPTY_LEDGER_FILTER: LedgerFilter = { type: '', itemId: '', from: '', to: '', text: '' }
 
-function localDate(iso: string): string {
-  const date = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+/** Every movement type the stock commands write (docs/domain/inventory-bom-lot-contract.md §2). */
+export const LEDGER_TYPES = [
+  'receipt',
+  'issue',
+  'reserve',
+  'release',
+  'adjustment',
+  'reversal',
+  'quarantine',
+  'unquarantine',
+  'production_input',
+  'production_output',
+  'transfer_out',
+  'transfer_in',
+] as const
+
+/** Local midnight of a yyyy-mm-dd day, plus whole days. */
+function localMidnight(day: string, plusDays = 0): Date {
+  const [year, month, date] = day.split('-').map(Number)
+  return new Date(year, month - 1, date + plusDays)
 }
 
-export function filterLedger(rows: InventoryTransactionDto[], filter: LedgerFilter): InventoryTransactionDto[] {
-  const needle = filter.text.trim().toLowerCase()
-  return rows.filter((row) => {
-    if (filter.type && row.transactionType !== filter.type) return false
-    if (filter.itemId && row.itemId !== filter.itemId) return false
-    if (filter.from || filter.to) {
-      // Rows written without a time cannot be placed in a date range.
-      if (!row.createdAt) return false
-      const day = localDate(row.createdAt)
-      if (filter.from && day < filter.from) return false
-      if (filter.to && day > filter.to) return false
-    }
-    if (needle) {
-      const haystack = [row.note, row.referenceType, row.referenceId, row.createdBy].filter(Boolean).join(' ').toLowerCase()
-      if (!haystack.includes(needle)) return false
-    }
-    return true
-  })
+/**
+ * The filter as GET /inventory-transactions/search parameters. Local days become instants: "from" is that day's
+ * midnight and "to" the next day's midnight, which the server treats as exclusive, so both days are included whole.
+ */
+export function toSearchParams(filter: LedgerFilter): Record<string, string> {
+  const params: Record<string, string> = {}
+  if (filter.type) params.type = filter.type
+  if (filter.itemId) params.itemId = filter.itemId
+  if (filter.from) params.from = localMidnight(filter.from).toISOString()
+  if (filter.to) params.to = localMidnight(filter.to, 1).toISOString()
+  if (filter.text.trim()) params.text = filter.text.trim()
+  return params
 }
 
-/** Movement types present in the history, for the filter list. */
-export function ledgerTypes(rows: InventoryTransactionDto[]): string[] {
-  return [...new Set(rows.map((row) => row.transactionType))].sort()
-}
-
-function csvCell(value: string | number | null | undefined): string {
+export function csvCell(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return ''
   const text = String(value)
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text

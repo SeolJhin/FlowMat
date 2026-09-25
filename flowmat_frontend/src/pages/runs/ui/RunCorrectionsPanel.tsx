@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { useLotsQuery } from '../../../entities/inventory/api/useLots'
 import {
   useDecideRunCorrectionMutation,
   useRequestRunCorrectionMutation,
@@ -10,6 +11,7 @@ import {
   buildCorrectionRequest,
   correctionStatusLabel,
   describeCorrectionLine,
+  orderStockForPick,
   voidableRecordings,
   type CorrectionAddDraft,
   type CorrectionDraft,
@@ -39,6 +41,7 @@ export function RunCorrectionsPanel({ projectId, run, runItems, items, inventori
   const correctionsQuery = useRunCorrectionsQuery(runId)
   const requestMutation = useRequestRunCorrectionMutation(runId)
   const decideMutation = useDecideRunCorrectionMutation(runId, projectId)
+  const lotsQuery = useLotsQuery(projectId)
   const [draft, setDraft] = useState<CorrectionDraft>(EMPTY_DRAFT)
   const [formError, setFormError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
@@ -252,9 +255,15 @@ export function RunCorrectionsPanel({ projectId, run, runItems, items, inventori
                       onChange={(e) => updateAdd(index, { inventoryId: e.target.value })}
                     >
                       <option value="" disabled={lotTracked}>{lotTracked ? 'Select LOT' : "Don't adjust stock"}</option>
-                      {stock.map((inv) => (
-                        <option key={inv.inventoryId} value={inv.inventoryId}>
+                      {orderStockForPick(stock, lotsQuery.data ?? []).map(({ inventory: inv, expiryDate, expired }) => (
+                        <option
+                          key={inv.inventoryId}
+                          value={inv.inventoryId}
+                          // Expired LOTs cannot go into production (docs/domain/lot-expiry.md).
+                          disabled={expired && add.direction === 'input'}
+                        >
                           {inventoryLabel(inv.inventoryId)} (available {formatQty(inv.availableQuantity)})
+                          {expiryDate ? ` · ${expired ? 'expired' : 'exp.'} ${expiryDate}` : ''}
                         </option>
                       ))}
                     </select>

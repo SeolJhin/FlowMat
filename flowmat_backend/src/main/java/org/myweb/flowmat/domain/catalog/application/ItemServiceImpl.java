@@ -1,5 +1,6 @@
 package org.myweb.flowmat.domain.catalog.application;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -72,6 +73,9 @@ public class ItemServiceImpl implements ItemService {
         item.setUnitId(requireActiveUnit(request.unitId()));
         item.setItemStatus(defaultIfBlank(request.itemStatus(), "active"));
         item.setLotManageYn(yn(request.lotManageYn()));
+        item.setSafetyStockQty(requireNonNegative(request.safetyStockQty(), "Safety stock"));
+        item.setLeadTimeDays(requireNonNegative(request.leadTimeDays(), "Lead time"));
+        item.setUnitCost(requireNonNegative(request.unitCost(), "Unit cost"));
         item.setDeletedYn(NOT_DELETED);
         return toResponse(itemRepository.save(item));
     }
@@ -114,6 +118,15 @@ public class ItemServiceImpl implements ItemService {
             }
             item.setLotManageYn(yn(request.lotManageYn()));
         }
+        if (request.safetyStockQty() != null) {
+            item.setSafetyStockQty(requireNonNegative(request.safetyStockQty(), "Safety stock"));
+        }
+        if (request.leadTimeDays() != null) {
+            item.setLeadTimeDays(requireNonNegative(request.leadTimeDays(), "Lead time"));
+        }
+        if (request.unitCost() != null) {
+            item.setUnitCost(requireNonNegative(request.unitCost(), "Unit cost"));
+        }
         return toResponse(itemRepository.save(item));
     }
 
@@ -151,8 +164,25 @@ public class ItemServiceImpl implements ItemService {
             item.getResourceType(),
             item.getUnitId(),
             item.getItemStatus(),
-            item.getLotManageYn()
+            item.getLotManageYn(),
+            item.getSafetyStockQty(),
+            item.getLeadTimeDays(),
+            item.getUnitCost()
         );
+    }
+
+    private static BigDecimal requireNonNegative(BigDecimal value, String what) {
+        if (value != null && value.signum() < 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, what + " cannot be negative.");
+        }
+        return value;
+    }
+
+    private static Integer requireNonNegative(Integer value, String what) {
+        if (value != null && value < 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, what + " cannot be negative.");
+        }
+        return value;
     }
 
     private static String yn(String value) {

@@ -123,6 +123,58 @@ export interface ProductionRunItemDto {
   cancelledByCorrectionId?: string | null
 }
 
+/** A run's material cost at today's unit costs (docs/domain/material-cost.md). Nothing is stored. */
+export interface RunCostDto {
+  productionRunId: string
+  materialCost: number
+  /** False when some input has no unit cost (or a unit that cannot be converted). */
+  costComplete: boolean
+  outputQuantity: number | null
+  /** materialCost / outputQuantity; null until there is an output quantity or while the cost is incomplete. */
+  costPerUnit: number | null
+  lines: {
+    itemId: string
+    itemCode: string
+    itemName: string | null
+    quantity: number | null
+    unit: string | null
+    unitCost: number | null
+    cost: number | null
+  }[]
+}
+
+/** A run's material use against the BOM it started with, scaled to the output (GET /production-runs/{id}/material-usage). */
+export interface RunMaterialUsageDto {
+  productionRunId: string
+  bomId: string | null
+  bomVersion: number | null
+  plannedOutputQty: number | null
+  /** The output the standard is worked out for: the actual output once there is one, else the planned output. */
+  basisQuantity: number | null
+  basisIsActual: boolean
+  /** Over zero: more was spent than the BOM allows. */
+  varianceCost: number
+  varianceCostComplete: boolean
+  lines: RunMaterialUsageLineDto[]
+}
+
+/** One input item in its own unit; an item not in the BOM has no plan and a standard of 0. */
+export interface RunMaterialUsageLineDto {
+  itemId: string
+  itemCode: string
+  itemName: string | null
+  unit: string | null
+  inBom: boolean
+  planned: number | null
+  standard: number | null
+  /** Null when a recording's unit cannot be converted. */
+  actual: number | null
+  variance: number | null
+  variancePercent: number | null
+  unitCost: number | null
+  varianceCost: number | null
+}
+
 export type ReadinessCheckStatus = 'ok' | 'warn' | 'fail'
 
 /** Whether a work order can run now (docs/domain/work-order-readiness.md). Nothing is reserved by checking. */
@@ -267,6 +319,80 @@ export interface DefectCreateRequest {
   reason?: string | null
 }
 
+/** The project's quality at a glance (GET /quality/summary), over an optional window. */
+export interface QualitySummaryDto {
+  inspections: number
+  passed: number
+  failed: number
+  /** passed / inspections, 0–1; null without inspections. */
+  passRate: number | null
+  openDefects: number
+  resolvedDefects: number
+  /** Most frequent first; counts only, as quantities of different items do not add up. */
+  defectsByType: { defectType: string; count: number; open: number }[]
+  /** Checks that failed at least once, most failures first. */
+  failuresByCheck: { inspectionType: string; inspections: number; failed: number }[]
+}
+
+/** Consumption, days of cover and idle time per item (GET /stock-analysis). Quantities are in the item's unit. */
+export interface StockAnalysisDto {
+  days: number
+  /** Start of the consumption window; it ends now. */
+  from: string
+  lines: StockAnalysisLineDto[]
+}
+
+export interface StockAnalysisLineDto {
+  itemId: string
+  itemCode: string
+  itemName: string | null
+  unit: string | null
+  onHandQuantity: number
+  /** Available outside quarantine and closed or expired LOTs. */
+  usableQuantity: number
+  stockValue: number | null
+  /** Issued and put into production in the window, less reversals. */
+  consumedQuantity: number
+  averageDailyConsumption: number
+  /** How long the usable stock lasts at the window's rate; null without consumption. */
+  daysOfCover: number | null
+  leadTimeDays: number | null
+  coverBelowLeadTime: boolean
+  lastConsumedAt: string | null
+  lastReceivedAt: string | null
+  /** Days since the last consumption, or since the first receipt when never consumed. */
+  idleDays: number | null
+  /** consumedQuantity × unit cost; null without a unit cost. */
+  consumedValue: number | null
+  /** A: the items making up the first 80% of the value used, B: the next 15%, C: the rest and unused. Null without a unit cost. */
+  abcClass: 'A' | 'B' | 'C' | null
+}
+
+/** Stock as it stood at a moment (GET /inventory-snapshots), rebuilt from the ledger; values at today's unit costs. */
+export interface StockSnapshotDto {
+  at: string
+  totalValue: number
+  /** False when some record's item has no unit cost; the total leaves it out. */
+  valueComplete: boolean
+  rows: StockSnapshotRowDto[]
+}
+
+export interface StockSnapshotRowDto {
+  inventoryId: string
+  itemId: string
+  itemCode: string | null
+  itemName: string | null
+  unit: string | null
+  location: string | null
+  lotId: string | null
+  lotNo: string | null
+  quantity: number
+  reservedQuantity: number
+  value: number | null
+  /** False for a record that has never moved: its quantity is what it was created with. */
+  fromLedger: boolean
+}
+
 /** A BOM revision that uses an item as a line (where-used). */
 export interface BomWhereUsedDto {
   bomId: string
@@ -367,6 +493,10 @@ export interface BomRequirementLineDto {
   itemUnit: string
   requiredItemQuantity: number
   conversionRate: number
+  /** Cost per itemUnit; null when the material has no unit cost (docs/domain/material-cost.md). */
+  unitCost?: number | null
+  /** requiredItemQuantity × unitCost; null when the unit cost is not known. */
+  lineCost?: number | null
 }
 
 export interface BomRequirementDto {
@@ -376,6 +506,10 @@ export interface BomRequirementDto {
   productionQuantity: number
   baseQuantity: number
   lines: BomRequirementLineDto[]
+  /** Sum of the known line costs. */
+  materialCost?: number
+  /** False when some material has no unit cost, so materialCost leaves it out. */
+  costComplete?: boolean
 }
 
 export type LotStatus = 'available' | 'reserved' | 'quarantined' | 'consumed' | 'closed'
@@ -422,6 +556,12 @@ export interface ProjectInvitePreviewDto {
   expiredAt: string | null
   expired: boolean
   addressedToCurrentUser: boolean
+}
+
+/** One page of GET /inventory-transactions/search, newest first; pass nextCursor back for the next page. */
+export interface InventoryTransactionPageDto {
+  items: InventoryTransactionDto[]
+  nextCursor: string | null
 }
 
 export interface InventoryTransactionDto {
@@ -482,6 +622,24 @@ export interface ItemDto {
   itemStatus: string
   /** "Y" when stock of this item is tracked per LOT. */
   lotManageYn: string | null
+  /** Stock to keep across all records; below it the item is on the reorder list. */
+  safetyStockQty?: number | null
+  leadTimeDays?: number | null
+  /** Cost of one unit in the item's own unit; 0 or null means not known. */
+  unitCost?: number | null
+}
+
+/** An item below its safety stock over all its records (GET /stock-alerts/reorder). */
+export interface ReorderLineDto {
+  itemId: string
+  itemCode: string
+  itemName: string
+  unit: string | null
+  safetyStockQty: number
+  /** Usable stock: not quarantined, not of a closed or expired LOT. */
+  availableQuantity: number
+  shortageQuantity: number
+  leadTimeDays: number | null
 }
 
 export interface ProcessDto {

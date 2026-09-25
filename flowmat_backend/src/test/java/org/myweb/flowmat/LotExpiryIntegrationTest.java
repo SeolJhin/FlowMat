@@ -74,7 +74,33 @@ class LotExpiryIntegrationTest extends IntegrationTestSupport {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.ready").value(false))
             .andExpect(jsonPath("$.data.materials[?(@.itemId == '" + salt + "')].availableQuantity").value(hasItem(2.0)))
-            .andExpect(jsonPath("$.data.materials[?(@.itemId == '" + salt + "')].usableLots").value(hasItem(1)));
+            .andExpect(jsonPath("$.data.materials[?(@.itemId == '" + salt + "')].usableLots").value(hasItem(1)))
+            // Salt has no unit cost, so the estimate says it is incomplete.
+            .andExpect(jsonPath("$.data.checks[?(@.code == 'cost')].message").value(hasItem(containsString("no unit cost"))));
+    }
+
+    @Test
+    void readinessWarnsAboutUsableLotsThatExpireSoon() throws Exception {
+        String product = item("unit_ea");
+        String sugar = item("unit_kg");
+        String bomId = id(call(post("/boms"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"targetItemId\":\"" + product
+            + "\",\"bomName\":\"Syrup\",\"baseQuantity\":1,\"baseUnit\":\"ea\"}"), "bomId");
+        call(post("/boms/" + bomId + "/lines"), "{\"childItemId\":\"" + sugar + "\",\"quantity\":1,\"unit\":\"kg\"}")
+            .andExpect(status().isOk());
+        call(post("/boms/" + bomId + "/submit")).andExpect(status().isOk());
+        call(post("/boms/" + bomId + "/approve")).andExpect(status().isOk());
+        String orderId = id(call(post("/work-orders"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"workOrderTitle\":\"Syrup\","
+            + "\"workflowId\":\"" + DEMO_WORKFLOW + "\",\"targetQuantity\":3,\"bomId\":\"" + bomId + "\"}"), "workOrderId");
+        call(post("/work-orders/" + orderId + "/approve")).andExpect(status().isOk());
+        String soonLot = lot(sugar, LocalDate.now().plusDays(2));
+        stock(sugar, soonLot, "5");
+
+        // Still usable and counted, so ready, but the LOT that runs out in two days is called out.
+        call(get("/work-orders/" + orderId + "/readiness"))
+            .andExpect(jsonPath("$.data.ready").value(true))
+            .andExpect(jsonPath("$.data.checks[?(@.code == 'expiry')].status").value(hasItem("warn")))
+            .andExpect(jsonPath("$.data.checks[?(@.code == 'expiry')].message")
+                .value(hasItem(containsString("expires on " + LocalDate.now().plusDays(2)))));
     }
 
     // ---- helpers ----

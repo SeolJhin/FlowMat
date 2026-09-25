@@ -312,11 +312,22 @@ public class BomServiceImpl implements BomService {
         BigDecimal factor = productionQuantity.divide(base, FACTOR_SCALE, RoundingMode.HALF_UP);
 
         List<BomRequirementResponse.Line> result = new ArrayList<>();
+        BigDecimal materialCost = BigDecimal.ZERO;
+        boolean costComplete = true;
         for (BomLine line : lines(header.getBomId())) {
             Item child = findProjectItem(line.getChildItemId(), header.getProjectId());
             BigDecimal required = factor.multiply(line.getQuantity()).setScale(8, RoundingMode.HALF_UP).stripTrailingZeros();
             UnitConverter.Conversion conversion = unitConverter.toItemUnit(required, line.getUnit(), child.getUnitId());
             BigDecimal rate = unitConverter.toItemUnit(BigDecimal.ONE, line.getUnit(), child.getUnitId()).quantity();
+            BigDecimal itemQuantity = conversion.quantity().setScale(STOCK_SCALE, RoundingMode.HALF_UP);
+            // Unit cost is per the item's own unit, so it multiplies the quantity already converted to that unit.
+            BigDecimal unitCost = child.getUnitCost() != null && child.getUnitCost().signum() > 0 ? child.getUnitCost() : null;
+            BigDecimal lineCost = unitCost == null ? null : itemQuantity.multiply(unitCost).setScale(STOCK_SCALE, RoundingMode.HALF_UP);
+            if (lineCost == null) {
+                costComplete = false;
+            } else {
+                materialCost = materialCost.add(lineCost);
+            }
             result.add(new BomRequirementResponse.Line(
                 line.getBomLineId(),
                 child.getItemId(),
@@ -324,12 +335,15 @@ public class BomServiceImpl implements BomService {
                 line.getUnit(),
                 required,
                 conversion.toUnitCode(),
-                conversion.quantity().setScale(STOCK_SCALE, RoundingMode.HALF_UP),
-                rate
+                itemQuantity,
+                rate,
+                unitCost,
+                lineCost
             ));
         }
         return new BomRequirementResponse(
-            header.getBomId(), header.getBomVersion(), header.getTargetItemId(), productionQuantity, base, result);
+            header.getBomId(), header.getBomVersion(), header.getTargetItemId(), productionQuantity, base, result,
+            materialCost.setScale(STOCK_SCALE, RoundingMode.HALF_UP), costComplete);
     }
 
     private BomHeader findEditableBom(String bomId) {

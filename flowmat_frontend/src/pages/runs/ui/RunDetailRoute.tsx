@@ -14,6 +14,7 @@ import type { ProductionRunItemDto } from '../../../shared/types/api'
 import { cancelSummary, recordedAgainstPlan, remainingOfPlan } from '../model/runPlan'
 import { RunCorrectionsPanel } from './RunCorrectionsPanel'
 import { RunQualityPanel } from './RunQualityPanel'
+import { RunCostPanel } from './RunCostPanel'
 import { RunStatusBadge, formatQty, isRunOpen } from './runDisplay'
 
 const cell = { padding: '8px 6px' } as const
@@ -438,6 +439,7 @@ export function RunDetailRoute() {
                   )}
                 </>
               )}
+              <RunCostPanel runId={run.productionRunId} />
               <RunQualityPanel
                 projectId={projectId}
                 run={run}
