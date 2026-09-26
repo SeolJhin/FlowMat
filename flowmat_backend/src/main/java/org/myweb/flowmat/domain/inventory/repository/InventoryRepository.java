@@ -3,6 +3,7 @@ package org.myweb.flowmat.domain.inventory.repository;
 import jakarta.persistence.LockModeType;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
@@ -19,6 +20,9 @@ public interface InventoryRepository extends JpaRepository<Inventory, String> {
     Optional<Inventory> findByInventoryIdAndDeletedYn(String inventoryId, String deletedYn);
 
     List<Inventory> findAllByLotIdAndDeletedYn(String lotId, String deletedYn);
+
+    /** The active records of several LOTs at once (LOT recall). */
+    List<Inventory> findAllByLotIdInAndDeletedYn(Collection<String> lotIds, String deletedYn);
 
     boolean existsByItemIdAndDeletedYn(String itemId, String deletedYn);
 
@@ -47,6 +51,32 @@ public interface InventoryRepository extends JpaRepository<Inventory, String> {
         @Param("itemId") String itemId,
         @Param("location") String location
     );
+
+    /**
+     * Holds a lock on one item, LOT and place until the transaction ends, so two movements that would each create the
+     * record there take turns: the second waits, then finds the record the first made. A hash collision only makes
+     * unrelated movements wait for each other.
+     */
+    @Query(value = "select 1 from pg_advisory_xact_lock(hashtext(:key))", nativeQuery = true)
+    Integer lockStockPlace(@Param("key") String key);
+
+    /** {@link #lockStockPlace(String)} for one item, LOT (or none) and place (or none), with the same key everywhere. */
+    default void lockStockPlace(String projectId, String itemId, String lotId, String location) {
+        lockStockPlace(String.join("|", "stock-place", projectId, itemId, lotId == null ? "" : lotId, location == null ? "" : location));
+    }
+
+    /**
+     * Locks an item's active stock records until the transaction ends, in id order so two lockers cannot deadlock, and
+     * returns their ids. Load the records after this call: a split planned from them (first-expiring first) then cannot
+     * be overtaken by another movement between planning and applying.
+     */
+    @Query(value = """
+        select inventory_id from inventory
+         where project_id = :projectId and item_id = :itemId and deleted_yn = 'N'
+         order by inventory_id
+           for update
+        """, nativeQuery = true)
+    List<String> lockItemStock(@Param("projectId") String projectId, @Param("itemId") String itemId);
 
     /** Locks the row (deleted or not) so its stock alerts are worked out against numbers that cannot move meanwhile. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
@@ -85,6 +115,14 @@ public interface InventoryRepository extends JpaRepository<Inventory, String> {
      * <p>Returns the number of rows changed: 0 means the record is gone, quarantined, or the movement would break an
      * invariant. Clears the persistence context; re-read the inventory afterwards to see the new values.
      */
+    /**
+     * Stamps records as counted. Nothing else changes, not even the version: a count that found the stock right should
+     * not turn someone's open adjustment into a conflict.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update Inventory i set i.lastCheckedAt = :at, i.lastCheckedBy = :by where i.inventoryId in :ids")
+    int markChecked(@Param("ids") Collection<String> inventoryIds, @Param("at") OffsetDateTime at, @Param("by") String by);
+
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
         update Inventory i

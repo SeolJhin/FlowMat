@@ -92,6 +92,8 @@ export interface WorkOrderDto {
   producedQuantity: number
   runCount: number
   bomId: string | null
+  /** Link to the written work instruction; http or https only. */
+  instructionUrl?: string | null
 }
 
 export interface ProductionRunItemDto {
@@ -332,6 +334,18 @@ export interface QualitySummaryDto {
   defectsByType: { defectType: string; count: number; open: number }[]
   /** Checks that failed at least once, most failures first. */
   failuresByCheck: { inspectionType: string; inspections: number; failed: number }[]
+  /** Items with a failed inspection or a defect, most defects first; defectQuantity is in the item's unit. */
+  byItem?: {
+    itemId: string
+    itemCode: string | null
+    itemName: string | null
+    unit: string | null
+    inspections: number
+    failed: number
+    defects: number
+    openDefects: number
+    defectQuantity: number
+  }[]
 }
 
 /** Consumption, days of cover and idle time per item (GET /stock-analysis). Quantities are in the item's unit. */
@@ -393,6 +407,163 @@ export interface StockSnapshotRowDto {
   fromLedger: boolean
 }
 
+/** One item line of a spreadsheet import (POST /items/import); every value is text as it was in the file. */
+export interface ItemImportRowDto {
+  itemCode: string
+  itemName?: string
+  itemType?: string
+  resourceCategory?: string
+  /** A unit's code such as "kg". */
+  unitCode?: string
+  itemStatus?: string
+  lotTracked?: string
+  safetyStockQty?: string
+  leadTimeDays?: string
+  unitCost?: string
+  /** Details; a blank cell keeps the stored value. */
+  itemGroup?: string
+  spec?: string
+  barcode?: string
+  sku?: string
+  storageCondition?: string
+  description?: string
+  /** What the item is bought in, e.g. "bag"; a blank cell keeps the stored value. */
+  purchaseUnit?: string
+  /** Stock units in one purchase unit. */
+  purchaseUnitQty?: string
+}
+
+/** What an item import did or would do. Nothing is saved when any row has an error or it is a dry run. */
+export interface ItemImportResultDto {
+  dryRun: boolean
+  applied: boolean
+  created: number
+  updated: number
+  unchanged: number
+  errors: number
+  rows: { row: number; itemCode: string | null; action: 'create' | 'update' | 'unchanged' | 'error'; message: string | null }[]
+}
+
+/** One material line of a draft BOM import (POST /boms/{id}/lines/import); values are text as in the file. */
+export interface BomLineImportRowDto {
+  itemCode: string
+  quantity?: string
+  unit?: string
+  note?: string
+}
+
+/** What a BOM line import did or would do; nothing is saved when any row has an error or it is a dry run. */
+export interface BomLineImportResultDto {
+  dryRun: boolean
+  applied: boolean
+  added: number
+  /** Lines of the draft removed (or to be removed) because the import replaces them. */
+  removed: number
+  errors: number
+  rows: { row: number; itemCode: string | null; action: 'add' | 'error'; message: string | null }[]
+}
+
+/** One row of a stock import (POST /inventories/import); values are text as in the file. */
+export interface StockImportRowDto {
+  itemCode: string
+  location?: string
+  lotNo?: string
+  quantity?: string
+  /** yyyy-MM-dd, for a LOT the file registers. */
+  expiryDate?: string
+  /** Instead of a quantity: how many of the item's purchase units came in. */
+  packs?: string
+}
+
+/** What a stock import did or would do; nothing is received when any row has an error or it is a dry run. */
+export interface StockImportResultDto {
+  dryRun: boolean
+  applied: boolean
+  created: number
+  received: number
+  newLots: number
+  errors: number
+  rows: { row: number; itemCode: string | null; action: 'create' | 'receive' | 'error'; message: string | null }[]
+}
+
+/** Each item's stock over a period (GET /stock-movement-summary); quantities in the item's unit. */
+export interface StockMovementSummaryDto {
+  from: string
+  to: string
+  lines: StockMovementSummaryLineDto[]
+}
+
+export interface StockMovementSummaryLineDto {
+  itemId: string
+  itemCode: string | null
+  itemName: string | null
+  unit: string | null
+  opening: number
+  received: number
+  produced: number
+  /** Issues, as a positive number. */
+  issued: number
+  /** Production input, as a positive number. */
+  consumed: number
+  /** Transfers in less transfers out; zero, as a transfer stays with the item. */
+  transferred: number
+  /** Adjustments and reversals, signed. */
+  corrected: number
+  closing: number
+  /** Not zero only for records that changed outside the ledger. */
+  unexplained: number
+}
+
+/** A suspect LOT and every LOT made from it (GET /lots/{id}/recall), start first. */
+export interface LotRecallDto {
+  lotId: string
+  lotNo: string
+  lots: LotRecallLineDto[]
+}
+
+export interface LotRecallLineDto {
+  lotId: string
+  lotNo: string
+  itemId: string
+  itemCode: string | null
+  itemName: string | null
+  unit: string | null
+  /** 0 for the suspect LOT, then steps along the genealogy. */
+  depth: number
+  /** The LOT one step closer to the start that this one was made from. */
+  viaLotNo: string | null
+  lotStatus: LotStatus
+  onHand: number
+  /** "WH-A 4" for each record holding stock. */
+  places: string[]
+  /** What issues took out, less those reversed: what already left the site. */
+  issued: number
+}
+
+export interface LotRecallQuarantineResultDto {
+  quarantined: string[]
+  skipped: { lotNo: string; reason: string }[]
+}
+
+/** What open work orders still need against usable stock (GET /material-requirements). */
+export interface MaterialRequirementDto {
+  /** Open work orders counted: approved or in progress, with a BOM and quantity still to make. */
+  orders: number
+  /** Biggest shortfall first; quantities in the material's own unit. */
+  lines: {
+    itemId: string
+    itemCode: string | null
+    itemName: string | null
+    unit: string | null
+    required: number
+    usable: number
+    shortage: number
+    orders: { workOrderId: string; workOrderTitle: string; required: number }[]
+  }[]
+  /** Work orders whose BOM could not be worked out, with the reason. */
+  problems: string[]
+}
+
 /** A BOM revision that uses an item as a line (where-used). */
 export interface BomWhereUsedDto {
   bomId: string
@@ -452,6 +623,9 @@ export interface InventoryDto {
   version: number | null
   lotId: string | null
   lotNo: string | null
+  /** When a stock count last covered this record (ISO timestamp); null when never counted. */
+  lastCheckedAt?: string | null
+  lastCheckedBy?: string | null
 }
 
 export type BomStatus = 'draft' | 'pending_approval' | 'approved' | 'retired'
@@ -510,6 +684,32 @@ export interface BomRequirementDto {
   materialCost?: number
   /** False when some material has no unit cost, so materialCost leaves it out. */
   costComplete?: boolean
+}
+
+/** GET /boms/{id}/buildable: how much of the product usable stock could make now (docs/domain/material-requirements.md). */
+export interface BuildableQuantityDto {
+  bomId: string
+  targetItemId: string
+  /** The product's unit, which baseQuantity and every buildable quantity are in. */
+  targetUnit: string
+  baseQuantity: number
+  /** Rounded down, whole units for a counted product; null when the BOM has no materials. */
+  buildable: number | null
+  limitingItemId: string | null
+  lines: BuildableQuantityLineDto[]
+  /** Why the BOM could not be worked out; only in the project-wide list (GET /boms/buildable). */
+  problem?: string | null
+}
+
+export interface BuildableQuantityLineDto {
+  childItemId: string
+  itemUnit: string
+  /** Needed for one batch, in the material's unit. */
+  perBatch: number
+  /** Available outside quarantine and closed or expired LOTs, in the material's unit. */
+  usable: number
+  /** What this material alone allows, in the product's unit; null when its need rounds to nothing. */
+  buildable: number | null
 }
 
 export type LotStatus = 'available' | 'reserved' | 'quarantined' | 'consumed' | 'closed'
@@ -627,6 +827,112 @@ export interface ItemDto {
   leadTimeDays?: number | null
   /** Cost of one unit in the item's own unit; 0 or null means not known. */
   unitCost?: number | null
+  /** Descriptive fields; the server always sends them (docs/domain/item-details.md). */
+  details?: ItemDetailsDto
+  /** What the item is bought in, e.g. "bag"; null when bought in its stock unit. */
+  purchaseUnit?: string | null
+  /** Stock units in one purchase unit; null without a purchase unit. */
+  purchaseUnitQty?: number | null
+}
+
+/** What an item is, beyond its code and name; null where not recorded. */
+export interface ItemDetailsDto {
+  /** Free grouping, e.g. "flour" or "packaging". */
+  itemGroup: string | null
+  spec: string | null
+  /** Unique among the project's active items. */
+  barcode: string | null
+  sku: string | null
+  storageCondition: string | null
+  description: string | null
+}
+
+/** Stock lost in the last days, by why (GET /stock-waste). Quantities in each item's unit; values at today's unit costs. */
+export interface StockWasteDto {
+  days: number
+  from: string
+  to: string
+  value: number
+  /** False when a lost item has no unit cost; the values leave it out. */
+  valueComplete: boolean
+  expiredValue: number
+  defectValue: number
+  countLossValue: number
+  lines: {
+    itemId: string
+    itemCode: string | null
+    itemName: string | null
+    unit: string | null
+    expired: number
+    defect: number
+    countLoss: number
+    total: number
+    value: number | null
+  }[]
+}
+
+/** What a write-off of expired LOT stock did, one line per LOT (POST /lots/expired/write-off). */
+export interface ExpiredWriteOffDto {
+  lots: number
+  /** At today's unit costs; items without one are left out (valueComplete false). */
+  value: number
+  valueComplete: boolean
+  lines: {
+    lotId: string
+    lotNo: string
+    itemId: string
+    itemCode: string | null
+    unit: string | null
+    writtenOff: number
+    value: number | null
+    closed: boolean
+    /** Why some stock stayed (quarantined, reserved); null when all of it went. */
+    note: string | null
+  }[]
+}
+
+/** What a first-expiring-first issue took, one line per stock record (POST /inventories/issue-fefo). */
+export interface FefoIssueDto {
+  itemId: string
+  action: 'issue' | 'reserve'
+  quantity: number
+  /** The item's unit; every quantity is in it. */
+  unit: string | null
+  lines: {
+    inventoryTransactionId: string
+    inventoryId: string
+    lotId: string | null
+    lotNo: string | null
+    location: string | null
+    /** Issued or reserved from the record. */
+    quantity: number
+    quantityAfter: number
+    reservedAfter: number
+  }[]
+}
+
+/** What a piece of equipment is and where it stands; null where not recorded (docs/domain/equipment.md). */
+export interface EquipmentDetailsDto {
+  manufacturer: string | null
+  modelName: string | null
+  serialNo: string | null
+  /** Output per hour, in the unit the project counts this equipment's work in. */
+  capacityPerHour: number | null
+  /** Electricity per hour of running. */
+  powerKwh: number | null
+  /** Water per hour of running. */
+  waterLiter: number | null
+  location: string | null
+}
+
+export interface EquipmentDto {
+  equipmentId: string
+  projectId: string
+  equipmentCode: string | null
+  equipmentName: string
+  equipmentType: string
+  equipmentStatus: string
+  details: EquipmentDetailsDto
 }
 
 /** An item below its safety stock over all its records (GET /stock-alerts/reorder). */

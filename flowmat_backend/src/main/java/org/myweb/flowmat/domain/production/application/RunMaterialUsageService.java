@@ -3,6 +3,7 @@ package org.myweb.flowmat.domain.production.application;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -10,6 +11,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.bom.domain.entity.BomLine;
+import org.myweb.flowmat.domain.bom.repository.BomLineRepository;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.domain.entity.UnitMaster;
@@ -46,13 +49,14 @@ public class RunMaterialUsageService {
     private final UnitConverter unitConverter;
     private final UnitMasterRepository unitMasterRepository;
     private final ProjectAccessService projectAccessService;
+    private final BomLineRepository bomLineRepository;
 
     public RunMaterialUsageResponse usage(String productionRunId) {
         ProductionRun run = productionRunRepository.findByProductionRunIdAndDeletedYn(productionRunId, "N")
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         projectAccessService.requireProjectReadAccess(run.getProjectId());
 
-        // Plan and actual per item in the item's own unit; plan items first, in plan order.
+        // Plan and actual per item in the item's own unit.
         Map<String, Item> items = new LinkedHashMap<>();
         Map<String, BigDecimal> planned = new HashMap<>();
         Map<String, BigDecimal> actual = new HashMap<>();
@@ -113,6 +117,17 @@ public class RunMaterialUsageService {
             lines.add(new RunMaterialUsageResponse.Line(itemId, item.getItemCode(), item.getItemName(), unitCodeOf(item), inBom,
                 plan, standard, used, variance, percent, unitCost, lineCost));
         }
+        // Recordings come back in id order, which is random; list materials as the BOM lists them, then the rest by code.
+        Map<String, Integer> bomOrder = new HashMap<>();
+        if (run.getBomId() != null) {
+            List<BomLine> bomLines = bomLineRepository.findAllByBomIdOrderBySortOrderAscBomLineIdAsc(run.getBomId());
+            for (int index = 0; index < bomLines.size(); index++) {
+                bomOrder.putIfAbsent(bomLines.get(index).getChildItemId(), index);
+            }
+        }
+        lines.sort(Comparator
+            .comparing((RunMaterialUsageResponse.Line line) -> bomOrder.getOrDefault(line.itemId(), Integer.MAX_VALUE))
+            .thenComparing(RunMaterialUsageResponse.Line::itemCode, Comparator.nullsLast(Comparator.naturalOrder())));
         return new RunMaterialUsageResponse(run.getProductionRunId(), run.getBomId(), run.getBomVersion(), plannedOutput, basis,
             basisIsActual, scale(varianceCost), complete, lines);
     }

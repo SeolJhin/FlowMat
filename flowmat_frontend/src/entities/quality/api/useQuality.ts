@@ -10,23 +10,25 @@ import type {
   QualitySummaryDto,
 } from '../../../shared/types/api'
 
-/** Narrows quality records to one run and/or one LOT. */
+/** Narrows quality records to one run, one LOT and/or one item. */
 export interface QualityFilter {
   productionRunId?: string | null
   lotId?: string | null
+  itemId?: string | null
 }
 
 function query(projectId: string, filter: QualityFilter, extra: Record<string, string> = {}) {
   const params = new URLSearchParams({ projectId, ...extra })
   if (filter.productionRunId) params.set('productionRunId', filter.productionRunId)
   if (filter.lotId) params.set('lotId', filter.lotId)
+  if (filter.itemId) params.set('itemId', filter.itemId)
   return params.toString()
 }
 
 /** Inspections, newest first (docs/domain/quality-inspection.md). */
 export function useQualityInspectionsQuery(projectId: string, filter: QualityFilter) {
   return useQuery<QualityInspectionDto[]>({
-    queryKey: ['quality-inspections', projectId, filter.productionRunId ?? null, filter.lotId ?? null],
+    queryKey: ['quality-inspections', projectId, filter.productionRunId ?? null, filter.lotId ?? null, filter.itemId ?? null],
     queryFn: async () =>
       unwrapApiResponse(
         await httpClient.get<ApiEnvelope<QualityInspectionDto[]>>(`/quality-inspections?${query(projectId, filter)}`),
@@ -38,7 +40,7 @@ export function useQualityInspectionsQuery(projectId: string, filter: QualityFil
 /** Defects, newest first; unresolved ones only when {@code openOnly}. */
 export function useDefectsQuery(projectId: string, filter: QualityFilter, openOnly = false) {
   return useQuery<DefectDto[]>({
-    queryKey: ['defects', projectId, filter.productionRunId ?? null, filter.lotId ?? null, openOnly],
+    queryKey: ['defects', projectId, filter.productionRunId ?? null, filter.lotId ?? null, filter.itemId ?? null, openOnly],
     queryFn: async () =>
       unwrapApiResponse(
         await httpClient.get<ApiEnvelope<DefectDto[]>>(`/defects?${query(projectId, filter, { openOnly: String(openOnly) })}`),

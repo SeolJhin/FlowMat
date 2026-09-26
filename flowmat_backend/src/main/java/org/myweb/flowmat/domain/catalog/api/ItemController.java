@@ -4,8 +4,11 @@ import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.api.dto.request.ItemCreateRequest;
+import org.myweb.flowmat.domain.catalog.api.dto.request.ItemImportRequest;
 import org.myweb.flowmat.domain.catalog.api.dto.request.ItemUpdateRequest;
+import org.myweb.flowmat.domain.catalog.api.dto.response.ItemImportResponse;
 import org.myweb.flowmat.domain.catalog.api.dto.response.ItemResponse;
+import org.myweb.flowmat.domain.catalog.application.ItemImportService;
 import org.myweb.flowmat.domain.catalog.application.ItemService;
 import org.myweb.flowmat.global.response.ApiResponse;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -24,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class ItemController {
 
     private final ItemService itemService;
+    private final ItemImportService itemImportService;
 
     @GetMapping
     public ApiResponse<List<ItemResponse>> listItems(@RequestParam("projectId") String projectId) {
@@ -35,6 +39,12 @@ public class ItemController {
         return ApiResponse.ok(itemService.createItem(request));
     }
 
+    /** Creates and updates items from a spreadsheet by item code (docs/domain/item-import.md); all rows or none. */
+    @PostMapping("/import")
+    public ApiResponse<ItemImportResponse> importItems(@Valid @RequestBody ItemImportRequest request) {
+        return ApiResponse.ok(itemImportService.importItems(request));
+    }
+
     @GetMapping("/{itemId}")
     public ApiResponse<ItemResponse> getItem(@PathVariable("itemId") String itemId) {
         return ApiResponse.ok(itemService.getItem(itemId));
@@ -43,7 +53,7 @@ public class ItemController {
     @PutMapping("/{itemId}")
     public ApiResponse<ItemResponse> updateItem(
         @PathVariable("itemId") String itemId,
-        @RequestBody ItemUpdateRequest request
+        @Valid @RequestBody ItemUpdateRequest request
     ) {
         return ApiResponse.ok(itemService.updateItem(itemId, request));
     }

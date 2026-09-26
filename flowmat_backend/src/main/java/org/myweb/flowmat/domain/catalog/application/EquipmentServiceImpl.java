@@ -1,9 +1,11 @@
 package org.myweb.flowmat.domain.catalog.application;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.api.dto.request.EquipmentCreateRequest;
+import org.myweb.flowmat.domain.catalog.api.dto.request.EquipmentDetails;
 import org.myweb.flowmat.domain.catalog.api.dto.request.EquipmentUpdateRequest;
 import org.myweb.flowmat.domain.catalog.api.dto.response.EquipmentResponse;
 import org.myweb.flowmat.domain.catalog.domain.entity.Equipment;
@@ -56,6 +58,7 @@ public class EquipmentServiceImpl implements EquipmentService {
         equipment.setEquipmentName(required(request.equipmentName(), "equipmentName"));
         equipment.setEquipmentType(required(request.equipmentType(), "equipmentType"));
         equipment.setEquipmentStatus("active");
+        if (request.details() != null) applyDetails(equipment, request.details());
         equipment.setCreatedBy(projectAccessService.requireCurrentUserId());
         return toResponse(equipmentRepository.save(equipment));
     }
@@ -72,6 +75,7 @@ public class EquipmentServiceImpl implements EquipmentService {
             if (!STATUSES.contains(status)) throw new BusinessException(ErrorCode.BAD_REQUEST, "Invalid equipmentStatus.");
             equipment.setEquipmentStatus(status);
         }
+        if (request.details() != null) applyDetails(equipment, request.details());
         equipment.setUpdatedBy(projectAccessService.requireCurrentUserId());
         return toResponse(equipmentRepository.save(equipment));
     }
@@ -100,8 +104,26 @@ public class EquipmentServiceImpl implements EquipmentService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
+    /** Replaces every detail; blank text and null numbers clear. */
+    private static void applyDetails(Equipment equipment, EquipmentDetails details) {
+        equipment.setManufacturer(optional(details.manufacturer()));
+        equipment.setModelName(optional(details.modelName()));
+        equipment.setSerialNo(optional(details.serialNo()));
+        equipment.setCapacityPerHour(nonNegative(details.capacityPerHour(), "capacityPerHour"));
+        equipment.setPowerKwh(nonNegative(details.powerKwh(), "powerKwh"));
+        equipment.setWaterLiter(nonNegative(details.waterLiter(), "waterLiter"));
+        equipment.setLocation(optional(details.location()));
+    }
+
+    private static BigDecimal nonNegative(BigDecimal value, String name) {
+        if (value != null && value.signum() < 0) throw new BusinessException(ErrorCode.BAD_REQUEST, name + " must not be negative.");
+        return value;
+    }
+
     private static EquipmentResponse toResponse(Equipment equipment) {
         return new EquipmentResponse(equipment.getEquipmentId(), equipment.getProjectId(), equipment.getEquipmentCode(),
-            equipment.getEquipmentName(), equipment.getEquipmentType(), equipment.getEquipmentStatus());
+            equipment.getEquipmentName(), equipment.getEquipmentType(), equipment.getEquipmentStatus(),
+            new EquipmentDetails(equipment.getManufacturer(), equipment.getModelName(), equipment.getSerialNo(),
+                equipment.getCapacityPerHour(), equipment.getPowerKwh(), equipment.getWaterLiter(), equipment.getLocation()));
     }
 }

@@ -39,7 +39,7 @@ class ProcessIoPortContractIntegrationTest extends IntegrationTestSupport {
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"processId\":\"" + processId + "\",\"itemId\":\"itm_demo_mix_output\","
                 + "\"direction\":\"input\",\"quantity\":2,\"unit\":\"kg\","
-                + "\"role\":\"feed\",\"resourceType\":\"material\","
+                + "\"role\":\"feed\",\"resourceType\":\"material\",\"requiredYn\":\"N\","
                 + "\"schemaJson\":{\"type\":\"object\"},\"validationRule\":\"quantity > 0\"}"));
         String portId = port.path("processIoId").asText();
         org.junit.jupiter.api.Assertions.assertEquals("feed", port.path("role").asText());
@@ -49,7 +49,8 @@ class ProcessIoPortContractIntegrationTest extends IntegrationTestSupport {
             .path("workflowRevisionId").asText();
         data(put("/process-ios/" + portId)
             .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"role\":\"product\",\"schemaJson\":{\"type\":\"string\"}}"));
+            .content("{\"role\":\"product\",\"schemaJson\":{\"type\":\"object\","
+                + "\"properties\":{\"batch\":{\"type\":\"string\"}}}}"));
 
         mockMvc.perform(auth(get("/process-ios/" + portId)))
             .andExpect(status().isOk())
@@ -62,6 +63,15 @@ class ProcessIoPortContractIntegrationTest extends IntegrationTestSupport {
         mockMvc.perform(auth(put("/process-ios/" + portId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"schemaJson\":[1,2]}")))
+            .andExpect(status().isBadRequest());
+        mockMvc.perform(auth(put("/process-ios/" + portId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"schemaJson\":{\"type\":\"string\"}}")))
+            .andExpect(status().isBadRequest());
+        mockMvc.perform(auth(put("/process-ios/" + portId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"schemaJson\":{\"type\":\"object\",\"properties\":{},"
+                    + "\"required\":[\"missing\"]}}")))
             .andExpect(status().isBadRequest());
     }
 

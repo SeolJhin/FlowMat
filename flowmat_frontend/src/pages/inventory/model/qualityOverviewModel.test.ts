@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { formatRate, windowStart } from './qualityOverviewModel'
+import type { ItemDto, LotDto } from '../../../shared/types/api'
+import { formatRate, qualityTargets, windowStart } from './qualityOverviewModel'
 
 describe('windowStart', () => {
   it('starts at local midnight so today is one of the days', () => {
@@ -22,5 +23,22 @@ describe('formatRate', () => {
     expect(formatRate(1)).toBe('100.0%')
     expect(formatRate(0)).toBe('0.0%')
     expect(formatRate(null)).toBe('–')
+  })
+})
+
+describe('qualityTargets', () => {
+  it('offers open LOTs first, then items without LOT tracking', () => {
+    const items = [
+      { itemId: 'salt', itemCode: 'SALT', lotManageYn: 'N' },
+      { itemId: 'flour', itemCode: 'FLOUR', lotManageYn: 'Y' },
+      { itemId: 'bag', itemCode: 'BAG', lotManageYn: 'N' },
+    ] as ItemDto[]
+    const lots = [
+      { lotId: 'l2', itemId: 'flour', lotNo: 'L-2', lotStatus: 'available' },
+      { lotId: 'l1', itemId: 'flour', lotNo: 'L-1', lotStatus: 'quarantined' },
+      { lotId: 'l0', itemId: 'flour', lotNo: 'L-0', lotStatus: 'closed' },
+    ] as LotDto[]
+    expect(qualityTargets(items, lots).map((target) => target.key)).toEqual(['lot:l1', 'lot:l2', 'item:bag', 'item:salt'])
+    expect(qualityTargets(items, lots)[2]).toEqual({ key: 'item:bag', itemId: 'bag', lotId: null, direction: 'item' })
   })
 })

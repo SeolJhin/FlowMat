@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.domain.entity.UnitMaster;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
@@ -148,6 +149,8 @@ public class StockAlertService {
         projectAccessService.requireProjectReadAccess(projectId);
         List<Item> watched = itemRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(projectId, NOT_DELETED).stream()
             .filter(item -> item.getSafetyStockQty() != null && item.getSafetyStockQty().signum() > 0)
+            // An inactive or discontinued item takes no new stock, so it is not suggested for ordering.
+            .filter(ItemStatusRule::isActive)
             .toList();
         if (watched.isEmpty()) {
             return List.of();

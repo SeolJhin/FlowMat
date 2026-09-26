@@ -1,7 +1,7 @@
 import { useRunCostQuery, useRunMaterialUsageQuery } from '../../../entities/production/api/useRunCost'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import type { RunMaterialUsageDto } from '../../../shared/types/api'
-import { basisLabel, formatVariance, varianceTone, type VarianceTone } from '../model/usageModel'
+import { basisLabel, formatVariance, varianceTone, yieldLabel, type VarianceTone } from '../model/usageModel'
 import { formatQty } from './runDisplay'
 
 const cell = { padding: '4px 6px' } as const
@@ -63,7 +63,9 @@ function UsageAgainstBom({ usage }: { usage: RunMaterialUsageDto }) {
   return (
     <div aria-label="Use against BOM" style={{ marginTop: 14 }}>
       <h4 style={{ margin: '0 0 4px' }}>Use against BOM{usage.bomVersion != null ? ` v${usage.bomVersion}` : ''}</h4>
-      <p className="inspector-hint" style={{ margin: '0 0 6px', fontSize: 12 }}>{basisLabel(usage, formatQty)}</p>
+      <p className="inspector-hint" style={{ margin: '0 0 6px', fontSize: 12 }}>
+        {basisLabel(usage, formatQty)} {yieldLabel(usage, formatQty)}
+      </p>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
           <tr style={{ opacity: 0.7 }}>

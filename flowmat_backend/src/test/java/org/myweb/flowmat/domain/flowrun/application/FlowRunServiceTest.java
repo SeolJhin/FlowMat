@@ -9,6 +9,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +22,7 @@ import org.myweb.flowmat.domain.flowrun.api.dto.request.FlowRunStartRequest;
 import org.myweb.flowmat.domain.flowrun.domain.entity.FlowRun;
 import org.myweb.flowmat.domain.flowrun.repository.FlowRunRepository;
 import org.myweb.flowmat.domain.flowrun.repository.FlowRunStepRepository;
+import org.myweb.flowmat.domain.flowrun.repository.FlowRunStepAttemptRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
 import org.myweb.flowmat.domain.workflow.domain.entity.WorkflowRevision;
@@ -32,9 +35,11 @@ class FlowRunServiceTest {
 
     @Mock private FlowRunRepository runRepository;
     @Mock private FlowRunStepRepository stepRepository;
+    @Mock private FlowRunStepAttemptRepository attemptRepository;
     @Mock private FlowRunEventRecorder eventRecorder;
     @Mock private WorkflowRevisionRepository revisionRepository;
     @Mock private ProjectAccessService accessService;
+    @Mock private EntityManager entityManager;
     @Mock private IdGenerator idGenerator;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -42,8 +47,9 @@ class FlowRunServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new FlowRunService(runRepository, stepRepository, eventRecorder, revisionRepository,
-            accessService, idGenerator, objectMapper);
+        service = new FlowRunService(runRepository, stepRepository, attemptRepository,
+            eventRecorder, revisionRepository,
+            accessService, entityManager, idGenerator, objectMapper);
     }
 
     @Test
@@ -69,6 +75,7 @@ class FlowRunServiceTest {
         assertEquals("L-1", response.inputPayload().path("lot").asText());
         assertEquals("running", response.status());
         assertNotNull(response.startedAt());
+        verify(entityManager).lock(workflow, LockModeType.PESSIMISTIC_WRITE);
     }
 
     @Test

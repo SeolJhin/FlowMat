@@ -1,6 +1,8 @@
 package org.myweb.flowmat;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -8,14 +10,26 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
+import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.global.security.JwtProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -28,6 +42,7 @@ class InventoryTransferIntegrationTest extends IntegrationTestSupport {
     @Autowired private JwtProvider jwtProvider;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private ItemRepository itemRepository;
+    @Autowired private InventoryRepository inventoryRepository;
 
     @Test
     void movingStockKeepsReservationsBehindAndReusesTheDestination() throws Exception {
@@ -91,6 +106,79 @@ class InventoryTransferIntegrationTest extends IntegrationTestSupport {
 
         move(rowA, "quarantine", null).andExpect(status().isOk());
         transfer(rowA, "WH-D-" + suffix().substring(0, 6), "1", UUID.randomUUID().toString()).andExpect(status().isConflict());
+    }
+
+    @Test
+    void transfersIntoTheSameNewPlaceAtOnceBothLand() throws Exception {
+        String lotItem = item(true);
+        String lotId = data(call(post("/lots"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"itemId\":\"" + lotItem
+            + "\",\"lotNo\":\"TR-" + suffix().substring(0, 8) + "\"}")).path("lotId").asText();
+        String plainItem = item(false);
+        for (int round = 0; round < 3; round++) {
+            // Same LOT from two places into one new place: without taking turns the second insert hits the unique index.
+            String a = data(call(post("/inventories"), stock(lotItem, lotId, "CA-" + suffix(), "5"))).path("inventoryId").asText();
+            String b = data(call(post("/inventories"), stock(lotItem, lotId, "CB-" + suffix(), "5"))).path("inventoryId").asText();
+            String place = "CD-" + suffix();
+            assertEquals(List.of(200, 200), together(() -> transfer(a, place, "1", UUID.randomUUID().toString()),
+                () -> transfer(b, place, "2", UUID.randomUUID().toString())));
+            assertEquals(0, new BigDecimal("3").compareTo(
+                inventoryRepository.findLotStockAt(DEMO_PROJECT, lotItem, lotId, place).orElseThrow().getQuantity()));
+
+            // A non-LOT item has no index to trip, but must still end up with one record there.
+            String c = data(call(post("/inventories"), stock(plainItem, null, "CC-" + suffix(), "5"))).path("inventoryId").asText();
+            String d = data(call(post("/inventories"), stock(plainItem, null, "CE-" + suffix(), "5"))).path("inventoryId").asText();
+            String plainPlace = "CF-" + suffix();
+            assertEquals(List.of(200, 200), together(() -> transfer(c, plainPlace, "1", UUID.randomUUID().toString()),
+                () -> transfer(d, plainPlace, "2", UUID.randomUUID().toString())));
+            List<Inventory> there = inventoryRepository.findStockAt(DEMO_PROJECT, plainItem, plainPlace);
+            assertEquals(1, there.size());
+            assertEquals(0, new BigDecimal("3").compareTo(there.get(0).getQuantity()));
+        }
+    }
+
+    @Test
+    void addingTheSameLotRecordTwiceAtOnceSaysWhichRecordToUse() throws Exception {
+        String lotItem = item(true);
+        String lotId = data(call(post("/lots"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"itemId\":\"" + lotItem
+            + "\",\"lotNo\":\"TA-" + suffix().substring(0, 8) + "\"}")).path("lotId").asText();
+        for (int round = 0; round < 3; round++) {
+            String place = "TA-" + suffix();
+            Callable<ResultActions> add = () -> call(post("/inventories"), stock(lotItem, lotId, place, "1"));
+            List<MockHttpServletResponse> responses = togetherResponses(add, add);
+            List<Integer> statuses = responses.stream().map(MockHttpServletResponse::getStatus).sorted().toList();
+            assertEquals(List.of(200, 409), statuses);
+            // The loser waited for the winner and got the plain answer, not a unique-index error.
+            String refused = responses.stream().filter(r -> r.getStatus() == 409).findFirst().orElseThrow().getContentAsString();
+            assertTrue(refused.contains("already has a stock record"), refused);
+        }
+    }
+
+    /** Runs the calls at the same moment and returns their HTTP statuses in order. */
+    private List<Integer> together(Callable<ResultActions> first, Callable<ResultActions> second) throws Exception {
+        return togetherResponses(first, second).stream().map(MockHttpServletResponse::getStatus).toList();
+    }
+
+    private List<MockHttpServletResponse> togetherResponses(Callable<ResultActions> first, Callable<ResultActions> second)
+        throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<MockHttpServletResponse>> results = new ArrayList<>();
+            for (Callable<ResultActions> call : List.of(first, second)) {
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return call.call().andReturn().getResponse();
+                }));
+            }
+            start.countDown();
+            List<MockHttpServletResponse> responses = new ArrayList<>();
+            for (Future<MockHttpServletResponse> result : results) {
+                responses.add(result.get(30, TimeUnit.SECONDS));
+            }
+            return responses;
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     // ---- helpers ----

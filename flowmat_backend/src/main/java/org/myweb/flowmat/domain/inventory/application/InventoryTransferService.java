@@ -91,8 +91,13 @@ public class InventoryTransferService {
         return response(transferId);
     }
 
-    /** The record of the same item and LOT at the destination; an empty one is created when there is none. */
+    /**
+     * The record of the same item and LOT at the destination; an empty one is created when there is none. Two transfers
+     * into the same new place take turns, so neither trips the one-record-per-LOT-and-place index and a non-LOT item does
+     * not get two records there.
+     */
     private Inventory destination(Inventory from, String toLocation) {
+        inventoryRepository.lockStockPlace(from.getProjectId(), from.getItemId(), from.getLotId(), toLocation);
         if (from.getLotId() != null) {
             return inventoryRepository.findLotStockAt(from.getProjectId(), from.getItemId(), from.getLotId(), toLocation)
                 .orElseGet(() -> createEmpty(from, toLocation));

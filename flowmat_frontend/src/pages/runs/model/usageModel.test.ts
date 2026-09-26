@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { basisLabel, formatVariance, varianceTone } from './usageModel'
+import { basisLabel, formatVariance, varianceTone, yieldLabel } from './usageModel'
 
 const line = { variance: 3, variancePercent: 37.5, unit: 'kg', actual: 11 }
 
@@ -31,5 +31,15 @@ describe('basisLabel', () => {
     expect(basisLabel({ basisQuantity: 16, basisIsActual: true })).toBe('Standard for the 16 made.')
     expect(basisLabel({ basisQuantity: 20, basisIsActual: false })).toContain('20 planned')
     expect(basisLabel({ basisQuantity: null, basisIsActual: false })).toBe('No output to work the standard out for.')
+  })
+})
+
+describe('yieldLabel', () => {
+  it('compares what was made with the plan once there is an output', () => {
+    expect(yieldLabel({ basisQuantity: 16, basisIsActual: true, plannedOutputQty: 20 })).toBe('Made 16 of 20 planned (80%).')
+    expect(yieldLabel({ basisQuantity: 21, basisIsActual: true, plannedOutputQty: 20 })).toBe('Made 21 of 20 planned (105%).')
+    expect(yieldLabel({ basisQuantity: 1, basisIsActual: true, plannedOutputQty: 3 })).toBe('Made 1 of 3 planned (33.3%).')
+    expect(yieldLabel({ basisQuantity: 20, basisIsActual: false, plannedOutputQty: 20 })).toBeNull()
+    expect(yieldLabel({ basisQuantity: 5, basisIsActual: true, plannedOutputQty: null })).toBeNull()
   })
 })

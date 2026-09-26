@@ -6,6 +6,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import lombok.Getter;
 import lombok.Setter;
 import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
@@ -39,4 +40,8 @@ public class Inventory extends CreatedUpdatedAuditEntity {
     /** Optimistic lock; also bumped by the atomic quantity update in InventoryRepository. */
     @Version
     private Long version;
+
+    /** When a stock count last covered this record, with or without a difference (docs/domain/stock-count.md "마지막 실사"). */
+    private OffsetDateTime lastCheckedAt;
+    private String lastCheckedBy;
 }

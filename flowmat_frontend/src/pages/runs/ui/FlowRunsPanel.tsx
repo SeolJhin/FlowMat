@@ -83,6 +83,7 @@ export function FlowRunsPanel({
   const [inputJson, setInputJson] = useState('{}')
   const [outputJson, setOutputJson] = useState('{}')
   const [errorCode, setErrorCode] = useState('MANUAL_FAILURE')
+  const [runStopReason, setRunStopReason] = useState('')
   const [formError, setFormError] = useState('')
 
   const published = revisions.filter((revision) => revision.status === 'published')
@@ -305,6 +306,18 @@ export function FlowRunsPanel({
               <button type="button" disabled={actionMutation.isPending || stepsQuery.isLoading || stepsQuery.isError
                 || steps.some((step) => step.status !== 'completed')}
                 onClick={() => void act(`${basePath}/finish`, {})}>Finish Flow Run</button>
+              <label>Reason for ending this run
+                <textarea value={runStopReason} onChange={(event) => setRunStopReason(event.target.value)}
+                  maxLength={4000} rows={2} />
+              </label>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" disabled={actionMutation.isPending || !runStopReason.trim()}
+                  onClick={() => void act(`${basePath}/cancel`, { reason: runStopReason })}>Cancel Flow Run</button>
+                <button type="button" disabled={actionMutation.isPending || !runStopReason.trim() || !errorCode.trim()}
+                  onClick={() => void act(`${basePath}/fail`, { errorCode, errorMessage: runStopReason })}>
+                  Mark Flow Run failed
+                </button>
+              </div>
             </div>
           )}
           {formError && <p role="alert">{formError}</p>}

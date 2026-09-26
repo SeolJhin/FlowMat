@@ -121,11 +121,19 @@ export async function refreshAccessToken(): Promise<boolean> {
     return refreshPromise
   }
 
-  refreshPromise = performRefresh().finally(() => {
+  const refresh = withRefreshCookieLock(performRefresh)
+  refreshPromise = refresh.finally(() => {
     refreshPromise = null
   })
 
   return refreshPromise
+}
+
+/** Serialize operations that consume or revoke the shared refresh cookie across tabs. */
+export function withRefreshCookieLock<T>(operation: () => Promise<T>): Promise<T> {
+  return isBrowser() && navigator.locks
+    ? navigator.locks.request('flowmat-refresh', { mode: 'exclusive' }, operation)
+    : operation()
 }
 
 export { getCsrfToken }

@@ -16,6 +16,8 @@ public record WorkOrderCreateRequest(
     OffsetDateTime plannedStartAt,
     OffsetDateTime plannedEndAt,
     String instruction,
-    String assignedTo
+    String assignedTo,
+    /** Link to the written work instruction; http or https, at most 255 characters. */
+    String instructionUrl
 ) {
 }

@@ -10,4 +10,10 @@ public interface ItemRepository extends JpaRepository<Item, String> {
     List<Item> findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(String projectId, String deletedYn);
 
     Optional<Item> findByItemIdAndDeletedYn(String itemId, String deletedYn);
+
+    /** Whether an active item already uses the code; codes are kept unique per project by the service. */
+    boolean existsByProjectIdAndItemCodeAndDeletedYn(String projectId, String itemCode, String deletedYn);
+
+    /** Another active item of the project with this barcode, if any. */
+    Optional<Item> findFirstByProjectIdAndBarcodeAndDeletedYnAndItemIdNot(String projectId, String barcode, String deletedYn, String itemId);
 }

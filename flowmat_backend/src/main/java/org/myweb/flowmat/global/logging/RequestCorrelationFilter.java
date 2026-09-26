@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.myweb.flowmat.global.security.AuthUser;
 import org.slf4j.MDC;
 import org.springframework.security.core.Authentication;
@@ -15,6 +16,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class RequestCorrelationFilter extends OncePerRequestFilter {
 
     private static final String REQUEST_ID_HEADER = "X-Request-Id";
+    private static final Pattern SAFE_REQUEST_ID = Pattern.compile("[A-Za-z0-9._:-]{1,100}");
 
     @Override
     protected void doFilterInternal(
@@ -23,7 +25,7 @@ public class RequestCorrelationFilter extends OncePerRequestFilter {
         FilterChain filterChain
     ) throws ServletException, IOException {
         String requestId = normalize(request.getHeader(REQUEST_ID_HEADER));
-        if (requestId == null) {
+        if (requestId == null || !SAFE_REQUEST_ID.matcher(requestId).matches()) {
             requestId = UUID.randomUUID().toString().replace("-", "");
         }
 

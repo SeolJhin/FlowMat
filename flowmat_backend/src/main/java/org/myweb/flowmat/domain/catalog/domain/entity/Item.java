@@ -1,5 +1,6 @@
 package org.myweb.flowmat.domain.catalog.domain.entity;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
@@ -46,4 +47,22 @@ public class Item extends CreatedUpdatedAuditEntity {
      * (docs/domain/material-cost.md). 0 or null means not known.
      */
     private BigDecimal unitCost;
+
+    /** Free grouping for lists and reports, e.g. "flour" or "packaging" (docs/domain/item-details.md). */
+    private String itemGroup;
+    private String spec;
+    /** Unique among the project's active items when set. */
+    private String barcode;
+    private String sku;
+    private String storageCondition;
+    private String itemDesc;
+
+    /**
+     * What the item is bought in, e.g. "bag", and how many stock units one holds (the V1 conversion_rate, 1 by default)
+     * (docs/domain/item-details.md "구매 단위"). Null when it is bought in its stock unit.
+     */
+    private String purchaseUnit;
+
+    @Column(name = "conversion_rate", precision = 18, scale = 8)
+    private BigDecimal conversionRate;
 }

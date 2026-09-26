@@ -28,9 +28,10 @@ import { preloadWorkspaceExperience } from '../../workspace/ui/workspacePreload'
 type DashboardProps = {
   onLogout: () => void
   onRequestDormant: () => void
+  isLoggingOut: boolean
 }
 
-function Dashboard({ onLogout, onRequestDormant }: DashboardProps) {
+function Dashboard({ onLogout, onRequestDormant, isLoggingOut }: DashboardProps) {
   const navigate = useNavigate()
   const currentUserQuery = useCurrentUserQuery()
   const currentUser = currentUserQuery.data
@@ -174,6 +175,7 @@ function Dashboard({ onLogout, onRequestDormant }: DashboardProps) {
             <button
               type="button"
               onClick={onLogout}
+              disabled={isLoggingOut}
               className="rounded-[10px] px-3.5 py-2 text-[13px] font-medium text-[#9694a3] transition hover:bg-[#1a1b24] hover:text-[#f2f1f6]"
             >
               Logout
@@ -971,6 +973,7 @@ export function HomeRoute() {
     <Dashboard
       onLogout={handleLogout}
       onRequestDormant={() => void handleRequestDormant()}
+      isLoggingOut={logoutMutation.isPending}
     />
   )
 }

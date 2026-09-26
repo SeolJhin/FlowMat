@@ -2,9 +2,11 @@ package org.myweb.flowmat.domain.catalog.application;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.api.dto.request.ItemCreateRequest;
+import org.myweb.flowmat.domain.catalog.api.dto.request.ItemDetails;
 import org.myweb.flowmat.domain.catalog.api.dto.request.ItemUpdateRequest;
 import org.myweb.flowmat.domain.catalog.api.dto.response.ItemResponse;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
@@ -61,6 +63,10 @@ public class ItemServiceImpl implements ItemService {
     @Transactional
     public ItemResponse createItem(ItemCreateRequest request) {
         projectAccessService.requireProjectWriteAccess(request.projectId());
+        // The table has no unique key on the code (V1); the code is how people and imports find an item, so keep it unique.
+        if (itemRepository.existsByProjectIdAndItemCodeAndDeletedYn(request.projectId().trim(), request.itemCode().trim(), NOT_DELETED)) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Item code " + request.itemCode().trim() + " already exists in this project.");
+        }
 
         Item item = new Item();
         item.setItemId(idGenerator.generate());
@@ -71,11 +77,19 @@ public class ItemServiceImpl implements ItemService {
         item.setResourceCategory(defaultIfBlank(request.resourceCategory(), "material"));
         item.setResourceType(trimToNull(request.resourceType()));
         item.setUnitId(requireActiveUnit(request.unitId()));
-        item.setItemStatus(defaultIfBlank(request.itemStatus(), "active"));
+        item.setItemStatus(hasText(request.itemStatus()) ? ItemStatusRule.requireKnown(request.itemStatus()) : ItemStatusRule.ACTIVE);
         item.setLotManageYn(yn(request.lotManageYn()));
         item.setSafetyStockQty(requireNonNegative(request.safetyStockQty(), "Safety stock"));
         item.setLeadTimeDays(requireNonNegative(request.leadTimeDays(), "Lead time"));
         item.setUnitCost(requireNonNegative(request.unitCost(), "Unit cost"));
+        if (request.details() != null) {
+            applyDetails(item, request.details());
+        }
+        // Mapped now, so set the column's own default instead of writing null over it.
+        item.setConversionRate(BigDecimal.ONE);
+        if (request.purchaseUnit() != null || request.purchaseUnitQty() != null) {
+            applyPurchaseUnit(item, request.purchaseUnit(), request.purchaseUnitQty());
+        }
         item.setDeletedYn(NOT_DELETED);
         return toResponse(itemRepository.save(item));
     }
@@ -92,6 +106,17 @@ public class ItemServiceImpl implements ItemService {
     public ItemResponse updateItem(String itemId, ItemUpdateRequest request) {
         Item item = findActiveItem(itemId);
         projectAccessService.requireProjectWriteAccess(item.getProjectId());
+        if (hasText(request.itemCode()) && !request.itemCode().trim().equals(item.getItemCode())) {
+            // Items are referred to by id everywhere, so a code can change; it must stay unique like on create.
+            String code = request.itemCode().trim();
+            if (code.length() > 50) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Item code is longer than 50 characters.");
+            }
+            if (itemRepository.existsByProjectIdAndItemCodeAndDeletedYn(item.getProjectId(), code, NOT_DELETED)) {
+                throw new BusinessException(ErrorCode.CONFLICT, "Item code " + code + " already exists in this project.");
+            }
+            item.setItemCode(code);
+        }
         if (hasText(request.itemName())) {
             item.setItemName(request.itemName().trim());
         }
@@ -104,11 +129,13 @@ public class ItemServiceImpl implements ItemService {
         if (request.resourceType() != null) {
             item.setResourceType(trimToNull(request.resourceType()));
         }
-        if (request.unitId() != null) {
+        // Only a new unit must be active: an item keeps a unit deactivated since, and can still be edited.
+        if (request.unitId() != null && !Objects.equals(trimToNull(request.unitId()), item.getUnitId())) {
             item.setUnitId(requireActiveUnit(request.unitId()));
         }
-        if (hasText(request.itemStatus())) {
-            item.setItemStatus(request.itemStatus().trim().toLowerCase());
+        // Like the unit, only a new status is checked, so an item saved with an older value can still be edited.
+        if (hasText(request.itemStatus()) && !request.itemStatus().trim().equalsIgnoreCase(Objects.toString(item.getItemStatus(), ""))) {
+            item.setItemStatus(ItemStatusRule.requireKnown(request.itemStatus()));
         }
         if (request.lotManageYn() != null && !yn(request.lotManageYn()).equals(item.getLotManageYn())) {
             // Existing stock rows were created under the old rule; switching would leave them inconsistent.
@@ -126,6 +153,12 @@ public class ItemServiceImpl implements ItemService {
         }
         if (request.unitCost() != null) {
             item.setUnitCost(requireNonNegative(request.unitCost(), "Unit cost"));
+        }
+        if (request.details() != null) {
+            applyDetails(item, request.details());
+        }
+        if (request.purchaseUnit() != null || request.purchaseUnitQty() != null) {
+            applyPurchaseUnit(item, request.purchaseUnit(), request.purchaseUnitQty());
         }
         return toResponse(itemRepository.save(item));
     }
@@ -148,6 +181,60 @@ public class ItemServiceImpl implements ItemService {
         itemRepository.save(item);
     }
 
+    /** Replaces every detail; blank clears. A barcode must not be another active item's. */
+    private void applyDetails(Item item, ItemDetails details) {
+        String barcode = trimToNull(details.barcode());
+        if (barcode != null) {
+            itemRepository.findFirstByProjectIdAndBarcodeAndDeletedYnAndItemIdNot(item.getProjectId(), barcode, NOT_DELETED, item.getItemId())
+                .ifPresent(other -> {
+                    throw new BusinessException(ErrorCode.CONFLICT,
+                        "Barcode " + barcode + " is already used by item " + other.getItemCode() + ".");
+                });
+        }
+        item.setItemGroup(trimToNull(details.itemGroup()));
+        item.setSpec(trimToNull(details.spec()));
+        item.setBarcode(barcode);
+        item.setSku(trimToNull(details.sku()));
+        item.setStorageCondition(trimToNull(details.storageCondition()));
+        item.setItemDesc(trimToNull(details.description()));
+    }
+
+    /**
+     * The unit the item is bought in and how many stock units one holds. A blank unit goes back to buying in the stock
+     * unit; a quantity alone resizes the unit already set; a new unit without a quantity keeps the current size.
+     */
+    private static void applyPurchaseUnit(Item item, String unit, BigDecimal quantity) {
+        if (unit != null && unit.isBlank()) {
+            item.setPurchaseUnit(null);
+            item.setConversionRate(BigDecimal.ONE);
+            return;
+        }
+        String name = trimToNull(unit);
+        if (name != null && name.length() > 20) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Purchase unit is longer than 20 characters.");
+        }
+        if (quantity != null) {
+            if (quantity.signum() <= 0) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Purchase unit quantity must be more than 0.");
+            }
+            BigDecimal plain = quantity.stripTrailingZeros();
+            if (plain.scale() > 8 || plain.precision() - plain.scale() > 10) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Purchase unit quantity takes at most 10 whole digits and 8 decimals.");
+            }
+            if (name == null && item.getPurchaseUnit() == null) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Give the purchase unit with its quantity.");
+            }
+        }
+        if (name != null) {
+            item.setPurchaseUnit(name);
+        }
+        if (quantity != null) {
+            item.setConversionRate(quantity);
+        } else if (item.getConversionRate() == null) {
+            item.setConversionRate(BigDecimal.ONE);
+        }
+    }
+
     private Item findActiveItem(String itemId) {
         return itemRepository.findByItemIdAndDeletedYn(itemId, NOT_DELETED)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
@@ -167,7 +254,11 @@ public class ItemServiceImpl implements ItemService {
             item.getLotManageYn(),
             item.getSafetyStockQty(),
             item.getLeadTimeDays(),
-            item.getUnitCost()
+            item.getUnitCost(),
+            new ItemDetails(item.getItemGroup(), item.getSpec(), item.getBarcode(), item.getSku(), item.getStorageCondition(),
+                item.getItemDesc()),
+            item.getPurchaseUnit(),
+            item.getPurchaseUnit() == null ? null : item.getConversionRate()
         );
     }
 

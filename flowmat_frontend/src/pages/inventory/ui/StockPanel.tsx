@@ -10,9 +10,15 @@ import { canReverse, reversedIds, stockValue } from '../model/stockModel'
 import { StockMovementForm } from './StockMovementForm'
 import { StockAlerts } from './StockAlerts'
 import { ReorderList } from './ReorderList'
+import { StockImportPanel } from './StockImportPanel'
+import { FefoIssuePanel } from './FefoIssuePanel'
+import { OpenOrderNeeds } from './OpenOrderNeeds'
 import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { InventoryDto, ItemDto } from '../../../shared/types/api'
+import { ItemScanInput } from './ItemScanInput'
+import { pickableItems } from '../model/itemStatusModel'
+import { earlierToIssue } from '../model/fefoModel'
 
 // Quarantine is not a free-form status: it goes through a quarantine / release movement (whole LOT when there is one).
 const INVENTORY_STATUSES = ['available', 'hold']
@@ -153,6 +159,7 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>
       <section>
         <ReorderList projectId={projectId} />
+        <OpenOrderNeeds projectId={projectId} />
         <StockAlerts
           projectId={projectId}
           onShowRow={(inventoryId) => {
@@ -161,6 +168,8 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
             requestAnimationFrame(() => document.getElementById('stock-history')?.scrollIntoView({ block: 'start' }))
           }}
         />
+        <StockImportPanel projectId={projectId} />
+        <FefoIssuePanel projectId={projectId} items={items} />
         {inventoriesQuery.isLoading && <p>Loading stock...</p>}
         {inventoriesQuery.isError && (
           <p style={{ color: '#dc2626' }}>{errorMessage(inventoriesQuery.error, 'Failed to load stock.')}</p>
@@ -288,7 +297,21 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
             <h3 style={{ marginBottom: 8 }}>
               History — {historyInventory ? itemLabel.get(historyInventory.itemId) ?? historyInventory.itemId : historyFor}
             </h3>
-            {historyInventory && <StockMovementForm projectId={projectId} inventory={historyInventory} />}
+            {historyInventory && (() => {
+              const earlier = earlierToIssue(historyInventory, inventories, lots)
+              const historyItem = items.find((item) => item.itemId === historyInventory.itemId)
+              return (
+                // No key: switching to the sooner LOT keeps the movement and quantity already typed.
+                <StockMovementForm
+                  projectId={projectId}
+                  inventory={historyInventory}
+                  earlier={earlier}
+                  onUseEarlier={earlier ? () => setHistoryFor(earlier.inventory.inventoryId) : undefined}
+                  packUnit={historyItem?.purchaseUnit}
+                  packQty={historyItem?.purchaseUnitQty}
+                />
+              )
+            })()}
             {transactionsQuery.isLoading && <p>Loading history...</p>}
             {transactionsQuery.isError && (
               <p style={{ color: '#dc2626' }}>{errorMessage(transactionsQuery.error, 'Failed to load history.')}</p>
@@ -358,6 +381,7 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
       <section style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 18 }}>
         <h3 style={{ marginTop: 0 }}>{editing ? 'Adjust Stock' : 'Add Stock'}</h3>
         <form onSubmit={(e) => void handleSubmit(e)} style={{ display: 'grid', gap: 10 }}>
+          {!editing && <ItemScanInput items={pickableItems(items)} onPick={(item) => setForm((f) => ({ ...f, itemId: item.itemId, lotId: '' }))} />}
           <label style={{ display: 'grid', gap: 4 }}>
             <span>Item *</span>
             <select
@@ -367,7 +391,8 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
               required
             >
               <option value="" disabled>Select item</option>
-              {items.map((item) => (
+              {/* Inactive and discontinued items take no new stock; a record being adjusted keeps showing its own. */}
+              {(editing ? items : pickableItems(items, form.itemId)).map((item) => (
                 <option key={item.itemId} value={item.itemId}>{item.itemCode} · {item.itemName}</option>
               ))}
             </select>

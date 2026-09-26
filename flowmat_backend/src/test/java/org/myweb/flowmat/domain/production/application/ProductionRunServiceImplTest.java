@@ -10,6 +10,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.math.BigDecimal;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -55,6 +57,7 @@ class ProductionRunServiceImplTest {
     @Mock private ProductionRunRepository productionRunRepository;
     @Mock private ProductionRunItemRepository productionRunItemRepository;
     @Mock private ProjectAccessService projectAccessService;
+    @Mock private EntityManager entityManager;
     @Mock private WorkflowRepository workflowRepository;
     @Mock private WorkflowRevisionRepository workflowRevisionRepository;
     @Mock private ProcessRepository processRepository;
@@ -158,6 +161,7 @@ class ProductionRunServiceImplTest {
 
         assertEquals("wo-1", run.workOrderId());
         assertEquals("in_progress", order.getWorkOrderStatus());
+        verify(entityManager).lock(any(Workflow.class), eq(LockModeType.PESSIMISTIC_WRITE));
         verify(workOrderRepository).save(order);
     }
 

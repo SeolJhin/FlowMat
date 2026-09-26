@@ -3,6 +3,8 @@ package org.myweb.flowmat.domain.production.application;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
@@ -67,6 +69,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     private final ProductionRunRepository productionRunRepository;
     private final ProductionRunItemRepository productionRunItemRepository;
     private final ProjectAccessService projectAccessService;
+    private final EntityManager entityManager;
     private final WorkflowRepository workflowRepository;
     private final WorkflowRevisionRepository workflowRevisionRepository;
     private final ObjectMapper objectMapper;
@@ -98,6 +101,8 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         projectAccessService.requireProjectWriteAccess(request.projectId());
         Workflow workflow = findActiveWorkflow(request.workflowId());
         validateSameProject(request.projectId(), workflow.getProjectId());
+        // Publish and retire lock the workflow; resolve its revision under the same lock.
+        entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
         WorkflowRevision workflowRevision = resolveWorkflowRevision(workflow.getWorkflowId(), request.workflowRevisionId());
         WorkOrder workOrder = findRunnableWorkOrder(request.workOrderId(), request.projectId(), workflow);
         String targetItemId = trimToNull(request.targetItemId());

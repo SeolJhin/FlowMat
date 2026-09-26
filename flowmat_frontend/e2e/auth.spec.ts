@@ -250,6 +250,111 @@ test('two tabs keep separate in-memory access tokens while sharing the cookie se
   await context.close()
 })
 
+test('simultaneous tabs serialize rotating refresh cookies', async ({ browser }) => {
+  const context = await browser.newContext()
+  try {
+    const first = await context.newPage()
+    const second = await context.newPage()
+    await mockAuthApi(first)
+    await mockAuthApi(second)
+    await mockWorkspaceApi(first)
+    await mockWorkspaceApi(second)
+
+    await first.goto('/')
+    await first.locator('input').nth(0).fill('demo-owner')
+    await first.locator('input[type="password"]').fill('demo1234')
+    await first.getByRole('button', { name: 'Log in' }).click()
+    await expect(first.getByText('안녕하세요, Demo Owner님')).toBeVisible()
+
+    const usedTokens = new Set<string>()
+    let currentToken = 'test-refresh'
+    let rejectedRefreshes = 0
+    const rotatingRefresh = async (route: import('@playwright/test').Route) => {
+      const cookie = await route.request().headerValue('cookie') ?? ''
+      const presented = /(?:^|;\s*)flowmat_rt=([^;]+)/.exec(cookie)?.[1]
+      if (presented !== currentToken || usedTokens.has(presented)) {
+        rejectedRefreshes += 1
+        await route.fulfill({ status: 401, contentType: 'application/json',
+          body: JSON.stringify({ success: false, data: null, message: 'Token was already consumed' }) })
+        return
+      }
+      usedTokens.add(presented)
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      currentToken = `refresh-${usedTokens.size + 1}`
+      await route.fulfill({ status: 200,
+        headers: { 'content-type': 'application/json', 'set-cookie': `flowmat_rt=${currentToken}; HttpOnly; Path=/api/auth` },
+        body: JSON.stringify({ success: true, data: { accessToken, refreshToken: null }, message: null }),
+      })
+    }
+    await first.unroute('**/api/auth/refresh')
+    await second.unroute('**/api/auth/refresh')
+    await first.route('**/api/auth/refresh', rotatingRefresh)
+    await second.route('**/api/auth/refresh', rotatingRefresh)
+
+    await Promise.all([
+      first.goto('/projects/prj-e2e/workflows/wf-e2e'),
+      second.goto('/projects/prj-e2e/workflows/wf-e2e'),
+    ])
+    await expect(first.getByText('E2E Workflow')).toBeVisible()
+    await expect(second.getByText('E2E Workflow')).toBeVisible()
+    expect(rejectedRefreshes).toBe(0)
+    expect(usedTokens.size).toBe(2)
+  } finally {
+    await context.close()
+  }
+})
+
+test('logout waits for an in-flight refresh in another tab', async ({ browser }) => {
+  const context = await browser.newContext()
+  let releaseRefresh = () => {}
+  try {
+    const first = await context.newPage()
+    const second = await context.newPage()
+    await mockAuthApi(first)
+    await mockAuthApi(second)
+    await first.goto('/')
+    await first.locator('input').nth(0).fill('demo-owner')
+    await first.locator('input[type="password"]').fill('demo1234')
+    await first.getByRole('button', { name: 'Log in' }).click()
+    await expect(first.getByText('안녕하세요, Demo Owner님')).toBeVisible()
+    await second.goto('/')
+    await expect(second.getByText('안녕하세요, Demo Owner님')).toBeVisible()
+
+    let refreshStarted = () => {}
+    const started = new Promise<void>((resolve) => { refreshStarted = resolve })
+    const release = new Promise<void>((resolve) => { releaseRefresh = resolve })
+    let refreshFinished = false
+    let logoutBeforeRefresh = false
+    await first.unroute('**/api/auth/refresh')
+    await first.route('**/api/auth/refresh', async (route) => {
+      refreshStarted()
+      await release
+      await route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ success: true, data: { accessToken, refreshToken: null }, message: null }) })
+      refreshFinished = true
+    })
+    await second.unroute('**/api/auth/logout')
+    await second.route('**/api/auth/logout', async (route) => {
+      logoutBeforeRefresh = !refreshFinished
+      await route.fulfill({ status: 200,
+        headers: { 'content-type': 'application/json', 'set-cookie': 'flowmat_rt=; Max-Age=0; HttpOnly; Path=/api/auth' },
+        body: JSON.stringify({ success: true, data: null, message: null }) })
+    })
+
+    await first.goto('/projects/prj-e2e/workflows/wf-e2e', { waitUntil: 'commit' })
+    await started
+    await second.getByRole('button', { name: 'Logout' }).click()
+    await expect(second.getByRole('button', { name: 'Logout' })).toBeDisabled()
+    expect(logoutBeforeRefresh).toBe(false)
+    releaseRefresh()
+    await expect(second.locator('input').nth(0)).toBeVisible()
+    await expect.poll(() => first.evaluate(() => localStorage.getItem('flowmat_refresh_cookie'))).toBeNull()
+  } finally {
+    releaseRefresh()
+    await context.close()
+  }
+})
+
 test('an expired refresh session returns the user to login', async ({ page }) => {
   await mockAuthApi(page)
   await page.unroute('**/api/auth/refresh')

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { errorMessage } from '../../../shared/lib/errorMessage'
 import { useCreateProcessConnectionMutation } from '../../../entities/workflow/api/useCreateProcessConnectionMutation'
 import { useCreateProcessIoMutation } from '../../../entities/workflow/api/useCreateProcessIoMutation'
 import { useCreateProcessMutation } from '../../../entities/workflow/api/useCreateProcessMutation'
@@ -352,7 +353,7 @@ export function useWorkflowCanvasActions({
     try {
       await createProcessIoMutation.mutateAsync(input)
     } catch (error) {
-      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to create port.')
+      setWorkspaceMessage(errorMessage(error, 'Failed to create port.'))
       throw error
     }
   }
@@ -363,7 +364,7 @@ export function useWorkflowCanvasActions({
     try {
       await updateProcessIoMutation.mutateAsync(input)
     } catch (error) {
-      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to update port.')
+      setWorkspaceMessage(errorMessage(error, 'Failed to update port.'))
       throw error
     }
   }
@@ -460,7 +461,7 @@ export function useWorkflowCanvasActions({
     try {
       await updateConnectionMutation.mutateAsync(input)
     } catch (error) {
-      setWorkspaceMessage(error instanceof Error ? error.message : 'Failed to update connection.')
+      setWorkspaceMessage(errorMessage(error, 'Failed to update connection.'))
       throw error
     }
 

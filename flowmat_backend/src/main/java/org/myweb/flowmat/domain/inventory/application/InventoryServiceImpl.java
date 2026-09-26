@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
 import org.myweb.flowmat.domain.inventory.domain.enums.InventoryTransactionType;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
@@ -60,6 +61,7 @@ public class InventoryServiceImpl implements InventoryService {
         projectAccessService.requireProjectWriteAccess(request.projectId());
         Item item = findActiveItem(request.itemId());
         validateSameProject(request.projectId(), item.getProjectId());
+        ItemStatusRule.requireActive(item, "receive stock");
         evaluateRules(
             request.projectId(),
             List.of(
@@ -81,7 +83,9 @@ public class InventoryServiceImpl implements InventoryService {
                     item.getItemCode() + " is LOT-tracked; choose a LOT for this stock record.");
             }
             LotMaster lot = lotService.requireLotForStock(lotId, item.getProjectId(), item.getItemId());
-            // One stock record per item + location + LOT (V17 unique index); say so instead of a bare conflict.
+            // One stock record per item + location + LOT (V17 unique index); say so instead of a bare conflict. Taking turns
+            // with anything else creating that record (another Add Stock, a transfer) makes the check hold until commit.
+            inventoryRepository.lockStockPlace(item.getProjectId(), item.getItemId(), lotId, trimToNull(request.location()));
             if (inventoryRepository.existsLotStockAt(item.getProjectId(), item.getItemId(), lotId, trimToNull(request.location()))) {
                 throw new BusinessException(ErrorCode.CONFLICT,
                     "LOT " + lot.getLotNo() + " already has a stock record"
@@ -319,7 +323,9 @@ public class InventoryServiceImpl implements InventoryService {
             stockLevel(inventory),
             inventory.getVersion(),
             inventory.getLotId(),
-            lotNo
+            lotNo,
+            inventory.getLastCheckedAt(),
+            inventory.getLastCheckedBy()
         );
     }
 

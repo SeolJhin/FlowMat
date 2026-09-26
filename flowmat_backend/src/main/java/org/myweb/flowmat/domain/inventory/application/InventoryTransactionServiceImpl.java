@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
+import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.api.dto.request.InventoryReversalRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.request.InventoryTransactionCreateRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.response.InventoryTransactionResponse;
@@ -34,6 +36,7 @@ public class InventoryTransactionServiceImpl implements InventoryTransactionServ
 
     private final InventoryTransactionRepository inventoryTransactionRepository;
     private final InventoryRepository inventoryRepository;
+    private final ItemRepository itemRepository;
     private final InventoryCommandService inventoryCommandService;
     private final ProjectAccessService projectAccessService;
 
@@ -68,6 +71,9 @@ public class InventoryTransactionServiceImpl implements InventoryTransactionServ
                 "Unknown transaction type '" + request.transactionType() + "'. Use one of: " + EXTERNAL_TYPES + "."));
         BigDecimal[] deltas = deltas(type, request.quantity(), request.direction());
         String requestId = request.requestId().trim();
+        if (type == InventoryTransactionType.RECEIPT) {
+            itemRepository.findById(inventory.getItemId()).ifPresent(item -> ItemStatusRule.requireActive(item, "receive stock"));
+        }
 
         InventoryTransaction previous = inventoryTransactionRepository
             .findByProjectIdAndRequestId(inventory.getProjectId(), requestId).orElse(null);

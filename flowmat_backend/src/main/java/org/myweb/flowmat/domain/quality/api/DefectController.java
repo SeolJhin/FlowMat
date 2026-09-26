@@ -29,9 +29,10 @@ public class DefectController {
         @RequestParam("projectId") String projectId,
         @RequestParam(value = "productionRunId", required = false) String productionRunId,
         @RequestParam(value = "lotId", required = false) String lotId,
+        @RequestParam(value = "itemId", required = false) String itemId,
         @RequestParam(value = "openOnly", defaultValue = "false") boolean openOnly
     ) {
-        return ApiResponse.ok(qualityService.listDefects(projectId, productionRunId, lotId, openOnly));
+        return ApiResponse.ok(qualityService.listDefects(projectId, productionRunId, lotId, itemId, openOnly));
     }
 
     @PostMapping

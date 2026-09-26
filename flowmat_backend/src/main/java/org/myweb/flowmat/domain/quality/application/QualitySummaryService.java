@@ -8,11 +8,19 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.catalog.domain.entity.Item;
+import org.myweb.flowmat.domain.catalog.domain.entity.UnitMaster;
+import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.quality.api.dto.response.QualitySummaryResponse;
 import org.myweb.flowmat.domain.quality.api.dto.response.QualitySummaryResponse.CheckCount;
 import org.myweb.flowmat.domain.quality.api.dto.response.QualitySummaryResponse.DefectTypeCount;
+import org.myweb.flowmat.domain.quality.api.dto.response.QualitySummaryResponse.ItemQuality;
 import org.myweb.flowmat.domain.quality.domain.entity.DefectLog;
 import org.myweb.flowmat.domain.quality.domain.entity.QualityInspection;
 import org.myweb.flowmat.domain.quality.repository.DefectLogRepository;
@@ -33,6 +41,8 @@ public class QualitySummaryService {
     private final QualityInspectionRepository inspectionRepository;
     private final DefectLogRepository defectLogRepository;
     private final ProjectAccessService projectAccessService;
+    private final ItemRepository itemRepository;
+    private final UnitMasterRepository unitMasterRepository;
 
     public QualitySummaryResponse summary(String projectId, OffsetDateTime from, OffsetDateTime to) {
         projectAccessService.requireProjectReadAccess(projectId);
@@ -76,8 +86,51 @@ public class QualitySummaryService {
             checks.values().stream()
                 .filter(check -> check.failed() > 0)
                 .sorted(Comparator.comparingLong(CheckCount::failed).reversed().thenComparing(CheckCount::inspectionType))
-                .toList()
+                .toList(),
+            byItem(inspections, defects)
         );
+    }
+
+    /** Per item, only items with a failed inspection or a defect; records without an item are left out. */
+    private List<ItemQuality> byItem(List<QualityInspection> inspections, List<DefectLog> defects) {
+        Map<String, long[]> counts = new LinkedHashMap<>();
+        Map<String, BigDecimal> quantities = new LinkedHashMap<>();
+        for (QualityInspection inspection : inspections) {
+            if (inspection.getItemId() != null) {
+                long[] c = counts.computeIfAbsent(inspection.getItemId(), id -> new long[4]);
+                c[0]++;
+                c[1] += QualityInspection.FAIL.equals(inspection.getResultStatus()) ? 1 : 0;
+            }
+        }
+        for (DefectLog defect : defects) {
+            if (defect.getItemId() != null) {
+                long[] c = counts.computeIfAbsent(defect.getItemId(), id -> new long[4]);
+                c[2]++;
+                c[3] += defect.isResolved() ? 0 : 1;
+                quantities.merge(defect.getItemId(), defect.getQuantity() == null ? BigDecimal.ZERO : defect.getQuantity(), BigDecimal::add);
+            }
+        }
+        counts.values().removeIf(c -> c[1] == 0 && c[2] == 0);
+        if (counts.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Item> items = itemRepository.findAllById(counts.keySet()).stream()
+            .collect(Collectors.toMap(Item::getItemId, Function.identity()));
+        Map<String, String> units = unitMasterRepository.findAllById(items.values().stream()
+                .map(Item::getUnitId).filter(Objects::nonNull).distinct().toList()).stream()
+            .collect(Collectors.toMap(UnitMaster::getUnitId, UnitMaster::getUnitCode));
+        return counts.entrySet().stream()
+            .map(entry -> {
+                Item item = items.get(entry.getKey());
+                long[] c = entry.getValue();
+                return new ItemQuality(entry.getKey(), item == null ? null : item.getItemCode(), item == null ? null : item.getItemName(),
+                    item == null || item.getUnitId() == null ? null : units.get(item.getUnitId()), c[0], c[1], c[2], c[3],
+                    quantities.getOrDefault(entry.getKey(), BigDecimal.ZERO));
+            })
+            .sorted(Comparator.comparingLong(ItemQuality::defects).reversed()
+                .thenComparing(Comparator.comparingLong(ItemQuality::failed).reversed())
+                .thenComparing(ItemQuality::itemCode, Comparator.nullsLast(Comparator.naturalOrder())))
+            .toList();
     }
 
     private static boolean within(OffsetDateTime at, OffsetDateTime from, OffsetDateTime to) {

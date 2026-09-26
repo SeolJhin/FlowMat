@@ -56,6 +56,7 @@ public class WorkOrderReadinessService {
     private final ItemRepository itemRepository;
     private final InventoryRepository inventoryRepository;
     private final LotMasterRepository lotMasterRepository;
+    private final OpenRunInputs openRunInputs;
 
     /** LOTs expiring within this many days are called out (same setting as the stock alerts). */
     @Value("${app.stock-alert.expiry-warning-days:7}")
@@ -152,6 +153,8 @@ public class WorkOrderReadinessService {
 
         List<Material> materials = new ArrayList<>();
         List<String> shortages = new ArrayList<>();
+        // What this order's unfinished runs already put in has left stock, so it is not needed again.
+        Map<String, BigDecimal> alreadyUsed = openRunInputs.forOrder(order.getWorkOrderId());
         for (BomRequirementResponse.Line line : requirement.lines()) {
             Item item = itemRepository.findByItemIdAndDeletedYn(line.childItemId(), NOT_DELETED).orElse(null);
             boolean lotTracked = item != null && "Y".equals(item.getLotManageYn());
@@ -177,7 +180,8 @@ public class WorkOrderReadinessService {
                     }
                 }
             }
-            BigDecimal required = line.requiredItemQuantity();
+            BigDecimal required = line.requiredItemQuantity().subtract(alreadyUsed.getOrDefault(line.childItemId(), BigDecimal.ZERO))
+                .max(BigDecimal.ZERO);
             BigDecimal shortage = required.subtract(available).max(BigDecimal.ZERO).setScale(4, RoundingMode.HALF_UP);
             String code = item != null ? item.getItemCode() : line.childItemId();
             if (shortage.signum() > 0) {

@@ -10,13 +10,21 @@ import type { ItemDto } from '../../../shared/types/api'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { StockPanel } from './StockPanel'
 import { CountPanel } from './CountPanel'
+import { CountHistory } from './CountHistory'
 import { MovementsTab } from './MovementsTab'
 import { UnitsPanel } from './UnitsPanel'
 import { LotPanel } from './LotPanel'
 import { BomPanel } from './BomPanel'
 import { EquipmentPanel } from './EquipmentPanel'
 import { QualityPanel } from './QualityPanel'
+import { ItemCsvPanel } from './ItemCsvPanel'
+import { ItemDetail } from './ItemDetail'
+import { ItemInfoFields } from './ItemInfoFields'
+import { EMPTY_ITEM_INFO, itemInfoForm, itemInfoPayload } from '../model/itemInfoModel'
+import { EMPTY_ITEM_FILTER, duplicateCodes, filterItems, type ItemFilter } from '../model/listFilterModel'
 import { StockAnalysisPanel } from './StockAnalysisPanel'
+import { StockValueTrend } from './StockValueTrend'
+import { StockWastePanel } from './StockWastePanel'
 
 const TABS = ['items', 'stock', 'count', 'movements', 'analysis', 'lots', 'quality', 'boms', 'units', 'equipment'] as const
 type Tab = (typeof TABS)[number]
@@ -41,6 +49,7 @@ const ITEM_STATUSES = ['active', 'inactive', 'discontinued']
 export function InventoryRoute() {
   const { projectId = '' } = useParams<{ projectId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
+  const [itemFilter, setItemFilter] = useState<ItemFilter>(EMPTY_ITEM_FILTER)
   const requestedTab = searchParams.get('tab')
   const tab: Tab = (TABS as readonly string[]).includes(requestedTab ?? '') ? (requestedTab as Tab) : 'items'
   const itemsQuery = useItemsQuery(projectId)
@@ -49,12 +58,16 @@ export function InventoryRoute() {
   const units = useUnitsQuery(true).data ?? []
   const unitLabel = new Map(units.map((unit) => [unit.unitId, unit.unitCode]))
   const canManageMasterData = useMyPermissionsQuery().data?.canManageMasterData ?? false
+  const shownItems = filterItems(items, itemFilter)
 
   const createMutation = useCreateItemMutation()
   const updateMutation = useUpdateItemMutation()
   const deleteMutation = useDeleteItemMutation(projectId)
 
   const [editingItem, setEditingItem] = useState<ItemDto | null>(null)
+  const [detailItemId, setDetailItemId] = useState<string | null>(null)
+  // Derived after the state it reads: a callback in .find runs at once, so declaration order matters here.
+  const detailItem = items.find((item) => item.itemId === detailItemId) ?? null
   const EMPTY_ITEM_FORM = {
     itemCode: '',
     itemName: '',
@@ -66,6 +79,9 @@ export function InventoryRoute() {
     safetyStockQty: '',
     leadTimeDays: '',
     unitCost: '',
+    purchaseUnit: '',
+    purchaseUnitQty: '',
+    details: EMPTY_ITEM_INFO,
   }
   const [form, setForm] = useState(EMPTY_ITEM_FORM)
 
@@ -89,6 +105,9 @@ export function InventoryRoute() {
       safetyStockQty: item.safetyStockQty ? String(item.safetyStockQty) : '',
       leadTimeDays: item.leadTimeDays != null ? String(item.leadTimeDays) : '',
       unitCost: item.unitCost ? String(item.unitCost) : '',
+      purchaseUnit: item.purchaseUnit ?? '',
+      purchaseUnitQty: item.purchaseUnitQty != null ? String(item.purchaseUnitQty) : '',
+      details: itemInfoForm(item.details),
     })
   }
 
@@ -97,10 +116,15 @@ export function InventoryRoute() {
     const safety = form.safetyStockQty.trim()
     const lead = form.leadTimeDays.trim()
     const cost = form.unitCost.trim()
+    const packUnit = form.purchaseUnit.trim()
+    const packQty = form.purchaseUnitQty.trim()
     return {
       safetyStockQty: safety ? Number(safety) : creating ? undefined : 0,
       leadTimeDays: lead ? Number(lead) : undefined,
       unitCost: cost ? Number(cost) : creating ? undefined : 0,
+      // Empty when editing goes back to buying in the stock unit.
+      purchaseUnit: packUnit || (creating ? undefined : ''),
+      purchaseUnitQty: packUnit && packQty ? Number(packQty) : undefined,
     }
   }
 
@@ -117,7 +141,9 @@ export function InventoryRoute() {
           unitId: form.unitId,
           itemStatus: form.itemStatus,
           lotManageYn: form.lotManageYn ? 'Y' : 'N',
+          itemCode: form.itemCode.trim(),
           ...reorderFields(false),
+          details: itemInfoPayload(form.details),
         })
       } else {
         await createMutation.mutateAsync({
@@ -130,6 +156,7 @@ export function InventoryRoute() {
           itemStatus: form.itemStatus,
           lotManageYn: form.lotManageYn ? 'Y' : 'N',
           ...reorderFields(true),
+          details: itemInfoPayload(form.details),
         })
       }
       resetForm()
@@ -178,9 +205,20 @@ export function InventoryRoute() {
       </div>
 
       {tab === 'stock' && <StockPanel projectId={projectId} items={items} />}
-      {tab === 'count' && <CountPanel projectId={projectId} items={items} />}
+      {tab === 'count' && (
+        <>
+          <CountPanel projectId={projectId} items={items} />
+          <CountHistory projectId={projectId} />
+        </>
+      )}
       {tab === 'movements' && <MovementsTab projectId={projectId} items={items} />}
-      {tab === 'analysis' && <StockAnalysisPanel projectId={projectId} />}
+      {tab === 'analysis' && (
+        <>
+          <StockValueTrend projectId={projectId} />
+          <StockWastePanel projectId={projectId} />
+          <StockAnalysisPanel projectId={projectId} />
+        </>
+      )}
       {tab === 'lots' && <LotPanel projectId={projectId} items={items} />}
       {tab === 'quality' && <QualityPanel projectId={projectId} items={items} />}
       {tab === 'boms' && <BomPanel projectId={projectId} items={items} units={units} />}
@@ -190,6 +228,7 @@ export function InventoryRoute() {
       {tab === 'items' && (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>
         <section>
+          <ItemCsvPanel projectId={projectId} items={items} units={units} />
           {itemsQuery.isLoading && <p>Loading items...</p>}
           {itemsQuery.isError && <p style={{ color: '#dc2626' }}>Failed to load items.</p>}
           {deleteMutation.isError && (
@@ -199,6 +238,51 @@ export function InventoryRoute() {
           )}
           {!itemsQuery.isLoading && items.length === 0 && (
             <p className="inspector-hint">No items found. Add one from the form on the right.</p>
+          )}
+          {duplicateCodes(items).length > 0 && (
+            <p role="note" style={{ color: '#b45309', fontSize: 12, margin: '0 0 8px' }}>
+              Some codes are used by more than one item:{' '}
+              {duplicateCodes(items).map((duplicate) => `${duplicate.code} (${duplicate.count})`).join(', ')}. Edit one of them to give
+              it a code of its own; imports cannot tell them apart.
+            </p>
+          )}
+          {items.length > 0 && (
+            <div role="search" aria-label="Filter items" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8, fontSize: 12 }}>
+              <input
+                value={itemFilter.text}
+                onChange={(e) => setItemFilter((f) => ({ ...f, text: e.target.value }))}
+                placeholder="code, name, type, group, barcode or SKU"
+                aria-label="Search items"
+              />
+              <select value={itemFilter.status} onChange={(e) => setItemFilter((f) => ({ ...f, status: e.target.value }))} aria-label="Item status">
+                <option value="">any status</option>
+                {ITEM_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+              </select>
+              <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={itemFilter.lotTrackedOnly}
+                  onChange={(e) => setItemFilter((f) => ({ ...f, lotTrackedOnly: e.target.checked }))}
+                />
+                LOT-tracked only
+              </label>
+              {shownItems.length !== items.length && (
+                <span className="inspector-hint">
+                  {shownItems.length} of {items.length}{' '}
+                  <button type="button" style={{ fontSize: 11 }} onClick={() => setItemFilter(EMPTY_ITEM_FILTER)}>Clear</button>
+                </span>
+              )}
+            </div>
+          )}
+          {detailItem && (
+            <ItemDetail
+              key={detailItem.itemId}
+              projectId={projectId}
+              item={detailItem}
+              unit={detailItem.unitId ? (unitLabel.get(detailItem.unitId) ?? '') : ''}
+              onEdit={() => startEdit(detailItem)}
+              onClose={() => setDetailItemId(null)}
+            />
           )}
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
@@ -213,7 +297,7 @@ export function InventoryRoute() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => (
+              {shownItems.map((item) => (
                 <tr
                   key={item.itemId}
                   style={{
@@ -222,7 +306,10 @@ export function InventoryRoute() {
                   }}
                 >
                   <td style={{ padding: '8px 6px' }}><code>{item.itemCode}</code></td>
-                  <td style={{ padding: '8px 6px' }}>{item.itemName}</td>
+                  <td style={{ padding: '8px 6px' }}>
+                    {item.itemName}
+                    {item.details?.itemGroup && <span className="inspector-hint"> · {item.details.itemGroup}</span>}
+                  </td>
                   <td style={{ padding: '8px 6px', opacity: 0.7 }}>{item.resourceCategory ?? '-'}</td>
                   <td style={{ padding: '8px 6px', opacity: 0.7 }}>
                     {item.unitId ? unitLabel.get(item.unitId) ?? item.unitId : '-'}
@@ -230,6 +317,9 @@ export function InventoryRoute() {
                   <td style={{ padding: '8px 6px', opacity: 0.7 }}>{item.lotManageYn === 'Y' ? 'tracked' : '-'}</td>
                   <td style={{ padding: '8px 6px', opacity: 0.7 }}>{item.itemStatus}</td>
                   <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>
+                    <button type="button" onClick={() => setDetailItemId(item.itemId)} style={{ marginRight: 4, fontSize: 12 }}>
+                      Details
+                    </button>
                     <button type="button" onClick={() => startEdit(item)} style={{ marginRight: 4, fontSize: 12 }}>
                       Edit
                     </button>
@@ -250,17 +340,15 @@ export function InventoryRoute() {
         <section style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 18 }}>
           <h3 style={{ marginTop: 0 }}>{editingItem ? 'Edit Item' : 'Add Item'}</h3>
           <form onSubmit={(e) => void handleSubmit(e)} style={{ display: 'grid', gap: 10 }}>
-            {!editingItem && (
-              <label style={{ display: 'grid', gap: 4 }}>
-                <span>Code *</span>
-                <input
-                  value={form.itemCode}
-                  onChange={(e) => setForm((f) => ({ ...f, itemCode: e.target.value }))}
-                  placeholder="e.g. MAT-001"
-                  required
-                />
-              </label>
-            )}
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span>Code *</span>
+              <input
+                value={form.itemCode}
+                onChange={(e) => setForm((f) => ({ ...f, itemCode: e.target.value }))}
+                placeholder="e.g. MAT-001"
+                required
+              />
+            </label>
             <label style={{ display: 'grid', gap: 4 }}>
               <span>Name *</span>
               <input value={form.itemName} onChange={(e) => setForm((f) => ({ ...f, itemName: e.target.value }))} required />
@@ -309,20 +397,23 @@ export function InventoryRoute() {
               />
               <span>Track stock per LOT</span>
             </label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              <label style={{ display: 'grid', gap: 4 }}>
+            {/* minWidth 0: side by side, the inputs' own width would otherwise push the whole form past its column. */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8 }}>
+              <label style={{ display: 'grid', gap: 4, minWidth: 0 }}>
                 <span>Safety stock</span>
                 <input
                   inputMode="decimal"
                   value={form.safetyStockQty}
                   placeholder="not watched"
+                  style={{ minWidth: 0 }}
                   onChange={(e) => setForm((f) => ({ ...f, safetyStockQty: e.target.value }))}
                 />
               </label>
-              <label style={{ display: 'grid', gap: 4 }}>
+              <label style={{ display: 'grid', gap: 4, minWidth: 0 }}>
                 <span>Lead time (days)</span>
                 <input
                   inputMode="numeric"
+                  style={{ minWidth: 0 }}
                   value={form.leadTimeDays}
                   onChange={(e) => setForm((f) => ({ ...f, leadTimeDays: e.target.value }))}
                 />
@@ -337,6 +428,32 @@ export function InventoryRoute() {
                 onChange={(e) => setForm((f) => ({ ...f, unitCost: e.target.value }))}
               />
             </label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8 }}>
+              <label style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+                <span>Bought in</span>
+                <input
+                  value={form.purchaseUnit}
+                  maxLength={20}
+                  placeholder="stock unit"
+                  style={{ minWidth: 0 }}
+                  onChange={(e) => setForm((f) => ({ ...f, purchaseUnit: e.target.value }))}
+                />
+              </label>
+              <label style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+                <span>Units per {form.purchaseUnit.trim() || 'pack'}</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={form.purchaseUnitQty}
+                  disabled={!form.purchaseUnit.trim()}
+                  placeholder="1"
+                  style={{ minWidth: 0 }}
+                  onChange={(e) => setForm((f) => ({ ...f, purchaseUnitQty: e.target.value }))}
+                />
+              </label>
+            </div>
+            <ItemInfoFields value={form.details} onChange={(details) => setForm((f) => ({ ...f, details }))} />
             <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
               <button type="submit" disabled={isPending}>
                 {isPending ? 'Saving...' : editingItem ? 'Save' : 'Add'}

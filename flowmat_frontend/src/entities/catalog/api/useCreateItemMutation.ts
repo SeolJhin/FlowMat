@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
-import type { ApiEnvelope, ItemDto } from '../../../shared/types/api'
+import type { ApiEnvelope, ItemDetailsDto, ItemDto } from '../../../shared/types/api'
 
 export interface CreateItemInput {
   projectId: string
@@ -18,6 +18,12 @@ export interface CreateItemInput {
   leadTimeDays?: number
   /** Cost of one unit in the item's own unit. */
   unitCost?: number
+  /** Omitted: every detail empty. A barcode another item has is refused (409). */
+  details?: ItemDetailsDto
+  /** What the item is bought in, e.g. "bag". */
+  purchaseUnit?: string
+  /** Stock units in one purchase unit; defaults to 1. */
+  purchaseUnitQty?: number
 }
 
 async function createItem(input: CreateItemInput): Promise<ItemDto> {

@@ -1,5 +1,6 @@
 package org.myweb.flowmat.domain.catalog.api.dto.request;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.math.BigDecimal;
 
@@ -18,6 +19,12 @@ public record ItemCreateRequest(
     BigDecimal safetyStockQty,
     Integer leadTimeDays,
     /** Cost of one unit in the item's unit; omitted means not known. */
-    BigDecimal unitCost
+    BigDecimal unitCost,
+    /** Optional; omitted leaves every detail empty. */
+    @Valid ItemDetails details,
+    /** What the item is bought in, e.g. "bag"; omitted: bought in its stock unit. */
+    String purchaseUnit,
+    /** Stock units in one purchase unit, more than 0; defaults to 1. */
+    BigDecimal purchaseUnitQty
 ) {
 }

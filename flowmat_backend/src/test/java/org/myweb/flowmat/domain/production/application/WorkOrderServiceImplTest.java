@@ -101,7 +101,7 @@ class WorkOrderServiceImplTest {
         givenOrder("approved");
 
         assertThatThrownBy(() -> workOrderService.updateWorkOrder("wo-1",
-            new WorkOrderUpdateRequest("New title", null, null, null, null, null, null, null, null, null)))
+            new WorkOrderUpdateRequest("New title", null, null, null, null, null, null, null, null, null, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Only draft");
         verify(workOrderRepository, never()).save(any());
@@ -189,6 +189,6 @@ class WorkOrderServiceImplTest {
 
     private static WorkOrderCreateRequest createRequest(String priority, OffsetDateTime start, OffsetDateTime end) {
         return new WorkOrderCreateRequest("project-1", "Batch 1", null, null, null, new BigDecimal("100"),
-            priority, start, end, null, null);
+            priority, start, end, null, null, null);
     }
 }

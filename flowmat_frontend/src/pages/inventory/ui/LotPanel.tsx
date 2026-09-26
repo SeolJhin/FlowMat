@@ -5,6 +5,12 @@ import { QualitySection } from '../../../entities/quality/ui/QualitySection'
 import type { ItemDto, LotDto, LotStatus } from '../../../shared/types/api'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
+import { EMPTY_LOT_FILTER, EXPIRES_SOON_DAYS, filterLots, type LotFilter } from '../model/listFilterModel'
+import { LotRecall } from './LotRecall'
+import { lotsCsv } from '../model/lotExportModel'
+import { ExpiryOutlook } from './ExpiryOutlook'
+import { ItemScanInput } from './ItemScanInput'
+import { pickableItems } from '../model/itemStatusModel'
 
 const STATUS_COLORS: Record<LotStatus, string> = {
   available: '#15803d',
@@ -22,6 +28,8 @@ export function LotPanel({ projectId, items }: { projectId: string; items: ItemD
   const itemLabel = useMemo(() => new Map(items.map((item) => [item.itemId, `${item.itemCode} · ${item.itemName}`])), [items])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selected = lots.find((lot) => lot.lotId === selectedId) ?? null
+  const [filter, setFilter] = useState<LotFilter>(EMPTY_LOT_FILTER)
+  const shown = filterLots(lots, filter, (itemId) => itemLabel.get(itemId) ?? itemId)
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 24, alignItems: 'start' }}>
@@ -32,6 +40,53 @@ export function LotPanel({ projectId, items }: { projectId: string; items: ItemD
           <p className="inspector-hint">
             No LOTs yet. Turn on “Track stock per LOT” for an item, then register LOTs here.
           </p>
+        )}
+        <ExpiryOutlook projectId={projectId} lots={lots} itemLabel={(itemId) => itemLabel.get(itemId) ?? itemId} onOpen={setSelectedId} />
+        {lots.length > 0 && (
+          <div role="search" aria-label="Filter LOTs" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8, fontSize: 12 }}>
+            <input
+              value={filter.text}
+              onChange={(e) => setFilter((f) => ({ ...f, text: e.target.value }))}
+              placeholder="LOT number or item"
+              aria-label="Search LOTs"
+            />
+            <select value={filter.status} onChange={(e) => setFilter((f) => ({ ...f, status: e.target.value as LotFilter['status'] }))} aria-label="LOT status">
+              <option value="all">any status</option>
+              <option value="open">not closed</option>
+              {(['available', 'reserved', 'quarantined', 'consumed', 'closed'] as const).map((status) => (
+                <option key={status} value={status}>{status}</option>
+              ))}
+            </select>
+            <select value={filter.expiry} onChange={(e) => setFilter((f) => ({ ...f, expiry: e.target.value as LotFilter['expiry'] }))} aria-label="LOT expiry">
+              <option value="any">any expiry</option>
+              <option value="expired">expired</option>
+              <option value="soon">expires within {EXPIRES_SOON_DAYS} days</option>
+              <option value="none">no expiry date</option>
+            </select>
+            {shown.length !== lots.length && (
+              <span className="inspector-hint">
+                {shown.length} of {lots.length}{' '}
+                <button type="button" style={{ fontSize: 11 }} onClick={() => setFilter(EMPTY_LOT_FILTER)}>Clear</button>
+              </span>
+            )}
+            <button
+              type="button"
+              disabled={shown.length === 0}
+              style={{ fontSize: 11 }}
+              onClick={() => {
+                const url = URL.createObjectURL(
+                  new Blob([lotsCsv(shown, (itemId) => itemLabel.get(itemId) ?? itemId)], { type: 'text/csv;charset=utf-8' }),
+                )
+                const link = document.createElement('a')
+                link.href = url
+                link.download = `lots-${new Date().toISOString().slice(0, 10)}.csv`
+                link.click()
+                URL.revokeObjectURL(url)
+              }}
+            >
+              Download CSV
+            </button>
+          </div>
         )}
         {lots.length > 0 && (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -46,7 +101,7 @@ export function LotPanel({ projectId, items }: { projectId: string; items: ItemD
               </tr>
             </thead>
             <tbody>
-              {lots.map((lot) => (
+              {shown.map((lot) => (
                 <tr
                   key={lot.lotId}
                   onClick={() => setSelectedId(lot.lotId)}
@@ -76,7 +131,7 @@ export function LotPanel({ projectId, items }: { projectId: string; items: ItemD
         {selected ? (
           <LotDetail key={selected.lotId} projectId={projectId} lot={selected} itemLabel={itemLabel} onClose={() => setSelectedId(null)} />
         ) : (
-          <CreateLotForm projectId={projectId} items={items.filter((item) => item.lotManageYn === 'Y')} onCreated={setSelectedId} />
+          <CreateLotForm projectId={projectId} items={pickableItems(items.filter((item) => item.lotManageYn === 'Y'))} onCreated={setSelectedId} />
         )}
       </section>
     </div>
@@ -109,6 +164,7 @@ function CreateLotForm({ projectId, items, onCreated }: { projectId: string; ite
         <p className="inspector-hint">No item tracks LOTs yet. Edit an item and tick “Track stock per LOT”.</p>
       ) : (
         <form onSubmit={(e) => void handleSubmit(e)} style={{ display: 'grid', gap: 10 }}>
+          <ItemScanInput items={items} onPick={(item) => setForm((f) => ({ ...f, itemId: item.itemId }))} />
           <label style={{ display: 'grid', gap: 4 }}>
             <span>Item *</span>
             <select value={form.itemId} onChange={(e) => setForm((f) => ({ ...f, itemId: e.target.value }))} required>
@@ -220,6 +276,8 @@ function LotDetail({
           </li>
         ))}
       </ul>
+
+      <LotRecall key={lot.lotId} projectId={projectId} lot={lot} />
 
       <section aria-label="LOT quality" style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
         <h4 style={{ margin: '0 0 4px' }}>Quality</h4>

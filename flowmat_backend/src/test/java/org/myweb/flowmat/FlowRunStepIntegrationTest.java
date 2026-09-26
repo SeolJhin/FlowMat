@@ -100,6 +100,99 @@ class FlowRunStepIntegrationTest extends IntegrationTestSupport {
             .andExpect(status().isConflict());
     }
 
+    @Test
+    void cancellingOrFailingRunClosesOpenStepsAndAttempts() throws Exception {
+        String workflowId = data(post("/workflows").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"projectId\":\"" + DEMO_PROJECT + "\",\"workflowName\":\"Stop "
+                + UUID.randomUUID() + "\"}")).path("workflowId").asText();
+        String nodeId = data(post("/processes").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"workflowId\":\"" + workflowId + "\",\"processName\":\"Mix\"}"))
+            .path("processId").asText();
+        String revisionId = data(post("/workflows/" + workflowId + "/revisions"))
+            .path("workflowRevisionId").asText();
+        String cancelRunId = startRun(workflowId, revisionId);
+        String runningStepId = addStep(cancelRunId, nodeId);
+        String plannedStepId = addStep(cancelRunId, nodeId);
+        data(post("/flow-runs/" + cancelRunId + "/steps/" + runningStepId + "/start"));
+
+        mockMvc.perform(post("/flow-runs/" + cancelRunId + "/cancel")
+                .header("Authorization", "Bearer " + jwtProvider.generateAccessToken("unrelated-user"))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Unauthorized stop\"}"))
+            .andExpect(status().isForbidden());
+
+        mockMvc.perform(auth(post("/flow-runs/" + cancelRunId + "/cancel")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Operator stopped\"}")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.status").value("cancelled"))
+            .andExpect(jsonPath("$.data.endedAt").isNotEmpty());
+        mockMvc.perform(auth(get("/flow-runs/" + cancelRunId + "/steps")))
+            .andExpect(jsonPath("$.data[0].status").value("cancelled"))
+            .andExpect(jsonPath("$.data[1].status").value("cancelled"));
+        mockMvc.perform(auth(get("/flow-runs/" + cancelRunId + "/steps/" + runningStepId + "/attempts")))
+            .andExpect(jsonPath("$.data[0].status").value("cancelled"))
+            .andExpect(jsonPath("$.data[0].endedAt").isNotEmpty());
+        mockMvc.perform(auth(get("/flow-runs/" + cancelRunId + "/steps/" + plannedStepId + "/attempts")))
+            .andExpect(jsonPath("$.data.length()").value(0));
+        mockMvc.perform(auth(get("/flow-runs/" + cancelRunId + "/events")))
+            .andExpect(jsonPath("$.data[6].eventType").value("run_cancelled"))
+            .andExpect(jsonPath("$.data[6].payload.reason").value("Operator stopped"));
+        mockMvc.perform(auth(post("/flow-runs/" + cancelRunId + "/steps/" + runningStepId + "/retry")))
+            .andExpect(status().isConflict());
+        mockMvc.perform(auth(post("/flow-runs/" + cancelRunId + "/cancel")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Again\"}")))
+            .andExpect(status().isConflict());
+
+        String failRunId = startRun(workflowId, revisionId);
+        String failedStepId = addStep(failRunId, nodeId);
+        data(post("/flow-runs/" + failRunId + "/steps/" + failedStepId + "/start"));
+        mockMvc.perform(auth(post("/flow-runs/" + failRunId + "/fail")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"errorCode\":\"MACHINE_STOP\",\"errorMessage\":\"Stopped\"}")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.status").value("failed"));
+        mockMvc.perform(auth(get("/flow-runs/" + failRunId + "/steps")))
+            .andExpect(jsonPath("$.data[0].status").value("failed"))
+            .andExpect(jsonPath("$.data[0].errorCode").value("MACHINE_STOP"));
+        mockMvc.perform(auth(get("/flow-runs/" + failRunId + "/steps/" + failedStepId + "/attempts")))
+            .andExpect(jsonPath("$.data[0].status").value("failed"))
+            .andExpect(jsonPath("$.data[0].errorCode").value("MACHINE_STOP"));
+        mockMvc.perform(auth(post("/flow-runs/" + failRunId + "/finish")
+                .contentType(MediaType.APPLICATION_JSON).content("{}")))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void oversizedRequestIdDoesNotBreakEventPersistence() throws Exception {
+        String workflowId = data(post("/workflows").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"projectId\":\"" + DEMO_PROJECT + "\",\"workflowName\":\"Request ID "
+                + UUID.randomUUID() + "\"}")).path("workflowId").asText();
+        String revisionId = data(post("/workflows/" + workflowId + "/revisions"))
+            .path("workflowRevisionId").asText();
+        String runId = data(post("/flow-runs").contentType(MediaType.APPLICATION_JSON)
+            .header("X-Request-Id", "x".repeat(101))
+            .content("{\"workflowId\":\"" + workflowId + "\",\"workflowRevisionId\":\""
+                + revisionId + "\",\"runType\":\"test\"}"))
+            .path("flowRunId").asText();
+
+        String persistedRequestId = data(get("/flow-runs/" + runId + "/events"))
+            .path(0).path("requestId").asText();
+        org.junit.jupiter.api.Assertions.assertTrue(persistedRequestId.matches("[0-9a-f]{32}"));
+    }
+
+    private String startRun(String workflowId, String revisionId) throws Exception {
+        return data(post("/flow-runs").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"workflowId\":\"" + workflowId + "\",\"workflowRevisionId\":\""
+                + revisionId + "\",\"runType\":\"test\"}"))
+            .path("flowRunId").asText();
+    }
+
+    private String addStep(String runId, String nodeId) throws Exception {
+        return data(post("/flow-runs/" + runId + "/steps")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"nodeId\":\"" + nodeId + "\"}"))
+            .path("stepId").asText();
+    }
+
     private JsonNode data(MockHttpServletRequestBuilder request) throws Exception {
         return objectMapper.readTree(mockMvc.perform(auth(request)).andExpect(status().isOk())
             .andReturn().getResponse().getContentAsString()).path("data");

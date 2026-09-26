@@ -21,6 +21,7 @@ import org.myweb.flowmat.domain.bom.domain.entity.BomLine;
 import org.myweb.flowmat.domain.bom.domain.enums.BomStatus;
 import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
 import org.myweb.flowmat.domain.bom.repository.BomLineRepository;
+import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
@@ -59,7 +60,17 @@ public class BomServiceImpl implements BomService {
             ? bomHeaderRepository.findAllByProjectIdAndDeletedYnOrderByTargetItemIdAscBomVersionDesc(projectId.trim(), NOT_DELETED)
             : bomHeaderRepository.findAllByProjectIdAndTargetItemIdAndDeletedYnOrderByBomVersionDesc(
                 projectId.trim(), targetItemId.trim(), NOT_DELETED);
-        return headers.stream().map(this::toResponse).toList();
+        if (headers.isEmpty()) {
+            return List.of();
+        }
+        // One query for every BOM's lines instead of one per BOM, in the order lines(bomId) gives.
+        Map<String, List<BomLine>> linesByBom = bomLineRepository
+            .findAllByBomIdIn(headers.stream().map(BomHeader::getBomId).toList())
+            .stream()
+            .sorted(Comparator.comparing(BomLine::getSortOrder, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(BomLine::getBomLineId))
+            .collect(Collectors.groupingBy(BomLine::getBomId));
+        return headers.stream().map(header -> toResponse(header, linesByBom.getOrDefault(header.getBomId(), List.of()))).toList();
     }
 
     @Override
@@ -127,6 +138,7 @@ public class BomServiceImpl implements BomService {
         String projectId = request.projectId().trim();
         projectAccessService.requireProjectWriteAccess(projectId);
         Item target = findProjectItem(request.targetItemId(), projectId);
+        ItemStatusRule.requireActive(target, "give it a BOM");
         if (bomHeaderRepository.findTopByProjectIdAndTargetItemIdAndDeletedYnOrderByBomVersionDesc(
             projectId, target.getItemId(), NOT_DELETED).isPresent()) {
             throw new BusinessException(ErrorCode.CONFLICT,
@@ -184,6 +196,7 @@ public class BomServiceImpl implements BomService {
     public BomResponse addLine(String bomId, BomLineCreateRequest request) {
         BomHeader header = findEditableBom(bomId);
         Item child = findProjectItem(request.childItemId(), header.getProjectId());
+        ItemStatusRule.requireActive(child, "use it in a BOM");
         requirePositive(request.quantity(), "Material quantity");
 
         BomLine line = new BomLine();

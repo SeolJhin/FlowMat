@@ -14,6 +14,7 @@ import org.myweb.flowmat.domain.workflow.annotation.application.CanvasAnnotation
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowRevisionResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowRevisionSnapshot;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowRevisionSummaryResponse;
+import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowValidationResponse;
 import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessConnection;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
@@ -46,6 +47,7 @@ public class WorkflowRevisionService {
     private final CanvasAnnotationService annotationService;
     private final WorkflowEditorDocumentService editorDocumentService;
     private final ProjectAccessService projectAccessService;
+    private final WorkflowValidationService validationService;
     private final EntityManager entityManager;
     private final ObjectMapper objectMapper;
     private final IdGenerator idGenerator;
@@ -55,6 +57,16 @@ public class WorkflowRevisionService {
         Workflow workflow = projectAccessService.requireWorkflowWriteAccess(workflowId);
         // Serialize publishers of the same draft; the draft remains editable after publication.
         entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
+        WorkflowValidationResponse validation = validationService.validate(workflowId);
+        if (validation.errors() > 0) {
+            String summary = validation.issues().stream()
+                .filter(issue -> "error".equals(issue.severity()))
+                .limit(3)
+                .map(issue -> issue.code() + ": " + issue.message())
+                .collect(java.util.stream.Collectors.joining("; "));
+            throw new BusinessException(ErrorCode.CONFLICT,
+                "Workflow has " + validation.errors() + " error(s): " + summary);
+        }
         int nextNumber = repository.findTopByWorkflowIdOrderByRevisionNoDesc(workflowId)
             .map(previous -> previous.getRevisionNo() + 1)
             .orElse(1);

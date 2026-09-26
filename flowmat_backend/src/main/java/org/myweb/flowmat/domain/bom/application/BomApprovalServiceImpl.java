@@ -16,6 +16,7 @@ import org.myweb.flowmat.domain.bom.domain.entity.BomLine;
 import org.myweb.flowmat.domain.bom.domain.enums.BomStatus;
 import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
 import org.myweb.flowmat.domain.bom.repository.BomLineRepository;
+import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
@@ -119,6 +120,8 @@ public class BomApprovalServiceImpl implements BomApprovalService {
             .orElse(null);
         if (target == null) {
             problems.add("The target item no longer exists in this project.");
+        } else if (!ItemStatusRule.isActive(target)) {
+            problems.add(ItemStatusRule.refusal(target, "approve its BOM"));
         }
         if (header.getBaseQuantity() == null || header.getBaseQuantity().signum() <= 0) {
             problems.add("Base quantity must be greater than 0.");
@@ -141,6 +144,9 @@ public class BomApprovalServiceImpl implements BomApprovalService {
             }
             if (line.getQuantity() == null || line.getQuantity().signum() <= 0) {
                 problems.add("Material " + label + " needs a quantity greater than 0.");
+            }
+            if (!ItemStatusRule.isActive(child)) {
+                problems.add("Material " + ItemStatusRule.refusal(child, "use it in a BOM"));
             }
             if (child.getItemId().equals(header.getTargetItemId())) {
                 problems.add("Material " + label + " is the item this BOM produces.");

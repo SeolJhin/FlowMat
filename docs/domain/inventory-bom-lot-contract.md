@@ -268,4 +268,13 @@ DB가 진실의 원천. 저장 흐름은 `행 잠금 → version 비교 → 409 
 | §2 위치 간 이동(`POST /inventory-transfers`, `transfer_out`/`transfer_in` 한 트랜잭션, 도착 행 재사용·생성, 멱등) | 구현 | `InventoryTransferIntegrationTest` 2건, [재고 이동](stock-transfer.md) |
 | 재고 실사(`POST /inventory-counts`, 센 수량으로 여러 행을 한 트랜잭션에서 `adjustment`, 실사 중 변동 409) | 구현 | `InventoryCountIntegrationTest` 2건, [재고 실사](stock-count.md) |
 | §5 BOM 역전개(where-used): `GET /boms/where-used?projectId=&itemId=`, 승인 → 승인 대기 → 초안 → 폐기 순, BOMs 탭 "Where is a material used?" | 구현 | `BomWhereUsedIntegrationTest` 1건, 실 화면 확인 |
+| §5 BOM revision 비교: BOM 상세의 "Compare with"로 같은 제품의 다른 revision과 자재별 추가·삭제·변경을 봄(옛 revision이 왼쪽). 수량은 **제품 1단위당**으로 비교하므로 기준 수량과 자재를 같은 비율로 바꾸면 변경 아님. 기준 단위가 바뀌면 적힌 수량 그대로 비교. 같은 자재의 같은 단위 라인은 합침. 아래에 두 revision의 **재료비**를 같은 제품 수량(새 revision 기준 수량이 제품 단위면 그 수량, 아니면 1)으로 소요량 API로 계산해 차이와 비율을 보여 줌(단가 없는 자재가 있으면 표시) | 구현 | `bomModel.test.ts`의 `compareBoms` 3건·`costChange` 1건, 실 화면: `Material cost for 10 ea: v1 10.2 → v2 14.2 (+4, +39.2%)` |
+| §2 재고 흐름 분석: 기간 소비(출고·생산 투입, 역분개 제외), 소진 일수, 정체 일수, ABC 등급을 DB 집계로 계산(`GET /stock-analysis`) | 구현 | `StockAnalysisIntegrationTest`, `StockMovementAnalysisServiceTest`, [재고 흐름 분석](stock-analysis.md) |
+| §3 과거 시점 재고(`GET /inventory-snapshots`, 행마다 마지막 이동의 `quantity_after`, `DISTINCT ON`)와 기간 수불(`GET /stock-movement-summary`, 기초 + 입고 + 산출 − 출고 − 투입 ± 이동·보정 = 기말) | 구현 | `StockSnapshotIntegrationTest`, `StockMovementSummaryIntegrationTest`, [재고 원장](stock-ledger.md) |
+| §2 재고 일괄 입고(`POST /inventories/import`): 행마다 같은 품목·위치·LOT 행에 `receipt` 또는 새 행, 모르는 LOT는 등록, 전부 아니면 없음 | 구현 | `StockImportIntegrationTest`, [재고 일괄 입고](stock-import.md) |
+| §4 품목 일괄 등록·수정(`POST /items/import`, 코드 기준, 재고 있는 품목의 LOT 관리 변경 금지 유지)과 품목 코드 중복 등록 409 | 구현 | `ItemImportIntegrationTest`, `ItemCodeIntegrationTest`, [품목 가져오기](item-import.md) |
+| §5 초안 BOM 자재 CSV(`POST /boms/{id}/lines/import`, 승인 검증 중 한 줄 규칙을 미리 적용) | 구현 | `BomLineImportIntegrationTest`, [품목 가져오기](item-import.md) "BOM 자재" |
+| §2 실사 이력(`GET /inventory-counts`, 실사별 조정 묶음과 금액 변화) | 구현 | `InventoryCountHistoryIntegrationTest`, [재고 실사](stock-count.md) |
+| §6 LOT 리콜: 정방향 계보의 LOT별 보유·출고(`GET /lots/{id}/recall`)와 일괄 격리(`POST …/recall/quarantine`, LOT마다 평소 격리 이동, 참조 `lot_recall`) | 구현 | `LotRecallIntegrationTest`, [LOT 리콜](lot-recall.md) |
+| §5 BOM 복사(`POST /boms/{id}/copy`, 다른 제품의 첫 초안으로 기준 수량·자재·순서를 그대로, 메모 `Copied from …`). 같은 제품(→ 새 revision), 자기 자재, 이미 BOM이 있는 제품은 거절. BOM 상세의 "Copy to another product"는 BOM 없는 제품만 보여 줌 | 구현 | `BomCopyIntegrationTest`, 실 화면: 복사 후 새 초안 v1이 열림 |
 | §7 협업 점검 | 미착수 | |

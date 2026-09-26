@@ -18,7 +18,9 @@ public record QualitySummaryResponse(
     /** Most frequent first. */
     List<DefectTypeCount> defectsByType,
     /** Checks that failed at least once, most failures first. */
-    List<CheckCount> failuresByCheck
+    List<CheckCount> failuresByCheck,
+    /** Items with a failed inspection or a defect in the window, most defects first. */
+    List<ItemQuality> byItem
 ) {
 
     /** Only counts: defects of one type can be of items in different units, so their quantities are not added up. */
@@ -26,5 +28,14 @@ public record QualitySummaryResponse(
     }
 
     public record CheckCount(String inspectionType, long inspections, long failed) {
+    }
+
+    /**
+     * One item's inspections and defects. Defect quantities are in the item's own unit, so for one item they add up.
+     *
+     * @param defectQuantity the defects' quantities added up, in {@code unit}
+     */
+    public record ItemQuality(String itemId, String itemCode, String itemName, String unit, long inspections, long failed,
+                              long defects, long openDefects, BigDecimal defectQuantity) {
     }
 }

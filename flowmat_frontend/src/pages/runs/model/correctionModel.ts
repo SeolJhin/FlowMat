@@ -129,3 +129,28 @@ export function orderStockForPick(stock: InventoryDto[], lots: LotDto[]): StockP
     )
     .map(({ inventory, expiryDate, expired }) => ({ inventory, expiryDate, expired }))
 }
+
+/** A stock record offered in a run's record form, with whether it can be picked and whether to use it first. */
+export interface LotOption extends StockPick {
+  disabled: boolean
+  useFirst: boolean
+}
+
+/**
+ * The item's stock records for a run's record form (docs/domain/lot-expiry.md "먼저 만료되는 LOT 먼저"). For an input
+ * they are in FEFO order: expired or quarantined records cannot be picked (the server refuses them), and the first one
+ * that can, if it has an expiry date and there is a choice, is marked to use first. For an output the order is kept.
+ */
+export function inputLotOptions(stock: InventoryDto[], lots: LotDto[], direction: 'input' | 'output'): LotOption[] {
+  if (direction === 'output') {
+    return orderStockForPick(stock, []).map((pick) => ({ ...pick, disabled: false, useFirst: false }))
+  }
+  const options = orderStockForPick(stock, lots).map((pick) => ({
+    ...pick,
+    disabled: pick.expired || pick.inventory.inventoryStatus === 'quarantined',
+    useFirst: false,
+  }))
+  const first = options.find((option) => !option.disabled)
+  if (first && first.expiryDate && options.length > 1) first.useFirst = true
+  return options
+}

@@ -2,7 +2,7 @@
 
 ## 준비
 
-Java 21, Node 22, Docker Desktop을 사용한다. 기존 개발 DB는 V2·V4·V5 Flyway 체크섬 불일치로 기동이 막힐 수 있다. 기존 DB에 `repair`를 임의로 실행하지 말고 [해결안](handoff/reports/G-flyway-checksum-options.md)을 확인한다.
+Java 21, Node 22, Docker Desktop을 사용한다. V2·V4·V5는 원본 파일 복원으로 해결한 이력이 있다. 기존 dev DB에는 별도로 [V26 체크섬 불일치](handoff/reports/flyway-v21-notice.md)가 기록돼 있다. DB마다 적용 이력을 확인하고, `repair`나 기존 마이그레이션 수정을 임의로 실행하지 않는다.
 
 `flowmat_backend/.env.example`을 `flowmat_backend/.env`로 복사하고 `POSTGRES_PASSWORD`, `DB_PASSWORD`를 같은 로컬 비밀번호로 바꾼다. `JWT_SECRET`도 32자 이상의 별도 로컬 값으로 바꾼다. `.env`는 Git에 넣지 않는다. 새 DB를 만들 때만 아래 Compose 절차를 사용한다. 기존 5432/6379 서비스가 있다면 포트 충돌부터 확인한다.
 
@@ -30,7 +30,7 @@ Get-Content .env | Where-Object { $_ -match '^[A-Z][A-Z0-9_]*=' } | ForEach-Obje
 기존 dev DB에서 프로젝트가 보이지 않으면 `flowmat_backend` 디렉터리에서 다음 읽기 전용 조회로 V18 적용 이력과 프로젝트 존재 여부를 확인한다. 아래 사용자명과 DB명은 `.env.example` 기본값이며, `.env`에서 바꿨다면 함께 바꾼다.
 
 ```powershell
-docker compose exec postgres psql -U flowmat_dev -d flowmat -c "SELECT version, description, success FROM flyway_schema_history WHERE version IN ('2', '18') ORDER BY installed_rank;"
+docker compose exec postgres psql -U flowmat_dev -d flowmat -c "SELECT version, description, checksum, success FROM flyway_schema_history WHERE version IN ('2', '18', '26') ORDER BY installed_rank;"
 docker compose exec postgres psql -U flowmat_dev -d flowmat -c "SELECT project_id, owner_id FROM project WHERE project_id = 'prj_demo_main';"
 ```
 
@@ -52,7 +52,7 @@ npm run dev
 
 | 증상 | 확인할 것 |
 |---|---|
-| `Migration checksum mismatch` | 기존 DB에 적용된 V2·V4·V5와 저장소 파일의 차이. 해결안 문서와 담당자 결정이 필요하다. |
+| `Migration checksum mismatch` | 오류에 나온 버전과 `flyway_schema_history`의 체크섬을 읽기 전용으로 비교한다. 기존 dev DB의 V26 불일치 기록은 위 인계 문서를 확인한다. DB 이력 변경은 담당자 결정 후 진행한다. |
 | `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET` 누락 | `.env` 작성 뒤 백엔드 셸에 환경변수를 내보냈는지 확인한다. |
 | Compose에서 `Set POSTGRES_* in .env` | `flowmat_backend/.env` 파일 위치와 세 값을 확인한다. |
 | 5432 또는 6379 포트 점유 | 이미 실행 중인 DB·Redis를 확인한다. 다른 DB를 쓸 경우 `DB_URL`도 맞춘다. |

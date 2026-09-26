@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { errorMessage } from '../../../shared/lib/errorMessage'
 import { useItemsQuery } from '../../../entities/catalog/api/useItemsQuery'
 import { getWorkflowNodeDefinition, getWorkflowPaletteDefinitions } from '../../../entities/workflow/model/nodeCatalog'
 import {
@@ -52,6 +53,7 @@ export function NodeInspector({
   const [processDesc, setProcessDesc] = useState('')
   const [portForm, setPortForm] = useState<PortFormState>(createDefaultPortFormState())
   const [editingPortId, setEditingPortId] = useState<string | null>(null)
+  const [portError, setPortError] = useState<string | null>(null)
 
   const projectId = node?.projectId ?? ''
   const itemsQuery = useItemsQuery(projectId)
@@ -106,13 +108,16 @@ export function NodeInspector({
   async function handlePortSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!hasValidPortSelection(portForm)) return
-
-    if (editingPortId) {
-      await onPortUpdate(toUpdateProcessIoInput(portForm))
-      return
+    setPortError(null)
+    try {
+      if (editingPortId) {
+        await onPortUpdate(toUpdateProcessIoInput(portForm))
+      } else {
+        await onPortCreate(toCreateProcessIoInput(node!.id, portForm))
+      }
+    } catch (error) {
+      setPortError(errorMessage(error, 'Could not save port.'))
     }
-
-    await onPortCreate(toCreateProcessIoInput(node!.id, portForm))
   }
 
   async function handlePortDelete() {
@@ -123,11 +128,13 @@ export function NodeInspector({
   }
 
   function selectPortForEdit(port: CanvasPortViewModel) {
+    setPortError(null)
     setEditingPortId(port.processIoId)
     setPortForm(toPortFormState(port))
   }
 
   function startNewPort(direction: 'input' | 'output') {
+    setPortError(null)
     setEditingPortId(null)
     setPortForm(createDefaultPortFormState(direction))
   }
@@ -344,13 +351,13 @@ export function NodeInspector({
             </label>
 
             <label style={{ display: 'grid', gap: '4px' }}>
-              <span>Data schema (JSON metadata)</span>
+              <span>Data schema (JSON object contract)</span>
               <textarea value={portForm.schemaJson} onChange={(event) => setPortForm((current) => ({ ...current, schemaJson: event.target.value }))} rows={4} aria-invalid={!isValidSchemaJson(portForm.schemaJson)} />
               {!isValidSchemaJson(portForm.schemaJson) && <small role="alert">Enter a valid JSON object.</small>}
             </label>
 
             <label style={{ display: 'grid', gap: '4px' }}>
-              <span>Validation rule (metadata)</span>
+              <span>Validation rule</span>
               <input value={portForm.validationRule} onChange={(event) => setPortForm((current) => ({ ...current, validationRule: event.target.value }))} />
             </label>
 
@@ -384,6 +391,7 @@ export function NodeInspector({
             </div>
 
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {portError && <p role="alert" style={{ color: '#991b1b' }}>{portError}</p>}
               <button type="submit" disabled={!hasValidPortSelection(portForm)}>
                 {editingPortId ? 'Save Port' : 'Create Port'}
               </button>

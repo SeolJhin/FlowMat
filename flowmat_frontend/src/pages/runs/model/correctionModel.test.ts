@@ -3,6 +3,7 @@ import type { InventoryDto, LotDto, ProductionRunItemDto, RunCorrectionLineDto }
 import {
   buildCorrectionRequest,
   describeCorrectionLine,
+  inputLotOptions,
   orderStockForPick,
   voidableRecordings,
   type CorrectionDraft,
@@ -122,5 +123,28 @@ describe('stock offered for an added recording', () => {
     )
     expect(picks.map((pick) => pick.inventory.inventoryId)).toEqual(['soon', 'late', 'none', 'undated', 'gone'])
     expect(picks[4]).toMatchObject({ expired: true, expiryDate: '2026-09-01' })
+  })
+})
+
+describe('LOTs offered in a run record form', () => {
+  const inv = (id: string, lotId: string | null, inventoryStatus = 'available') => ({ inventoryId: id, lotId, inventoryStatus }) as unknown as InventoryDto
+  const lot = (lotId: string, expiryDate: string | null, expired = false) => ({ lotId, expiryDate, expired }) as unknown as LotDto
+  const lots = [lot('L1', '2026-10-01'), lot('L2', '2026-12-01'), lot('L3', '2026-09-01', true)]
+
+  it('orders inputs FEFO, blocks expired and quarantined records and marks the first usable one', () => {
+    const options = inputLotOptions([inv('late', 'L2'), inv('gone', 'L3'), inv('held', 'L1', 'quarantined'), inv('soon', 'L1')], lots, 'input')
+    expect(options.map((option) => [option.inventory.inventoryId, option.disabled, option.useFirst])).toEqual([
+      ['held', true, false],
+      ['soon', false, true],
+      ['late', false, false],
+      ['gone', true, false],
+    ])
+  })
+
+  it('marks nothing when there is no choice or no expiry date, and keeps outputs as they are', () => {
+    expect(inputLotOptions([inv('soon', 'L1')], lots, 'input')[0].useFirst).toBe(false)
+    expect(inputLotOptions([inv('a', null), inv('b', null)], lots, 'input').some((option) => option.useFirst)).toBe(false)
+    const outputs = inputLotOptions([inv('gone', 'L3'), inv('late', 'L2')], lots, 'output')
+    expect(outputs.map((option) => [option.inventory.inventoryId, option.disabled])).toEqual([['gone', false], ['late', false]])
   })
 })

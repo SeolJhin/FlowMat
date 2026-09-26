@@ -26,9 +26,10 @@ public class QualityInspectionController {
     public ApiResponse<List<QualityInspectionResponse>> listInspections(
         @RequestParam("projectId") String projectId,
         @RequestParam(value = "productionRunId", required = false) String productionRunId,
-        @RequestParam(value = "lotId", required = false) String lotId
+        @RequestParam(value = "lotId", required = false) String lotId,
+        @RequestParam(value = "itemId", required = false) String itemId
     ) {
-        return ApiResponse.ok(qualityService.listInspections(projectId, productionRunId, lotId));
+        return ApiResponse.ok(qualityService.listInspections(projectId, productionRunId, lotId, itemId));
     }
 
     @PostMapping

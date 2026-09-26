@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { errorMessage } from '../../../shared/lib/errorMessage'
 import type {
   CanvasEdgeViewModel,
   FlowRuleViewModel,
@@ -39,6 +40,7 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
   const [conditionExpr, setConditionExpr] = useState('')
   const [capacity, setCapacity] = useState('')
   const [failurePolicy, setFailurePolicy] = useState<'stop' | 'skip' | 'retry'>('stop')
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
     if (focusLabel) setTimeout(() => labelRef.current?.focus(), 50)
@@ -46,6 +48,7 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
 
   useEffect(() => {
     if (!edge) return
+    setSaveError(null)
     setLabel(edge.label ?? '')
     setConnectionType(edge.connectionType ?? 'material')
     setFlowRate(edge.flowRate ?? '')
@@ -63,7 +66,9 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
-    await onSubmit({
+    setSaveError(null)
+    try {
+      await onSubmit({
       connectionId: currentEdge.id,
       connectionLabel: label.trim() || null,
       connectionType: connectionType.trim(),
@@ -76,7 +81,10 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
       capacity: capacity !== '' ? Number(capacity) : null,
       clearCapacity: capacity === '',
       failurePolicy,
-    })
+      })
+    } catch (error) {
+      setSaveError(errorMessage(error, 'Could not save connection.'))
+    }
   }
 
   return (
@@ -168,7 +176,7 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
         </div>
 
         <label style={{ display: 'grid', gap: '4px' }}>
-          <span>Condition expression (metadata)</span>
+          <span>Condition expression</span>
           <input value={conditionExpr} onChange={(e) => setConditionExpr(e.target.value)} />
         </label>
 
@@ -188,6 +196,7 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
         </div>
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {saveError && <p role="alert" style={{ color: '#991b1b' }}>{saveError}</p>}
           <button type="submit">Save Connection</button>
           <button
             type="button"

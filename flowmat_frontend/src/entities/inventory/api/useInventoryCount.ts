@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
 import { newRequestId } from '../../../shared/lib/requestId'
@@ -40,5 +40,42 @@ export function useInventoryCountMutation(projectId: string) {
       void queryClient.invalidateQueries({ queryKey: ['lots', projectId] })
       void queryClient.invalidateQueries({ queryKey: ['inventory-transactions'] })
     },
+  })
+}
+
+/** One past count and the records it changed (GET /inventory-counts, docs/domain/stock-count.md "실사 이력"). */
+export interface InventoryCountHistoryDto {
+  countId: string
+  countedAt: string
+  countedBy: string | null
+  note: string | null
+  adjusted: number
+  increase: number
+  /** As a positive number. */
+  decrease: number
+  /** The differences at today's unit costs, signed. */
+  valueChange: number
+  valueComplete: boolean
+  lines: {
+    inventoryId: string
+    itemId: string
+    itemCode: string | null
+    itemName: string | null
+    unit: string | null
+    location: string | null
+    lotNo: string | null
+    difference: number
+  }[]
+}
+
+/** The latest counts, newest first; under ['inventories', projectId] so a new count refreshes them. */
+export function useInventoryCountHistoryQuery(projectId: string) {
+  return useQuery<InventoryCountHistoryDto[]>({
+    queryKey: ['inventories', projectId, 'count-history'],
+    queryFn: async () =>
+      unwrapApiResponse(
+        await httpClient.get<ApiEnvelope<InventoryCountHistoryDto[]>>(`/inventory-counts?projectId=${encodeURIComponent(projectId)}`),
+      ),
+    enabled: Boolean(projectId),
   })
 }

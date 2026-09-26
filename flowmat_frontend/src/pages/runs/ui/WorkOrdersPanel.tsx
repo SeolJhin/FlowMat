@@ -8,9 +8,11 @@ import {
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { ItemDto, WorkflowDto, WorkOrderDto } from '../../../shared/types/api'
-import { availableWorkOrderActions, isWorkOrderEditable, workOrderProgress } from '../model/workOrderActions'
-import { useBomsQuery } from '../../../entities/bom/api/useBoms'
+import { availableWorkOrderActions, isWorkOrderEditable, safeHttpUrl, workOrderProgress } from '../model/workOrderActions'
+import { useBomBuildableQuery, useBomsQuery } from '../../../entities/bom/api/useBoms'
 import { approvedRevision } from '../../inventory/model/bomModel'
+import { ItemScanInput } from '../../inventory/ui/ItemScanInput'
+import { pickableItems } from '../../inventory/model/itemStatusModel'
 import { WorkOrderReadiness } from './WorkOrderReadiness'
 
 const PRIORITIES = ['low', 'normal', 'high', 'urgent']
@@ -47,6 +49,7 @@ interface OrderForm {
   plannedStartAt: string
   plannedEndAt: string
   instruction: string
+  instructionUrl: string
 }
 
 const EMPTY_FORM: OrderForm = {
@@ -59,6 +62,7 @@ const EMPTY_FORM: OrderForm = {
   plannedStartAt: '',
   plannedEndAt: '',
   instruction: '',
+  instructionUrl: '',
 }
 
 /** "2026-10-01T09:00" (datetime-local, local time) <-> ISO instant for the API. */
@@ -102,6 +106,8 @@ export function WorkOrdersPanel({
   // Retired revisions can no longer be chosen; draft / pending ones can, but must be approved before the order is.
   const bomChoices = boms.filter((bom) => bom.targetItemId === form.targetItemId && bom.bomStatus !== 'retired')
   const chosenBom = form.bomId ? bomById.get(form.bomId) : undefined
+  // What usable stock could make with the chosen BOM, so a quantity beyond it shows before approving.
+  const canMake = useBomBuildableQuery(projectId, form.bomId || null).data
 
   function selectTargetItem(targetItemId: string) {
     setForm((f) => ({ ...f, targetItemId, bomId: approvedRevision(boms, targetItemId)?.bomId ?? '' }))
@@ -125,6 +131,7 @@ export function WorkOrdersPanel({
       plannedStartAt: toLocalInput(order.plannedStartAt),
       plannedEndAt: toLocalInput(order.plannedEndAt),
       instruction: order.instruction ?? '',
+      instructionUrl: order.instructionUrl ?? '',
     })
   }
 
@@ -142,6 +149,7 @@ export function WorkOrdersPanel({
         plannedStartAt: toIso(form.plannedStartAt),
         plannedEndAt: toIso(form.plannedEndAt),
         instruction: form.instruction.trim() || undefined,
+        instructionUrl: form.instructionUrl.trim() || undefined,
       })
       resetForm()
     } catch {
@@ -200,6 +208,16 @@ export function WorkOrdersPanel({
                     <td style={cell}>
                       <div><code>{order.workOrderNumber}</code></div>
                       <div>{order.workOrderTitle}</div>
+                      {safeHttpUrl(order.instructionUrl) && (
+                        <a
+                          href={safeHttpUrl(order.instructionUrl) ?? undefined}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ fontSize: 11 }}
+                        >
+                          Work instruction ↗
+                        </a>
+                      )}
                       <div style={{ fontSize: 11, opacity: 0.6 }}>
                         {order.priority !== 'normal' && <strong>{order.priority} · </strong>}
                         {order.workflowId ? workflowLabel.get(order.workflowId) ?? order.workflowId : 'any workflow'}
@@ -321,12 +339,13 @@ export function WorkOrdersPanel({
               {workflows.map((wf) => <option key={wf.workflowId} value={wf.workflowId}>{wf.workflowName}</option>)}
             </select>
           </label>
+          <ItemScanInput items={pickableItems(items)} onPick={(item) => selectTargetItem(item.itemId)} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 8 }}>
             <label style={{ display: 'grid', gap: 4 }}>
               <span>Target item</span>
               <select value={form.targetItemId} onChange={(e) => selectTargetItem(e.target.value)}>
                 <option value="">None</option>
-                {items.map((item) => <option key={item.itemId} value={item.itemId}>{item.itemCode} · {item.itemName}</option>)}
+                {pickableItems(items, form.targetItemId).map((item) => <option key={item.itemId} value={item.itemId}>{item.itemCode} · {item.itemName}</option>)}
               </select>
             </label>
             <label style={{ display: 'grid', gap: 4 }}>
@@ -358,6 +377,20 @@ export function WorkOrdersPanel({
               )}
               {bomChoices.length === 0 && (
                 <span style={{ fontSize: 11, opacity: 0.6 }}>No BOM for this item yet. Create one on the Inventory → BOMs tab.</span>
+              )}
+              {canMake && canMake.bomId === form.bomId && canMake.buildable != null && (
+                <span
+                  data-testid="work-order-can-make"
+                  style={{
+                    fontSize: 11,
+                    color: Number(form.targetQuantity) > Number(canMake.buildable) ? '#b45309' : undefined,
+                    opacity: Number(form.targetQuantity) > Number(canMake.buildable) ? 1 : 0.7,
+                  }}
+                >
+                  Stock can make {formatQty(canMake.buildable)} {canMake.targetUnit} now
+                  {canMake.limitingItemId ? ` (${itemLabel.get(canMake.limitingItemId) ?? canMake.limitingItemId} runs out first)` : ''}
+                  {Number(form.targetQuantity) > Number(canMake.buildable) ? '; the rest needs more material.' : '.'}
+                </span>
               )}
             </label>
           )}
@@ -391,6 +424,16 @@ export function WorkOrdersPanel({
               rows={3}
               value={form.instruction}
               onChange={(e) => setForm((f) => ({ ...f, instruction: e.target.value }))}
+            />
+          </label>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span>Instruction link</span>
+            <input
+              type="url"
+              value={form.instructionUrl}
+              maxLength={255}
+              placeholder="https://… (work instruction PDF or page)"
+              onChange={(e) => setForm((f) => ({ ...f, instructionUrl: e.target.value }))}
             />
           </label>
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>

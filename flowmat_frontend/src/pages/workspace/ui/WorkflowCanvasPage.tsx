@@ -11,6 +11,7 @@ import { fetchWorkflowPresenceSnapshot } from '../../../entities/workflow/api/wo
 import { applyGraphChangesToCanvas } from '../../../entities/workflow/model/applyGraphChangesToCanvas'
 import { useWorkspaceStore } from '../model/workspaceStore'
 import { useWorkflowCanvasActions } from '../model/useWorkflowCanvasActions'
+import { sortedValidationIssues, validationSelection } from '../model/validationPanelModel'
 import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
 import { createWorkspaceSelectionCommands } from '../model/workspaceSelectionCommands'
 import { getRelatedConnectionIds } from '../../../entities/workflow/model/connectionPolicy'
@@ -18,6 +19,7 @@ import { useAutoLayout } from '../model/useAutoLayout'
 import { CANVAS_ACTIONS } from '../model/canvasActions'
 import { useWorkflowsQuery } from '../../../entities/workflow/api/useWorkflowsQuery'
 import { useUpdateWorkflowMutation } from '../../../entities/workflow/api/useUpdateWorkflowMutation'
+import { useWorkflowValidationQuery, workflowValidationQueryKey } from '../../../entities/workflow/api/useWorkflowValidationQuery'
 import type { PresenceMessage, GraphChangeMessage } from '../../../entities/workflow/api/useWorkflowSync'
 import { Link, useNavigate } from 'react-router-dom'
 import { PALETTE_DRAG_MIME } from './canvasConstants'
@@ -528,6 +530,8 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   const [localPanelWidths, setLocalPanelWidths] = useState(panelWidths)
 
   const [activeRibbonTabId, setActiveRibbonTabId] = useState('home')
+  const [showValidation, setShowValidation] = useState(false)
+  const validationQuery = useWorkflowValidationQuery(canvas.workflow.workflowId, showValidation)
   const [editorSelection, setEditorSelection] = useState<WorkspaceEditorSelectionSnapshot>(EMPTY_EDITOR_SELECTION)
   const editorCommandApiRef = useRef<WorkspaceEditorCommandApi | null>(null)
 
@@ -646,6 +650,9 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
   }, [])
 
   const queryClient = useQueryClient()
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: workflowValidationQueryKey(canvas.workflow.workflowId) })
+  }, [canvas.nodes, canvas.edges, canvas.workflow.workflowId, queryClient])
   const graphSeqRef = useRef(canvas.graphSeq)
   const deferredGraphResyncFromRef = useRef<number | null>(null)
 
@@ -1521,6 +1528,41 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
       </header>
 
       <Ribbon tabs={ribbonTabs} activeTabId={activeRibbonTabId} onTabChange={setActiveRibbonTabId} />
+
+      <section aria-label="Workflow validation" style={{ margin: '12px 16px 0' }}>
+        <button type="button" onClick={() => {
+          if (showValidation) void validationQuery.refetch()
+          else setShowValidation(true)
+        }}>Check workflow</button>
+        {showValidation && (
+          <div role="status" style={{ marginTop: 8 }}>
+            {validationQuery.isPending && <p>Checking workflow...</p>}
+            {validationQuery.isError && <p role="alert">{validationQuery.error.message}</p>}
+            {validationQuery.data && (
+              <>
+                <p>{validationQuery.data.errors} errors, {validationQuery.data.warnings} warnings</p>
+                {validationQuery.data.issues.length === 0 && <p>No issues found.</p>}
+                <ul style={{ maxHeight: 180, overflowY: 'auto' }}>
+                  {sortedValidationIssues(validationQuery.data.issues).map((issue, index) => (
+                    <li key={`${issue.code}-${issue.connectionId ?? issue.ioId ?? issue.processId ?? index}`}>
+                      <button type="button" onClick={() => {
+                        const target = validationSelection(issue)
+                        if (target?.kind === 'connection') selectEdge(target.id)
+                        else if (target?.kind === 'process') {
+                          selectNode(target.id)
+                          if (target.ioId) useWorkspaceStore.getState().selectPort(target.ioId)
+                        }
+                      }}>
+                        {issue.severity}: {issue.code} — {issue.message}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
+      </section>
 
       {workspaceMessage && (
         <div

@@ -4,6 +4,7 @@ import {
   availableWorkOrderActions,
   isWorkOrderEditable,
   runnableWorkOrders,
+  safeHttpUrl,
   workOrderProgress,
 } from './workOrderActions'
 
@@ -67,5 +68,19 @@ describe('workOrderProgress', () => {
     expect(workOrderProgress({ producedQuantity: 5, targetQuantity: null })).toBeNull()
     expect(workOrderProgress({ producedQuantity: 25, targetQuantity: 100 })).toBe(25)
     expect(workOrderProgress({ producedQuantity: 130, targetQuantity: 100 })).toBe(100)
+  })
+})
+
+describe('safeHttpUrl', () => {
+  it('keeps http and https addresses', () => {
+    expect(safeHttpUrl('https://docs.example.com/wi-12.pdf')).toBe('https://docs.example.com/wi-12.pdf')
+    expect(safeHttpUrl('http://intranet/wi')).toBe('http://intranet/wi')
+  })
+
+  it('drops anything that could run or resolve inside the app', () => {
+    expect(safeHttpUrl('javascript:alert(1)')).toBeNull()
+    expect(safeHttpUrl('data:text/html,hi')).toBeNull()
+    expect(safeHttpUrl('/files/wi.pdf')).toBeNull()
+    expect(safeHttpUrl(null)).toBeNull()
   })
 })

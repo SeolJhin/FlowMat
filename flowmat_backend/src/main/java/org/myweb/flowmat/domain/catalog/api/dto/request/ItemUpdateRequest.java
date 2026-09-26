@@ -1,5 +1,6 @@
 package org.myweb.flowmat.domain.catalog.api.dto.request;
 
+import jakarta.validation.Valid;
 import java.math.BigDecimal;
 
 public record ItemUpdateRequest(
@@ -16,6 +17,14 @@ public record ItemUpdateRequest(
     /** Omitted: unchanged. */
     Integer leadTimeDays,
     /** Omitted: unchanged. */
-    BigDecimal unitCost
+    BigDecimal unitCost,
+    /** Omitted: unchanged. Must not be another active item's code in the project (409). */
+    String itemCode,
+    /** Omitted: every detail unchanged. Present: replaces them all, so a null field is cleared. */
+    @Valid ItemDetails details,
+    /** Omitted: unchanged. Blank: bought in the stock unit again (clears the quantity too). */
+    String purchaseUnit,
+    /** Omitted: unchanged. More than 0; needs a purchase unit, given here or already set. */
+    BigDecimal purchaseUnitQty
 ) {
 }

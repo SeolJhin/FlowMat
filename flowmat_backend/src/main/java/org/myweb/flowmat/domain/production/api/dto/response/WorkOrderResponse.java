@@ -24,6 +24,7 @@ public record WorkOrderResponse(
     /** Sum of actual output from finished production runs started against this order. */
     BigDecimal producedQuantity,
     int runCount,
-    String bomId
+    String bomId,
+    String instructionUrl
 ) {
 }

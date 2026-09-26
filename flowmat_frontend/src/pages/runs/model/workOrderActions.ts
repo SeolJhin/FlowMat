@@ -32,3 +32,17 @@ export function workOrderProgress(order: Pick<WorkOrderDto, 'producedQuantity' |
   if (!order.targetQuantity || order.targetQuantity <= 0) return null
   return Math.min(100, Math.round((Number(order.producedQuantity) / Number(order.targetQuantity)) * 100))
 }
+
+/**
+ * The work order's instruction link when it is an absolute http or https address, else null. The server only saves
+ * such links; checking again keeps a stray javascript: or data: value from ever becoming a clickable link.
+ */
+export function safeHttpUrl(url: string | null | undefined): string | null {
+  if (!url) return null
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? url : null
+  } catch {
+    return null
+  }
+}

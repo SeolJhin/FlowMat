@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { InventoryDto } from '../../../shared/types/api'
-import { buildCountLines, countDifference, filterCountRows } from './countModel'
+import { buildCountLines, countDifference, countDue, countIntervalDays, filterCountRows, lastCountedLabel } from './countModel'
 
 function row(id: string, quantity: number, patch: Partial<InventoryDto> = {}): InventoryDto {
   return {
@@ -53,5 +53,32 @@ describe('stock count', () => {
     expect(filterCountRows(mixed, 'l-77', label).map((r) => r.inventoryId)).toEqual(['b'])
     expect(filterCountRows(mixed, 'SALT', label).map((r) => r.inventoryId)).toEqual(['c'])
     expect(filterCountRows(mixed, ' ', label)).toHaveLength(3)
+  })
+})
+
+describe('countDue', () => {
+  const now = new Date(2026, 8, 26, 12)
+  const row = (lastCheckedAt: string | null) => ({ inventoryId: 'r', lastCheckedAt }) as InventoryDto
+
+  it('is due when never counted or counted more than 30 days ago', () => {
+    expect(countDue(row(null), now)).toBe(true)
+    expect(countDue(row(new Date(2026, 7, 26, 11).toISOString()), now)).toBe(true)
+    expect(countDue(row(new Date(2026, 7, 27, 12).toISOString()), now)).toBe(false)
+    expect(countDue(row(new Date(2026, 8, 20).toISOString()), now, 5)).toBe(true)
+  })
+
+  it('labels the local date or never', () => {
+    expect(lastCountedLabel(null)).toBe('never')
+    expect(lastCountedLabel(new Date(2026, 8, 3, 23, 30).toISOString())).toBe('2026-09-03')
+  })
+})
+
+describe('countIntervalDays', () => {
+  it('counts A items monthly, B quarterly, C twice a year and unclassed items monthly', () => {
+    expect([countIntervalDays('A'), countIntervalDays('B'), countIntervalDays('C'), countIntervalDays(null)]).toEqual([30, 90, 180, 30])
+    const row = { inventoryId: 'r', lastCheckedAt: new Date(2026, 5, 1).toISOString() } as InventoryDto
+    const now = new Date(2026, 7, 1)
+    expect(countDue(row, now, countIntervalDays('A'))).toBe(true)
+    expect(countDue(row, now, countIntervalDays('B'))).toBe(false)
   })
 })

@@ -1,5 +1,7 @@
 package org.myweb.flowmat.domain.workflow.application;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
@@ -7,6 +9,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessConnectionCreateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessConnectionUpdateRequest;
@@ -15,6 +18,8 @@ import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessConnection;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
+import org.myweb.flowmat.domain.workflow.domain.contract.PortSchema;
+import org.myweb.flowmat.domain.workflow.domain.expression.ConditionExpression;
 import org.myweb.flowmat.domain.workflow.collab.GraphSyncService;
 import org.myweb.flowmat.domain.workflow.collab.dto.GraphChangeMessage.Type;
 import org.myweb.flowmat.domain.workflow.repository.ProcessConnectionRepository;
@@ -41,6 +46,8 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     private final ProcessRepository processRepository;
     private final ProcessIoRepository processIoRepository;
     private final ItemRepository itemRepository;
+    private final UnitMasterRepository unitMasterRepository;
+    private final EntityManager entityManager;
     private final IdGenerator idGenerator;
     private final GraphSyncService graphSyncService;
     private final ProjectAccessService projectAccessService;
@@ -58,6 +65,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     @Transactional
     public ProcessConnectionResponse createConnection(ProcessConnectionCreateRequest request) {
         Workflow workflow = projectAccessService.requireWorkflowWriteAccess(request.workflowId());
+        entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
         Process fromProcess = projectAccessService.requireProcessWriteAccess(request.fromProcessId());
         Process toProcess = projectAccessService.requireProcessWriteAccess(request.toProcessId());
         validateProcessMembership(workflow, fromProcess, toProcess);
@@ -70,7 +78,6 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         connection.setToProcessId(toProcess.getProcessId());
         connection.setFromIoId(validateProcessIo(request.fromIoId(), fromProcess.getProcessId(), "output"));
         connection.setToIoId(validateProcessIo(request.toIoId(), toProcess.getProcessId(), "input"));
-        validatePortCompatibility(connection.getFromIoId(), connection.getToIoId());
         connection.setItemId(validateItem(request.itemId(), workflow.getProjectId()));
         connection.setSourceHandle(resolveHandle(request.sourceHandle(), connection.getFromIoId(), "out"));
         connection.setTargetHandle(resolveHandle(request.targetHandle(), connection.getToIoId(), "in"));
@@ -87,6 +94,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         connection.setDeletedYn(NOT_DELETED);
         connection.setVersion(1);
         connection.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
+        validateConnectionContract(connection, null, true);
         ProcessConnectionResponse response = toResponse(processConnectionRepository.save(connection));
         graphSyncService.broadcast(Type.CONNECTION_CREATED, response.workflowId(), response.connectionId());
         return response;
@@ -101,6 +109,8 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     @Transactional
     public ProcessConnectionResponse updateConnection(String connectionId, ProcessConnectionUpdateRequest request) {
         ProcessConnection connection = projectAccessService.requireConnectionWriteAccess(connectionId);
+        Workflow workflow = projectAccessService.requireWorkflowWriteAccess(connection.getWorkflowId());
+        entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
         Process fromProcess = projectAccessService.requireProcessWriteAccess(connection.getFromProcessId());
         Process toProcess = projectAccessService.requireProcessWriteAccess(connection.getToProcessId());
 
@@ -109,9 +119,6 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         }
         if (request.toIoId() != null) {
             connection.setToIoId(validateProcessIo(request.toIoId(), toProcess.getProcessId(), "input"));
-        }
-        if (request.fromIoId() != null || request.toIoId() != null) {
-            validatePortCompatibility(connection.getFromIoId(), connection.getToIoId());
         }
         if (request.itemId() != null) {
             connection.setItemId(validateItem(request.itemId(), connection.getProjectId()));
@@ -158,6 +165,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         }
         connection.setVersion(connection.getVersion() + 1);
         connection.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
+        validateConnectionContract(connection, connectionId, true);
         ProcessConnectionResponse response = toResponse(processConnectionRepository.save(connection));
         graphSyncService.broadcast(Type.CONNECTION_UPDATED, response.workflowId(), response.connectionId());
         return response;
@@ -189,19 +197,76 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         return processIo.getProcessIoId();
     }
 
-    private void validatePortCompatibility(String fromIoId, String toIoId) {
-        if (fromIoId == null || toIoId == null) {
-            return;
+    void validateConnectionContract(ProcessConnection connection, String excludedConnectionId) {
+        validateConnectionContract(connection, excludedConnectionId, false);
+    }
+
+    private void validateConnectionContract(ProcessConnection connection, String excludedConnectionId, boolean inferItem) {
+        ConditionExpression condition = null;
+        if (hasText(connection.getConditionExpr())) {
+            condition = ConditionExpression.compile(connection.getConditionExpr());
         }
-        ProcessIo source = processIoRepository.findByProcessIoIdAndDeletedYn(fromIoId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        ProcessIo target = processIoRepository.findByProcessIoIdAndDeletedYn(toIoId, NOT_DELETED)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        String sourceType = defaultIfBlank(source.getResourceType(), source.getIoType());
-        String targetType = defaultIfBlank(target.getResourceType(), target.getIoType());
-        if (!sourceType.equals(targetType)) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST,
-                "Connected ports must use the same resource type.");
+        if (connection.getFromProcessId().equals(connection.getToProcessId())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "A connection cannot link a process to itself.");
+        }
+        if (connection.getFromIoId() != null && connection.getToIoId() != null &&
+            processConnectionRepository.findAllByWorkflowIdAndDeletedYnOrderByCreatedAtAsc(
+                connection.getWorkflowId(), NOT_DELETED).stream().anyMatch(existing ->
+                !existing.getConnectionId().equals(excludedConnectionId)
+                    && connection.getFromIoId().equals(existing.getFromIoId())
+                    && connection.getToIoId().equals(existing.getToIoId()))) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Ports are already connected.");
+        }
+        String fromIoId = connection.getFromIoId();
+        String toIoId = connection.getToIoId();
+        ProcessIo source = fromIoId == null ? null : processIoRepository.findByProcessIoIdAndDeletedYn(fromIoId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "Connection fromIoId points to a deleted port."));
+        ProcessIo target = toIoId == null ? null : processIoRepository.findByProcessIoIdAndDeletedYn(toIoId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "Connection toIoId points to a deleted port."));
+        if (source != null && (!source.getProcessId().equals(connection.getFromProcessId())
+            || !"output".equalsIgnoreCase(source.getDirection()))) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Connection fromIoId must be an output port of fromProcessId.");
+        }
+        if (target != null && (!target.getProcessId().equals(connection.getToProcessId())
+            || !"input".equalsIgnoreCase(target.getDirection()))) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Connection toIoId must be an input port of toProcessId.");
+        }
+        PortSchema sourceSchema = source == null ? null : PortSchema.parseStored(source.getSchemaJson());
+        if (condition != null) {
+            condition.requireDeclaredAttributes(sourceSchema == null ? null : sourceSchema.properties().keySet());
+        }
+        String sourceItem = source == null ? null : source.getItemId();
+        String targetItem = target == null ? null : target.getItemId();
+        String selectedItem = connection.getItemId();
+        if (sourceItem != null && targetItem != null && !sourceItem.equals(targetItem)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Connected ports itemId must match.");
+        }
+        if (selectedItem != null && ((sourceItem != null && !selectedItem.equals(sourceItem))
+            || (targetItem != null && !selectedItem.equals(targetItem)))) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Connection itemId must match the ports.");
+        }
+        if (inferItem && selectedItem == null && sourceItem != null && sourceItem.equals(targetItem)) {
+            connection.setItemId(sourceItem);
+        }
+        if (source != null && target != null) {
+            String sourceType = defaultIfBlank(source.getResourceType(), source.getIoType());
+            String targetType = defaultIfBlank(target.getResourceType(), target.getIoType());
+            if (!sourceType.equals(targetType)) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST,
+                    "Connected ports resourceType must match.");
+            }
+            PortSchema targetSchema = PortSchema.parseStored(target.getSchemaJson());
+            PortSchema.requireCompatible(sourceSchema, targetSchema);
+        }
+        Set<String> types = new java.util.HashSet<>();
+        for (String unit : new String[] {source == null ? null : source.getUnit(),
+            target == null ? null : target.getUnit(), connection.getUnit()}) {
+            if (unit != null && !unit.isBlank()) {
+                unitMasterRepository.findByUnitCodeIgnoreCase(unit).ifPresent(master -> types.add(master.getUnitType()));
+            }
+        }
+        if (types.size() > 1) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Connection unit type must match port units.");
         }
     }
 

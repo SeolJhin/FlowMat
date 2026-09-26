@@ -4,6 +4,8 @@ import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.flowrun.api.dto.request.FlowRunFinishRequest;
+import org.myweb.flowmat.domain.flowrun.api.dto.request.FlowRunCancelRequest;
+import org.myweb.flowmat.domain.flowrun.api.dto.request.FlowRunFailRequest;
 import org.myweb.flowmat.domain.flowrun.api.dto.request.FlowRunStartRequest;
 import org.myweb.flowmat.domain.flowrun.api.dto.response.FlowRunResponse;
 import org.myweb.flowmat.domain.flowrun.application.FlowRunService;
@@ -43,5 +45,19 @@ public class FlowRunController {
         @PathVariable String flowRunId, @Valid @RequestBody FlowRunFinishRequest request
     ) {
         return ApiResponse.ok(service.finish(flowRunId, request));
+    }
+
+    @PostMapping("/{flowRunId}/cancel")
+    public ApiResponse<FlowRunResponse> cancel(
+        @PathVariable String flowRunId, @Valid @RequestBody FlowRunCancelRequest request
+    ) {
+        return ApiResponse.ok(service.cancel(flowRunId, request));
+    }
+
+    @PostMapping("/{flowRunId}/fail")
+    public ApiResponse<FlowRunResponse> fail(
+        @PathVariable String flowRunId, @Valid @RequestBody FlowRunFailRequest request
+    ) {
+        return ApiResponse.ok(service.fail(flowRunId, request));
     }
 }

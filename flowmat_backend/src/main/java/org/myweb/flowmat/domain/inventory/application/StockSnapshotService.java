@@ -5,7 +5,6 @@ import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -24,6 +23,7 @@ import org.myweb.flowmat.domain.inventory.domain.entity.InventoryTransaction;
 import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
 import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.domain.inventory.repository.InventoryTransactionRepository;
+import org.myweb.flowmat.domain.inventory.repository.InventoryTransactionRepository.LastMovement;
 import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
@@ -57,14 +57,9 @@ public class StockSnapshotService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Give the moment to show stock at.");
         }
 
-        // The last movement of each record up to the moment. Ties on the timestamp keep the one read last.
-        Map<String, InventoryTransaction> last = new HashMap<>();
-        for (InventoryTransaction movement : transactionRepository.findAllByProjectIdAndCreatedAtLessThanEqual(projectId, at)) {
-            InventoryTransaction before = last.get(movement.getInventoryId());
-            if (before == null || !movement.getCreatedAt().isBefore(before.getCreatedAt())) {
-                last.put(movement.getInventoryId(), movement);
-            }
-        }
+        // The last movement of each record up to the moment, one per record from the database.
+        Map<String, LastMovement> last = transactionRepository.findLastMovementsUpTo(projectId, at).stream()
+            .collect(Collectors.toMap(LastMovement::getInventoryId, Function.identity()));
         Set<String> moved = transactionRepository.findInventoryIdsWithMovements(projectId);
         Map<String, Inventory> records = StreamSupport.stream(inventoryRepository.findAllById(last.keySet()).spliterator(), false)
             .collect(Collectors.toMap(Inventory::getInventoryId, Function.identity()));
@@ -87,7 +82,7 @@ public class StockSnapshotService {
         BigDecimal total = BigDecimal.ZERO;
         boolean complete = true;
         for (Inventory record : records.values()) {
-            InventoryTransaction movement = last.get(record.getInventoryId());
+            LastMovement movement = last.get(record.getInventoryId());
             boolean fromLedger = movement != null;
             BigDecimal quantity = scale(fromLedger ? movement.getQuantityAfter() : record.getQuantity());
             BigDecimal reserved = scale(fromLedger ? movement.getReservedAfter() : record.getReservedQuantity());

@@ -1,10 +1,22 @@
 import { useMemo, useState } from 'react'
 import { useInventoriesQuery } from '../../../entities/inventory/api/useInventoriesQuery'
-import { useDefectsQuery, useQualitySummaryQuery, useResolveDefectMutation } from '../../../entities/quality/api/useQuality'
-import { DefectList } from '../../../entities/quality/ui/QualityRecords'
+import { useLotsQuery } from '../../../entities/inventory/api/useLots'
+import {
+  useDefectsQuery,
+  useLogDefectMutation,
+  useQualitySummaryQuery,
+  useRecordInspectionMutation,
+  useResolveDefectMutation,
+} from '../../../entities/quality/api/useQuality'
+import type { InspectionTarget } from '../../../entities/quality/model/qualityModel'
+import { DefectForm, DefectList, InspectionForm } from '../../../entities/quality/ui/QualityRecords'
+import { httpClient } from '../../../shared/api/httpClient'
+import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
 import { errorMessage } from '../../../shared/lib/errorMessage'
-import type { ItemDto } from '../../../shared/types/api'
-import { QUALITY_PERIODS, formatRate, windowStart } from '../model/qualityOverviewModel'
+import { formatQty } from '../../../shared/lib/formatQty'
+import type { ApiEnvelope, DefectDto, ItemDto, QualityInspectionDto } from '../../../shared/types/api'
+import { defectsCsv, inspectionsCsv } from '../model/qualityExportModel'
+import { QUALITY_PERIODS, formatRate, qualityTargets, windowStart } from '../model/qualityOverviewModel'
 
 const cell = { padding: '6px 6px' } as const
 const num = { ...cell, textAlign: 'right' } as const
@@ -29,6 +41,46 @@ export function QualityPanel({ projectId, items }: { projectId: string; items: I
   }, [items])
   const summary = summaryQuery.data
   const open = openQuery.data ?? []
+  const lotsQuery = useLotsQuery(projectId)
+  const recordMutation = useRecordInspectionMutation(projectId)
+  const logMutation = useLogDefectMutation(projectId)
+  const [form, setForm] = useState<null | 'inspection' | 'defect'>(null)
+  const targets = useMemo(() => qualityTargets(items, lotsQuery.data ?? []), [items, lotsQuery.data])
+  const lotNo = useMemo(() => new Map((lotsQuery.data ?? []).map((lot) => [lot.lotId, lot.lotNo])), [lotsQuery.data])
+  const targetLabel = (target: InspectionTarget) =>
+    target.lotId ? `LOT ${lotNo.get(target.lotId) ?? target.lotId} · ${itemLabel(target.itemId)}` : itemLabel(target.itemId)
+  const saveError = recordMutation.isError
+    ? errorMessage(recordMutation.error, 'The inspection could not be saved.')
+    : logMutation.isError
+      ? errorMessage(logMutation.error, 'The defect could not be saved.')
+      : null
+
+  function openForm(next: typeof form) {
+    recordMutation.reset()
+    logMutation.reset()
+    setForm(next)
+  }
+  const [exportError, setExportError] = useState<string | null>(null)
+
+  /** Fetches the full list only when asked, and saves the period's part of it. */
+  async function exportCsv(kind: 'inspections' | 'defects') {
+    setExportError(null)
+    try {
+      const query = `projectId=${encodeURIComponent(projectId)}`
+      const text =
+        kind === 'inspections'
+          ? inspectionsCsv(unwrapApiResponse(await httpClient.get<ApiEnvelope<QualityInspectionDto[]>>(`/quality-inspections?${query}`)), from)
+          : defectsCsv(unwrapApiResponse(await httpClient.get<ApiEnvelope<DefectDto[]>>(`/defects?${query}&openOnly=false`)), from)
+      const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${kind}-${(from ?? 'all').slice(0, 10)}-to-${new Date().toISOString().slice(0, 10)}.csv`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      setExportError(errorMessage(error, 'The export failed.'))
+    }
+  }
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
@@ -43,7 +95,58 @@ export function QualityPanel({ projectId, items }: { projectId: string; items: I
             ))}
           </select>
         </label>
+        <button type="button" onClick={() => void exportCsv('inspections')}>Inspections CSV</button>
+        <button type="button" onClick={() => void exportCsv('defects')}>Defects CSV</button>
         <span className="inspector-hint">Inspections and defects are recorded on a run or a LOT.</span>
+      </div>
+      {exportError && <p role="alert" style={{ color: '#dc2626', fontSize: 12, margin: 0 }}>{exportError}</p>}
+
+      <div style={{ display: 'grid', gap: 8 }}>
+        {form === null && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 12 }}>
+            <button type="button" disabled={targets.length === 0} onClick={() => openForm('inspection')}>
+              Record inspection
+            </button>
+            <button type="button" disabled={targets.length === 0} onClick={() => openForm('defect')}>
+              Log defect
+            </button>
+            <span className="inspector-hint">
+              For a LOT or an item without LOT tracking, such as goods received. Runs have their own on the run page.
+            </span>
+          </div>
+        )}
+        {form === 'inspection' && (
+          <InspectionForm
+            targets={targets}
+            targetLabel={targetLabel}
+            productionRunId={null}
+            pending={recordMutation.isPending}
+            onSubmit={async (body) => {
+              await recordMutation.mutateAsync(body)
+              setForm(null)
+            }}
+            onCancel={() => openForm(null)}
+          />
+        )}
+        {form === 'defect' && (
+          <DefectForm
+            targets={targets}
+            targetLabel={targetLabel}
+            productionRunId={null}
+            fromInspection={null}
+            pending={logMutation.isPending}
+            onSubmit={async (body) => {
+              await logMutation.mutateAsync(body)
+              setForm(null)
+            }}
+            onCancel={() => openForm(null)}
+          />
+        )}
+        {saveError && (
+          <p role="alert" style={{ color: '#dc2626', fontSize: 12, margin: 0 }}>
+            {saveError}
+          </p>
+        )}
       </div>
 
       {summaryQuery.isError && (
@@ -111,6 +214,37 @@ export function QualityPanel({ projectId, items }: { projectId: string; items: I
               )}
             </section>
           </div>
+          {(summary.byItem ?? []).length > 0 && (
+            <section aria-label="Quality by item">
+              <h4 style={{ margin: '0 0 4px' }}>By item</h4>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th style={head}>Item</th>
+                    <th style={{ ...head, textAlign: 'right' }}>Failed checks</th>
+                    <th style={{ ...head, textAlign: 'right' }}>Defects</th>
+                    <th style={{ ...head, textAlign: 'right' }}>Open</th>
+                    <th style={{ ...head, textAlign: 'right' }}>Defective qty</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(summary.byItem ?? []).map((line) => (
+                    <tr key={line.itemId}>
+                      <td style={cell}>{line.itemCode ? `${line.itemCode} · ${line.itemName ?? ''}` : line.itemId}</td>
+                      <td style={num}>
+                        {line.failed} <span style={{ opacity: 0.6 }}>of {line.inspections}</span>
+                      </td>
+                      <td style={num}>{line.defects}</td>
+                      <td style={{ ...num, color: line.openDefects > 0 ? '#b45309' : undefined }}>{line.openDefects}</td>
+                      <td style={num}>
+                        {line.defects > 0 ? `${formatQty(line.defectQuantity)} ${line.unit ?? ''}` : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
         </>
       )}
 

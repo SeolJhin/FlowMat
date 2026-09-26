@@ -5,13 +5,18 @@ import java.math.BigDecimal;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.bom.api.dto.request.BomApproveRequest;
+import org.myweb.flowmat.domain.bom.api.dto.request.BomCopyRequest;
 import org.myweb.flowmat.domain.bom.api.dto.request.BomCreateRequest;
 import org.myweb.flowmat.domain.bom.api.dto.request.BomLineCreateRequest;
+import org.myweb.flowmat.domain.bom.api.dto.request.BomLineImportRequest;
 import org.myweb.flowmat.domain.bom.api.dto.request.BomUpdateRequest;
+import org.myweb.flowmat.domain.bom.api.dto.response.BomLineImportResponse;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomResponse;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomWhereUsedResponse;
 import org.myweb.flowmat.domain.bom.application.BomApprovalService;
+import org.myweb.flowmat.domain.bom.application.BomCopyService;
+import org.myweb.flowmat.domain.bom.application.BomLineImportService;
 import org.myweb.flowmat.domain.bom.application.BomService;
 import org.myweb.flowmat.global.response.ApiResponse;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -32,6 +37,8 @@ public class BomController {
 
     private final BomService bomService;
     private final BomApprovalService bomApprovalService;
+    private final BomCopyService bomCopyService;
+    private final BomLineImportService bomLineImportService;
 
     @GetMapping
     public ApiResponse<List<BomResponse>> listBoms(
@@ -77,6 +84,21 @@ public class BomController {
         @Valid @RequestBody BomLineCreateRequest request
     ) {
         return ApiResponse.ok(bomService.addLine(bomId, request));
+    }
+
+    /** Materials for a draft from a spreadsheet (docs/domain/item-import.md "BOM 자재"); all rows or none. */
+    @PostMapping("/{bomId}/lines/import")
+    public ApiResponse<BomLineImportResponse> importLines(
+        @PathVariable("bomId") String bomId,
+        @RequestBody BomLineImportRequest request
+    ) {
+        return ApiResponse.ok(bomLineImportService.importLines(bomId, request));
+    }
+
+    /** Another product's first draft, from this BOM's base and materials. */
+    @PostMapping("/{bomId}/copy")
+    public ApiResponse<BomResponse> copy(@PathVariable("bomId") String bomId, @Valid @RequestBody BomCopyRequest request) {
+        return ApiResponse.ok(bomCopyService.copy(bomId, request));
     }
 
     @DeleteMapping("/{bomId}/lines/{bomLineId}")

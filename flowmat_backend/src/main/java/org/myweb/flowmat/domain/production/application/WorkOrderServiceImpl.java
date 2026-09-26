@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.bom.domain.entity.BomHeader;
 import org.myweb.flowmat.domain.bom.domain.enums.BomStatus;
 import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
+import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.production.api.dto.request.WorkOrderCreateRequest;
@@ -86,6 +87,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         applyEditableFields(order, request.workOrderTitle(), request.workflowId(), request.targetItemId(),
             request.targetQuantity(), request.priority(), request.plannedStartAt(), request.plannedEndAt(),
             request.instruction(), request.assignedTo(), request.bomId());
+        order.setInstructionUrl(instructionUrl(request.instructionUrl()));
         order.setCreatedBy(projectAccessService.requireCurrentUserId());
         order.setDeletedYn(NOT_DELETED);
         return toResponse(workOrderRepository.save(order), List.of());
@@ -106,6 +108,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         applyEditableFields(order, title, request.workflowId(), request.targetItemId(), request.targetQuantity(),
             request.priority(), request.plannedStartAt(), request.plannedEndAt(), request.instruction(), request.assignedTo(),
             request.bomId());
+        order.setInstructionUrl(instructionUrl(request.instructionUrl()));
         order.setUpdatedBy(projectAccessService.requireCurrentUserId());
         return toResponse(workOrderRepository.save(order));
     }
@@ -190,6 +193,10 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             Item item = itemRepository.findByItemIdAndDeletedYn(normalizedItemId, NOT_DELETED)
                 .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "Target item does not exist."));
             requireSameProject(order, item.getProjectId());
+            // Only a new target is checked, so an order for an item phased out later can still be edited and finished.
+            if (!normalizedItemId.equals(order.getTargetItemId())) {
+                ItemStatusRule.requireActive(item, "plan a work order for it");
+            }
         }
         order.setTargetItemId(normalizedItemId);
 
@@ -309,8 +316,33 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             order.getApprovedAt(),
             produced,
             runs.size(),
-            order.getBomId()
+            order.getBomId(),
+            order.getInstructionUrl()
         );
+    }
+
+    /**
+     * Blank clears the link. Only an absolute http or https address with a host is kept, since the link is opened from
+     * the work order list; anything else (javascript:, data:, a relative path) is refused.
+     */
+    private static String instructionUrl(String value) {
+        String url = trimToNull(value);
+        if (url == null) {
+            return null;
+        }
+        if (url.length() > 255) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Instruction link takes at most 255 characters.");
+        }
+        try {
+            java.net.URI uri = new java.net.URI(url);
+            String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(java.util.Locale.ROOT);
+            if ((scheme.equals("http") || scheme.equals("https")) && uri.getHost() != null && !uri.getHost().isBlank()) {
+                return url;
+            }
+        } catch (java.net.URISyntaxException e) {
+            // Refused below.
+        }
+        throw new BusinessException(ErrorCode.BAD_REQUEST, "Instruction link must be an http or https address, like https://docs.example.com/wi-12.pdf.");
     }
 
     private static String trimToNull(String value) {

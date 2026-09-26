@@ -1,7 +1,9 @@
 package org.myweb.flowmat.domain.workflow.application;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
@@ -11,9 +13,13 @@ import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessIoUpdateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessIoResponse;
 import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
+import org.myweb.flowmat.domain.workflow.domain.entity.ProcessConnection;
+import org.myweb.flowmat.domain.workflow.domain.contract.PortSchema;
+import org.myweb.flowmat.domain.workflow.domain.expression.ConditionExpression;
 import org.myweb.flowmat.domain.workflow.collab.GraphSyncService;
 import org.myweb.flowmat.domain.workflow.collab.dto.GraphChangeMessage.Type;
 import org.myweb.flowmat.domain.workflow.repository.ProcessIoRepository;
+import org.myweb.flowmat.domain.workflow.repository.ProcessConnectionRepository;
 import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
@@ -33,6 +39,8 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     private static final String DEFAULT_COLOR = "slate";
 
     private final ProcessIoRepository processIoRepository;
+    private final ProcessConnectionRepository processConnectionRepository;
+    private final ProcessConnectionServiceImpl connectionService;
     private final ProcessRepository processRepository;
     private final GraphSyncService graphSyncService;
     private final ItemRepository itemRepository;
@@ -72,6 +80,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         processIo.setRequiredYn(defaultYn(request.requiredYn(), "Y"));
         processIo.setAllowShortageYn(defaultYn(request.allowShortageYn(), "N"));
         processIo.setDeletedYn(NOT_DELETED);
+        validatePortContract(processIo);
         ProcessIoResponse response = ProcessIoResponse.from(processIoRepository.save(processIo));
         graphSyncService.broadcast(Type.PORT_CREATED, process.getWorkflowId(), response.processIoId());
         return response;
@@ -86,6 +95,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     @Transactional
     public ProcessIoResponse updateProcessIo(String processIoId, ProcessIoUpdateRequest request) {
         ProcessIo processIo = projectAccessService.requireProcessIoWriteAccess(processIoId);
+        List<String> contractBefore = contractFields(processIo);
 
         if (hasText(request.itemId())) {
             Item item = findActiveItem(request.itemId());
@@ -134,6 +144,17 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         if (request.allowShortageYn() != null) {
             processIo.setAllowShortageYn(defaultYn(request.allowShortageYn(), processIo.getAllowShortageYn()));
         }
+        validatePortContract(processIo);
+        if (!Objects.equals(contractBefore, contractFields(processIo))) {
+            List<String> brokenConnections = processConnectionRepository.findLiveConnectionsForPort(processIoId).stream()
+                .filter(connection -> breaksConnection(connection))
+                .map(ProcessConnection::getConnectionId)
+                .toList();
+            if (!brokenConnections.isEmpty()) {
+                throw new BusinessException(ErrorCode.CONFLICT,
+                    "Port change would break connection(s): " + String.join(", ", brokenConnections));
+            }
+        }
         ProcessIo saved = processIoRepository.save(processIo);
         Process parentProcess = projectAccessService.requireProcessWriteAccess(saved.getProcessId());
         graphSyncService.broadcast(Type.PORT_UPDATED, parentProcess.getWorkflowId(), saved.getProcessIoId());
@@ -146,6 +167,11 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         ProcessIo processIo = projectAccessService.requireProcessIoWriteAccess(processIoId);
         Process parentProcess = projectAccessService.requireProcessWriteAccess(processIo.getProcessId());
         String workflowId = parentProcess.getWorkflowId();
+        for (ProcessConnection connection : processConnectionRepository.findLiveConnectionsForPort(processIoId)) {
+            connection.setDeletedYn(DELETED);
+            processConnectionRepository.save(connection);
+            graphSyncService.broadcast(Type.CONNECTION_DELETED, connection.getWorkflowId(), connection.getConnectionId());
+        }
         processIo.setDeletedYn(DELETED);
         processIoRepository.save(processIo);
         graphSyncService.broadcast(Type.PORT_DELETED, workflowId, processIoId);
@@ -166,7 +192,30 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         if (schema.toString().length() > 65536) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Port schema is too large.");
         }
+        PortSchema.parse(schema);
         return schema.toString();
+    }
+
+    private static void validatePortContract(ProcessIo port) {
+        PortSchema schema = PortSchema.parseStored(port.getSchemaJson());
+        if (hasText(port.getValidationRule())) {
+            ConditionExpression rule = ConditionExpression.compile(port.getValidationRule());
+            rule.requireDeclaredAttributes(schema == null ? null : schema.properties().keySet());
+        }
+    }
+
+    private boolean breaksConnection(ProcessConnection connection) {
+        try {
+            connectionService.validateConnectionContract(connection, connection.getConnectionId());
+            return false;
+        } catch (BusinessException exception) {
+            return true;
+        }
+    }
+
+    private static List<String> contractFields(ProcessIo port) {
+        return Arrays.asList(port.getDirection(), port.getResourceType(), port.getItemId(),
+            port.getUnit(), port.getSchemaJson());
     }
 
     private static void validateSameProject(String processProjectId, String itemProjectId) {

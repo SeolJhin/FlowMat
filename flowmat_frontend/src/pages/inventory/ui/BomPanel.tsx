@@ -1,17 +1,25 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import {
   useBomActionMutation,
+  useBomBuildableQuery,
   useBomLineMutations,
   useBomRequirementsQuery,
   useBomsQuery,
+  useBuildableBomsQuery,
   useCreateBomMutation,
   type BomAction,
 } from '../../../entities/bom/api/useBoms'
-import type { BomDto, ItemDto, UnitDto } from '../../../shared/types/api'
+import type { BomDto, BuildableQuantityDto, ItemDto, UnitDto } from '../../../shared/types/api'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import { BOM_ACTION_LABELS, bomActions, groupByTarget, isEditable } from '../model/bomModel'
+import { shortBy, usableByMaterial } from '../model/buildableModel'
+import { BomRevisionCompare } from './BomRevisionCompare'
+import { BomLineImport } from './BomLineImport'
+import { BomCopyForm } from './BomCopyForm'
 import { BomWhereUsed } from './BomWhereUsed'
+import { ItemScanInput } from './ItemScanInput'
+import { pickableItems } from '../model/itemStatusModel'
 
 const STATUS_COLORS: Record<BomDto['bomStatus'], string> = {
   draft: '#64748b',
@@ -21,6 +29,24 @@ const STATUS_COLORS: Record<BomDto['bomStatus'], string> = {
 }
 
 const cell = { padding: '6px 6px' } as const
+
+/** What an approved BOM could make from usable stock now; empty for other revisions. */
+function BuildableCell({ entry, itemLabel }: { entry: BuildableQuantityDto | undefined; itemLabel: Map<string, string> }) {
+  if (!entry) return null
+  if (entry.problem) {
+    return <span style={{ color: '#b45309' }} title={entry.problem}>can't tell</span>
+  }
+  if (entry.buildable == null) return null
+  const limiting = entry.limitingItemId ? itemLabel.get(entry.limitingItemId) ?? entry.limitingItemId : null
+  return (
+    <span
+      style={{ color: Number(entry.buildable) > 0 ? undefined : '#dc2626' }}
+      title={limiting ? `${limiting} runs out first` : undefined}
+    >
+      can make {formatQty(entry.buildable)} {entry.targetUnit}
+    </span>
+  )
+}
 
 export function BomPanel({ projectId, items, units }: { projectId: string; items: ItemDto[]; units: UnitDto[] }) {
   const bomsQuery = useBomsQuery(projectId)
@@ -32,6 +58,11 @@ export function BomPanel({ projectId, items, units }: { projectId: string; items
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selected = boms.find((bom) => bom.bomId === selectedId) ?? null
+  const buildableQuery = useBuildableBomsQuery(projectId)
+  const buildableById = useMemo(
+    () => new Map((buildableQuery.data ?? []).map((entry) => [entry.bomId, entry])),
+    [buildableQuery.data],
+  )
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 24, alignItems: 'start' }}>
@@ -62,6 +93,9 @@ export function BomPanel({ projectId, items, units }: { projectId: string; items
                       {formatQty(bom.baseQuantity)} {bom.baseUnit}
                     </td>
                     <td style={cell}>{bom.lines.length} materials</td>
+                    <td style={{ ...cell, fontSize: 12 }}>
+                      <BuildableCell entry={buildableById.get(bom.bomId)} itemLabel={itemLabel} />
+                    </td>
                     <td style={{ ...cell, color: STATUS_COLORS[bom.bomStatus], fontWeight: 600 }}>
                       {bom.bomStatus.replace('_', ' ')}
                     </td>
@@ -80,6 +114,8 @@ export function BomPanel({ projectId, items, units }: { projectId: string; items
             key={selected.bomId}
             projectId={projectId}
             bom={selected}
+            revisions={(groups.get(selected.targetItemId) ?? []).filter((bom) => bom.bomId !== selected.bomId)}
+            productsWithBom={new Set(groups.keys())}
             items={items}
             itemLabel={itemLabel}
             unitCodes={unitCodes}
@@ -120,7 +156,7 @@ function CreateBomForm({
   const createMutation = useCreateBomMutation(projectId)
   const [form, setForm] = useState({ targetItemId: '', bomName: '', baseQuantity: '1', baseUnit: unitCodes[0] ?? 'ea' })
   // A product with a BOM gets new revisions from that BOM instead of a second BOM.
-  const candidates = items.filter((item) => !existing.has(item.itemId))
+  const candidates = pickableItems(items).filter((item) => !existing.has(item.itemId))
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -198,6 +234,8 @@ function CreateBomForm({
 function BomDetail({
   projectId,
   bom,
+  revisions,
+  productsWithBom,
   items,
   itemLabel,
   unitCodes,
@@ -207,6 +245,10 @@ function BomDetail({
 }: {
   projectId: string
   bom: BomDto
+  /** The product's other revisions, to compare with. */
+  revisions: BomDto[]
+  /** Products that already have a BOM, which a copy cannot go to. */
+  productsWithBom: Set<string>
   items: ItemDto[]
   itemLabel: Map<string, string>
   unitCodes: string[]
@@ -220,6 +262,9 @@ function BomDetail({
   const [line, setLine] = useState({ childItemId: '', quantity: '', unit: unitCodes[0] ?? 'kg' })
   const [productionQty, setProductionQty] = useState(String(bom.baseQuantity))
   const requirementsQuery = useBomRequirementsQuery(bom.bomStatus === 'draft' ? null : bom.bomId, Number(productionQty))
+  const buildableQuery = useBomBuildableQuery(projectId, bom.bomStatus === 'draft' ? null : bom.bomId)
+  const buildable = buildableQuery.data
+  const usable = useMemo(() => usableByMaterial(buildable), [buildable])
 
   async function handleAddLine(e: FormEvent) {
     e.preventDefault()
@@ -296,6 +341,14 @@ function BomDetail({
 
       {editable && (
         <form onSubmit={(e) => void handleAddLine(e)} style={{ display: 'grid', gridTemplateColumns: '1fr 70px 64px auto', gap: 6, marginBottom: 12 }}>
+          <ItemScanInput
+            items={pickableItems(items).filter((item) => item.itemId !== bom.targetItemId)}
+            style={{ gridColumn: '1 / -1', fontSize: 12 }}
+            onPick={(item) => {
+              const code = item.unitId ? unitCodeById.get(item.unitId) : undefined
+              setLine((l) => ({ ...l, childItemId: item.itemId, unit: code ?? l.unit }))
+            }}
+          />
           <select
             aria-label="Material"
             value={line.childItemId}
@@ -308,7 +361,7 @@ function BomDetail({
             required
           >
             <option value="" disabled>Material</option>
-            {items
+            {pickableItems(items)
               .filter((item) => item.itemId !== bom.targetItemId)
               .map((item) => <option key={item.itemId} value={item.itemId}>{item.itemCode} · {item.itemName}</option>)}
           </select>
@@ -328,6 +381,7 @@ function BomDetail({
           <button type="submit" disabled={add.isPending}>Add</button>
         </form>
       )}
+      {editable && <BomLineImport projectId={projectId} bomId={bom.bomId} />}
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {bomActions(bom.bomStatus).map((action) => (
@@ -340,6 +394,32 @@ function BomDetail({
 
       {bom.bomStatus !== 'draft' && (
         <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+          {buildable && buildable.buildable != null && (
+            <p style={{ margin: '0 0 8px', fontSize: 13 }} data-testid="bom-buildable">
+              Can make now:{' '}
+              <strong style={{ color: Number(buildable.buildable) > 0 ? undefined : '#dc2626' }}>
+                {formatQty(buildable.buildable)} {buildable.targetUnit}
+              </strong>
+              {buildable.limitingItemId && (
+                <span style={{ opacity: 0.75 }}> · {itemLabel.get(buildable.limitingItemId) ?? buildable.limitingItemId} runs out first</span>
+              )}
+              {Number(buildable.buildable) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setProductionQty(String(buildable.buildable))}
+                  style={{ fontSize: 11, marginLeft: 8 }}
+                  title="Work out the materials for this quantity"
+                >
+                  Use
+                </button>
+              )}
+            </p>
+          )}
+          {buildableQuery.isError && (
+            <p style={{ color: '#dc2626', fontSize: 12, margin: '0 0 8px' }}>
+              {errorMessage(buildableQuery.error, 'Could not work out what the stock can make.')}
+            </p>
+          )}
           <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
             <span>Materials needed to make</span>
             <input
@@ -357,22 +437,34 @@ function BomDetail({
           {requirementsQuery.data && (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginTop: 6 }}>
               <tbody>
-                {requirementsQuery.data.lines.map((r) => (
-                  <tr key={r.bomLineId} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={cell}>{itemLabel.get(r.childItemId) ?? r.childItemId}</td>
-                    <td style={{ ...cell, textAlign: 'right' }}>
-                      <strong>{formatQty(r.requiredItemQuantity)} {r.itemUnit}</strong>
-                      {r.lineUnit !== r.itemUnit && (
-                        <span style={{ opacity: 0.6 }}> ({formatQty(r.requiredQuantity)} {r.lineUnit})</span>
-                      )}
-                    </td>
-                    <td style={{ ...cell, textAlign: 'right', opacity: r.lineCost == null ? 0.5 : 1 }}>
-                      {r.lineCost == null ? 'no cost' : formatQty(r.lineCost)}
-                    </td>
-                  </tr>
-                ))}
+                {requirementsQuery.data.lines.map((r) => {
+                  const have = usable.get(r.childItemId)
+                  const short = shortBy(r.requiredItemQuantity, have)
+                  return (
+                    <tr key={r.bomLineId} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={cell}>{itemLabel.get(r.childItemId) ?? r.childItemId}</td>
+                      <td style={{ ...cell, textAlign: 'right' }}>
+                        <strong>{formatQty(r.requiredItemQuantity)} {r.itemUnit}</strong>
+                        {r.lineUnit !== r.itemUnit && (
+                          <span style={{ opacity: 0.6 }}> ({formatQty(r.requiredQuantity)} {r.lineUnit})</span>
+                        )}
+                      </td>
+                      <td style={{ ...cell, textAlign: 'right', fontSize: 12 }}>
+                        {have !== undefined && (
+                          <span style={{ color: short ? '#dc2626' : undefined, opacity: short ? 1 : 0.7 }}>
+                            {formatQty(have)} in stock{short ? ` · ${formatQty(short)} short` : ''}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ ...cell, textAlign: 'right', opacity: r.lineCost == null ? 0.5 : 1 }}>
+                        {r.lineCost == null ? 'no cost' : formatQty(r.lineCost)}
+                      </td>
+                    </tr>
+                  )
+                })}
                 <tr>
                   <td style={cell}><strong>Material cost</strong></td>
+                  <td style={cell} />
                   <td style={cell} />
                   <td style={{ ...cell, textAlign: 'right' }}>
                     <strong>{formatQty(requirementsQuery.data.materialCost ?? 0)}</strong>
@@ -386,6 +478,18 @@ function BomDetail({
           )}
         </div>
       )}
+      <div style={{ marginTop: 12 }}>
+        <BomCopyForm projectId={projectId} bom={bom} items={items} productsWithBom={productsWithBom} onCopied={onRevisionCreated} />
+      </div>
+      <BomRevisionCompare
+        bom={bom}
+        revisions={revisions}
+        itemLabel={itemLabel}
+        productUnit={(() => {
+          const unitId = items.find((item) => item.itemId === bom.targetItemId)?.unitId
+          return unitId ? unitCodeById.get(unitId) : undefined
+        })()}
+      />
     </>
   )
 }

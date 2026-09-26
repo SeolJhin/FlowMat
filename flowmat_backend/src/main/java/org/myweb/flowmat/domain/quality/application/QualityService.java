@@ -11,13 +11,13 @@ import org.myweb.flowmat.domain.quality.api.dto.response.QualityInspectionRespon
 public interface QualityService {
 
     /** Newest first; narrowed to one run and/or one LOT when given. */
-    List<QualityInspectionResponse> listInspections(String projectId, String productionRunId, String lotId);
+    List<QualityInspectionResponse> listInspections(String projectId, String productionRunId, String lotId, String itemId);
 
     /** Records an inspection and, for a failed one when asked, quarantines its LOT in the same transaction. */
     QualityInspectionResponse recordInspection(QualityInspectionCreateRequest request);
 
     /** Newest first; narrowed to one run and/or one LOT when given, and to unresolved ones when {@code openOnly}. */
-    List<DefectResponse> listDefects(String projectId, String productionRunId, String lotId, boolean openOnly);
+    List<DefectResponse> listDefects(String projectId, String productionRunId, String lotId, String itemId, boolean openOnly);
 
     DefectResponse logDefect(DefectCreateRequest request);
 

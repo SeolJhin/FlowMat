@@ -1,6 +1,7 @@
 package org.myweb.flowmat.domain.inventory.application;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -96,6 +97,8 @@ public class InventoryCountService {
             results.add(new InventoryCountResponse.Line(row.getInventoryId(), row.getItemId(), row.getLocation(), row.getLotId(),
                 before, line.countedQuantity(), difference, transactionId));
         }
+        // Every counted record was checked, also those already right, which leave no movement behind.
+        inventoryRepository.markChecked(results.stream().map(InventoryCountResponse.Line::inventoryId).toList(), OffsetDateTime.now(), actor);
         int adjusted = (int) results.stream().filter(line -> line.inventoryTransactionId() != null).count();
         return new InventoryCountResponse(countId, adjusted, results.size() - adjusted, results);
     }

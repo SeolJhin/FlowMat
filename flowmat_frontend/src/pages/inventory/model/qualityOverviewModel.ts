@@ -1,3 +1,6 @@
+import type { InspectionTarget } from '../../../entities/quality/model/qualityModel'
+import type { ItemDto, LotDto } from '../../../shared/types/api'
+
 /** Windows the quality overview can show, in days; null is all time. */
 export const QUALITY_PERIODS = [
   { days: 7, label: 'Last 7 days' },
@@ -19,4 +22,20 @@ export function windowStart(days: number | null, now: Date = new Date()): string
 /** "83.3%", or "–" without inspections. */
 export function formatRate(rate: number | null): string {
   return rate === null ? '–' : `${(rate * 100).toFixed(1)}%`
+}
+
+/**
+ * What can be inspected from the Quality tab, where no run is involved: every LOT that is not closed, then every item
+ * that is not LOT-tracked (a LOT-tracked item is inspected through its LOTs). Incoming goods are the usual case.
+ */
+export function qualityTargets(items: ItemDto[], lots: LotDto[]): InspectionTarget[] {
+  const byLot = [...lots]
+    .filter((lot) => lot.lotStatus !== 'closed')
+    .sort((a, b) => a.lotNo.localeCompare(b.lotNo))
+    .map((lot) => ({ key: `lot:${lot.lotId}`, itemId: lot.itemId, lotId: lot.lotId, direction: 'lot' }))
+  const byItem = items
+    .filter((item) => item.lotManageYn !== 'Y')
+    .sort((a, b) => a.itemCode.localeCompare(b.itemCode))
+    .map((item) => ({ key: `item:${item.itemId}`, itemId: item.itemId, lotId: null, direction: 'item' }))
+  return [...byLot, ...byItem]
 }

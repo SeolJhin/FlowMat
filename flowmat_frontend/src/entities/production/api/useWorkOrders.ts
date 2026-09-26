@@ -16,6 +16,8 @@ export interface WorkOrderInput {
   assignedTo?: string
   /** BOM revision runs of this order plan their materials from; must be approved before the order is. */
   bomId?: string
+  /** Link to the written work instruction (http or https); left out on an update, it is cleared. */
+  instructionUrl?: string
 }
 
 export type WorkOrderTransition = 'approve' | 'cancel' | 'complete'

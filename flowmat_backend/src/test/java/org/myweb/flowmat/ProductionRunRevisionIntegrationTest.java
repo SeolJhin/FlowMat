@@ -63,8 +63,10 @@ class ProductionRunRevisionIntegrationTest extends IntegrationTestSupport {
         String processId = createProcess(workflowId, "Published process");
         String processIoId = data(post("/process-ios")
             .contentType(MediaType.APPLICATION_JSON)
+            // Not required: the port has no connection, and publishing refuses an unconnected required input
+            // (docs/domain/process-port-connection-contract.md F6); what this test checks is the frozen process.
             .content("{\"processId\":\"" + processId + "\",\"itemId\":\"itm_demo_mix_output\","
-                + "\"direction\":\"input\",\"quantity\":1,\"unit\":\"kg\"}"))
+                + "\"direction\":\"input\",\"quantity\":1,\"unit\":\"kg\",\"requiredYn\":\"N\"}"))
             .path("processIoId").asText();
         String revisionId = data(post("/workflows/" + workflowId + "/revisions"))
             .path("workflowRevisionId").asText();

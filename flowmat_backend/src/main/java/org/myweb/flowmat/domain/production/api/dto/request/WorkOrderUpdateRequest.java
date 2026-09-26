@@ -15,6 +15,8 @@ public record WorkOrderUpdateRequest(
     String instruction,
     String assignedTo,
     /** BOM revision the order produces with; null clears it. Must be approved before the order is approved. */
-    String bomId
+    String bomId,
+    /** Link to the written work instruction; null clears it. http or https, at most 255 characters. */
+    String instructionUrl
 ) {
 }

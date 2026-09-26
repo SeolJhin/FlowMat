@@ -69,7 +69,7 @@ public class QualityServiceImpl implements QualityService {
     private final IdGenerator idGenerator;
 
     @Override
-    public List<QualityInspectionResponse> listInspections(String projectId, String productionRunId, String lotId) {
+    public List<QualityInspectionResponse> listInspections(String projectId, String productionRunId, String lotId, String itemId) {
         projectAccessService.requireProjectReadAccess(projectId);
         String runFilter = trimToNull(productionRunId);
         String lotFilter = trimToNull(lotId);
@@ -81,6 +81,7 @@ public class QualityServiceImpl implements QualityService {
         List<QualityInspection> inspections = found.stream()
             .filter(inspection -> projectId.equals(inspection.getProjectId()))
             .filter(inspection -> lotFilter == null || lotFilter.equals(inspection.getLotId()))
+            .filter(inspection -> trimToNull(itemId) == null || itemId.trim().equals(inspection.getItemId()))
             .toList();
         Names names = names(
             inspections.stream().map(QualityInspection::getProductionRunId),
@@ -133,7 +134,7 @@ public class QualityServiceImpl implements QualityService {
     }
 
     @Override
-    public List<DefectResponse> listDefects(String projectId, String productionRunId, String lotId, boolean openOnly) {
+    public List<DefectResponse> listDefects(String projectId, String productionRunId, String lotId, String itemId, boolean openOnly) {
         projectAccessService.requireProjectReadAccess(projectId);
         String runFilter = trimToNull(productionRunId);
         String lotFilter = trimToNull(lotId);
@@ -145,6 +146,7 @@ public class QualityServiceImpl implements QualityService {
         List<DefectLog> defects = found.stream()
             .filter(defect -> projectId.equals(defect.getProjectId()))
             .filter(defect -> lotFilter == null || lotFilter.equals(defect.getLotId()))
+            .filter(defect -> trimToNull(itemId) == null || itemId.trim().equals(defect.getItemId()))
             .filter(defect -> !openOnly || !defect.isResolved())
             .toList();
         Names names = names(

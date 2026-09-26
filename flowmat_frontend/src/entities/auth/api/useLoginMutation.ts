@@ -2,7 +2,7 @@ import { useMutation } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse, unwrapApiVoidResponse } from '../../../shared/api/unwrapApiResponse'
 import type { ApiEnvelope } from '../../../shared/types/api'
-import { getCsrfToken, parseJwtUserId, refreshAccessToken, tokenStorage } from '../lib/authSession'
+import { getCsrfToken, parseJwtUserId, refreshAccessToken, tokenStorage, withRefreshCookieLock } from '../lib/authSession'
 
 export interface LoginRequest {
   userIdOrEmail: string
@@ -92,7 +92,7 @@ export function useRequestDormantMutation() {
 
 export function useLogoutMutation() {
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: () => withRefreshCookieLock(async () => {
       try {
         const csrfToken = await getCsrfToken()
         await fetch('/api/auth/logout', {
@@ -102,9 +102,11 @@ export function useLogoutMutation() {
         })
       } catch {
         // Ignore logout transport failures. Local session is cleared regardless.
+      } finally {
+        // Clear the shared hint before releasing the lock to waiting refresh requests.
+        tokenStorage.clear()
       }
-    },
-    onSettled: () => tokenStorage.clear(),
+    }),
   })
 }
 

@@ -27,3 +27,13 @@ export function basisLabel(usage: Pick<RunMaterialUsageDto, 'basisQuantity' | 'b
     ? `Standard for the ${format(usage.basisQuantity)} made.`
     : `Standard for the ${format(usage.basisQuantity)} planned; it follows the actual output once the run is finished.`
 }
+
+/** "Made 16 of 20 planned (80%)." once the run has an output; null before that or without a plan. */
+export function yieldLabel(
+  usage: Pick<RunMaterialUsageDto, 'basisQuantity' | 'basisIsActual' | 'plannedOutputQty'>,
+  format: (value: number) => string = String,
+): string | null {
+  if (!usage.basisIsActual || usage.basisQuantity === null || !usage.plannedOutputQty) return null
+  const percent = Math.round((usage.basisQuantity / usage.plannedOutputQty) * 1000) / 10
+  return `Made ${format(usage.basisQuantity)} of ${format(usage.plannedOutputQty)} planned (${percent}%).`
+}

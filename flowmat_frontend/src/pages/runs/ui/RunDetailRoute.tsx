@@ -5,17 +5,21 @@ import { useProductionRunQuery } from '../../../entities/production/api/useProdu
 import { useWorkflowRevisionsQuery } from '../../../entities/workflow/api/useWorkflowRevisions'
 import { useProductionRunItemsQuery } from '../../../entities/production/api/useProductionRunItemsQuery'
 import { useRecordRunItemMutation } from '../../../entities/production/api/useRecordRunItemMutation'
+import { useAllocateRunInputMutation } from '../../../entities/production/api/useAllocateRunInputMutation'
 import { useCancelRunItemMutation } from '../../../entities/production/api/useCancelRunItemMutation'
 import { useFinishProductionRunMutation } from '../../../entities/production/api/useFinishProductionRunMutation'
 import { useInventoriesQuery } from '../../../entities/inventory/api/useInventoriesQuery'
+import { useLotsQuery } from '../../../entities/inventory/api/useLots'
 import { useUnitsQuery } from '../../../entities/catalog/api/useUnitsQuery'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import type { ProductionRunItemDto } from '../../../shared/types/api'
 import { cancelSummary, recordedAgainstPlan, remainingOfPlan } from '../model/runPlan'
+import { inputLotOptions } from '../model/correctionModel'
 import { RunCorrectionsPanel } from './RunCorrectionsPanel'
 import { RunQualityPanel } from './RunQualityPanel'
 import { RunCostPanel } from './RunCostPanel'
 import { RunStatusBadge, formatQty, isRunOpen } from './runDisplay'
+import { ItemScanInput } from '../../inventory/ui/ItemScanInput'
 
 const cell = { padding: '8px 6px' } as const
 
@@ -44,6 +48,7 @@ export function RunDetailRoute() {
     setItemForm((f) => ({ ...f, itemId, inventoryId: '', unit: unitCode ?? f.unit }))
   }
   const inventoriesQuery = useInventoriesQuery(projectId)
+  const lots = useLotsQuery(projectId).data ?? []
 
   /** Copies a BOM plan line into the record form: what is still unrecorded becomes the actual quantity. */
   function fillFromPlan(planned: ProductionRunItemDto) {
@@ -60,6 +65,8 @@ export function RunDetailRoute() {
   }
 
   const recordMutation = useRecordRunItemMutation(runId, projectId)
+  const allocateMutation = useAllocateRunInputMutation(runId, projectId)
+  const [allocation, setAllocation] = useState<string | null>(null)
   const cancelMutation = useCancelRunItemMutation(runId, projectId)
   const finishMutation = useFinishProductionRunMutation()
 
@@ -298,6 +305,7 @@ export function RunDetailRoute() {
                           </label>
                         ))}
                       </div>
+                      <ItemScanInput items={itemsQuery.data ?? []} onPick={(item) => selectItem(item.itemId)} />
                       <label style={{ display: 'grid', gap: 4 }}>
                         <span>Item *</span>
                         <select
@@ -364,10 +372,13 @@ export function RunDetailRoute() {
                           required={lotTracked}
                         >
                           <option value="" disabled={lotTracked}>{lotTracked ? 'Select LOT' : "Don't adjust stock"}</option>
-                          {inventoriesForItem.map((inv) => (
-                            <option key={inv.inventoryId} value={inv.inventoryId}>
+                          {inputLotOptions(inventoriesForItem, lots, itemForm.direction).map(({ inventory: inv, expiryDate, expired, disabled, useFirst }) => (
+                            <option key={inv.inventoryId} value={inv.inventoryId} disabled={disabled}>
                               {inventoryLabel.get(inv.inventoryId)} (available {formatQty(inv.availableQuantity)})
+                              {expiryDate ? ` · expires ${expiryDate}` : ''}
+                              {expired ? ' — expired' : ''}
                               {inv.inventoryStatus === 'quarantined' ? ' — quarantined' : ''}
+                              {useFirst ? ' · use first' : ''}
                             </option>
                           ))}
                         </select>
@@ -386,6 +397,46 @@ export function RunDetailRoute() {
                       <button type="submit" disabled={recordMutation.isPending}>
                         {recordMutation.isPending ? 'Recording...' : 'Record'}
                       </button>
+                      {itemForm.direction === 'input' && lotTracked && (
+                        <button
+                          type="button"
+                          disabled={allocateMutation.isPending || !(Number(itemForm.actualQty || itemForm.plannedQty) > 0)}
+                          title="Take the quantity from the LOTs that expire first, one recording per LOT"
+                          onClick={() => {
+                            setAllocation(null)
+                            allocateMutation.mutate(
+                              {
+                                productionRunId: runId,
+                                itemId: itemForm.itemId,
+                                quantity: Number(itemForm.actualQty || itemForm.plannedQty),
+                                unit: itemForm.unit,
+                              },
+                              {
+                                onSuccess: (recorded) => {
+                                  const lotNo = new Map(lots.map((lot) => [lot.lotId, lot.lotNo]))
+                                  setAllocation(
+                                    `Recorded from ${recorded.length} LOT${recorded.length === 1 ? '' : 's'}: `
+                                      + recorded.map((row) => `${lotNo.get(row.lotId ?? '') ?? row.lotId} ${formatQty(row.actualQty)} ${row.unit}`).join(', '),
+                                  )
+                                  setItemForm(EMPTY_ITEM_FORM)
+                                },
+                              },
+                            )
+                          }}
+                        >
+                          {allocateMutation.isPending ? 'Splitting...' : 'Split over LOTs (FEFO)'}
+                        </button>
+                      )}
+                      {allocation && (
+                        <p role="status" style={{ color: '#047857', fontSize: 12, margin: 0 }}>
+                          {allocation}
+                        </p>
+                      )}
+                      {allocateMutation.isError && (
+                        <p style={{ color: '#dc2626', fontSize: 12, margin: 0 }}>
+                          {errorMessage(allocateMutation.error, 'The LOTs could not be split.')}
+                        </p>
+                      )}
                       {recordMutation.isError && (
                         <p style={{ color: '#dc2626', fontSize: 12, margin: 0 }}>
                           {errorMessage(recordMutation.error, 'Failed to record item.')}

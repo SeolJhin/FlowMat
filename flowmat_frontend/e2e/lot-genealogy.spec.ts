@@ -25,7 +25,7 @@ const label = (code: string) => `${code} · ${code.toLowerCase()}`
 async function addLotTrackedItem(page: Page, code: string, unit: string) {
   await page.getByRole('textbox', { name: 'Code *' }).fill(code)
   await page.getByRole('textbox', { name: 'Name *' }).fill(code.toLowerCase())
-  await page.getByLabel('Unit').selectOption({ label: unit })
+  await page.getByRole('combobox', { name: /^Unit/ }).selectOption({ label: unit })
   await page.getByRole('checkbox', { name: 'Track stock per LOT' }).check()
   await page.getByRole('button', { name: 'Add' }).click()
   await expect(page.getByRole('row', { name: new RegExp(code) })).toContainText('tracked')

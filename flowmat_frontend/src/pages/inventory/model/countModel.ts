@@ -37,6 +37,32 @@ export function countDifference(entry: string | undefined, onHand: number): numb
   return Number.isFinite(counted) && counted >= 0 ? counted - onHand : null
 }
 
+/** Days after which a record is due to be counted again. */
+export const COUNT_DUE_DAYS = 30
+
+/**
+ * Days between counts by the item's ABC class (docs/domain/stock-count.md "순환 실사"): the items that carry the most value
+ * are counted most often. Items without a class (no unit cost or no use) keep {@link COUNT_DUE_DAYS}.
+ */
+export const ABC_COUNT_DAYS: Record<'A' | 'B' | 'C', number> = { A: 30, B: 90, C: 180 }
+
+export function countIntervalDays(abcClass: 'A' | 'B' | 'C' | null | undefined): number {
+  return abcClass ? ABC_COUNT_DAYS[abcClass] : COUNT_DUE_DAYS
+}
+
+/** Whether a record is due a count: never counted, or last counted more than {@code days} days before {@code now}. */
+export function countDue(row: InventoryDto, now: Date = new Date(), days = COUNT_DUE_DAYS): boolean {
+  if (!row.lastCheckedAt) return true
+  return now.getTime() - new Date(row.lastCheckedAt).getTime() > days * 24 * 60 * 60 * 1000
+}
+
+/** The local date a record was last counted, or "never". */
+export function lastCountedLabel(lastCheckedAt: string | null | undefined): string {
+  if (!lastCheckedAt) return 'never'
+  const at = new Date(lastCheckedAt)
+  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`
+}
+
 /** Rows whose item, LOT or location contains the filter text, ignoring case. */
 export function filterCountRows(rows: InventoryDto[], filter: string, itemLabel: (itemId: string) => string): InventoryDto[] {
   const needle = filter.trim().toLowerCase()

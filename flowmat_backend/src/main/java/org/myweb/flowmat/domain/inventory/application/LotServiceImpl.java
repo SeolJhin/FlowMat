@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.api.dto.request.LotCreateRequest;
@@ -58,6 +59,7 @@ public class LotServiceImpl implements LotService {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 item.getItemCode() + " is not LOT-tracked. Turn on LOT tracking for the item first.");
         }
+        ItemStatusRule.requireActive(item, "register a LOT");
         String lotNo = request.lotNo().trim();
         if (lotMasterRepository.existsByProjectIdAndLotNoIgnoreCase(projectId, lotNo)) {
             throw new BusinessException(ErrorCode.CONFLICT, "LOT " + lotNo + " already exists in this project.");
@@ -84,7 +86,15 @@ public class LotServiceImpl implements LotService {
         List<LotMaster> lots = itemId == null || itemId.isBlank()
             ? lotMasterRepository.findAllByProjectIdOrderByCreatedAtDesc(projectId.trim())
             : lotMasterRepository.findAllByProjectIdAndItemIdOrderByCreatedAtDesc(projectId.trim(), itemId.trim());
-        return lots.stream().map(this::toResponse).toList();
+        if (lots.isEmpty()) {
+            return List.of();
+        }
+        // One query for every LOT's stock records instead of one per LOT.
+        Map<String, List<Inventory>> stockByLot = inventoryRepository
+            .findAllByLotIdInAndDeletedYn(lots.stream().map(LotMaster::getLotId).toList(), NOT_DELETED)
+            .stream()
+            .collect(Collectors.groupingBy(Inventory::getLotId));
+        return lots.stream().map(lot -> toResponse(lot, stockByLot.getOrDefault(lot.getLotId(), List.of()))).toList();
     }
 
     @Override

@@ -3,14 +3,18 @@ package org.myweb.flowmat.domain.inventory.application;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
@@ -21,11 +25,10 @@ import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
 import org.myweb.flowmat.domain.inventory.api.dto.response.StockMovementAnalysisResponse;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
-import org.myweb.flowmat.domain.inventory.domain.entity.InventoryTransaction;
 import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
-import org.myweb.flowmat.domain.inventory.domain.enums.InventoryTransactionType;
 import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.domain.inventory.repository.InventoryTransactionRepository;
+import org.myweb.flowmat.domain.inventory.repository.InventoryTransactionRepository.ItemMovementTotals;
 import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
@@ -47,11 +50,6 @@ public class StockMovementAnalysisService {
     public static final int MAX_DAYS = 365;
     private static final String NOT_DELETED = "N";
     private static final int SCALE = 4;
-    private static final Set<String> CONSUMPTION = Set.of(
-        InventoryTransactionType.ISSUE.code(), InventoryTransactionType.PRODUCTION_INPUT.code());
-    private static final Set<String> RECEIVING = Set.of(
-        InventoryTransactionType.RECEIPT.code(), InventoryTransactionType.PRODUCTION_OUTPUT.code());
-    private static final String REVERSAL = InventoryTransactionType.REVERSAL.code();
     private static final BigDecimal A_SHARE = new BigDecimal("0.80");
     private static final BigDecimal B_SHARE = new BigDecimal("0.95");
 
@@ -71,33 +69,19 @@ public class StockMovementAnalysisService {
         OffsetDateTime now = OffsetDateTime.now();
         OffsetDateTime from = now.minusDays(window);
 
-        List<InventoryTransaction> movements = transactionRepository.findAllByProjectIdAndTransactionTypeIn(projectId,
-            Set.of(InventoryTransactionType.ISSUE.code(), InventoryTransactionType.PRODUCTION_INPUT.code(),
-                InventoryTransactionType.RECEIPT.code(), InventoryTransactionType.PRODUCTION_OUTPUT.code(), REVERSAL));
-        Set<String> reversed = movements.stream()
-            .filter(movement -> REVERSAL.equals(movement.getTransactionType()))
-            .map(InventoryTransaction::getReferenceId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toSet());
+        // One row per item from the database; reversed movements are already left out there.
         Map<String, BigDecimal> consumed = new HashMap<>();
         Map<String, OffsetDateTime> lastConsumed = new HashMap<>();
         Map<String, OffsetDateTime> lastReceived = new HashMap<>();
         Map<String, OffsetDateTime> firstReceived = new HashMap<>();
-        for (InventoryTransaction movement : movements) {
-            OffsetDateTime at = movement.getCreatedAt();
-            if (REVERSAL.equals(movement.getTransactionType()) || reversed.contains(movement.getInventoryTransactionId()) || at == null) {
-                continue;
+        for (ItemMovementTotals totals : transactionRepository.findItemMovementTotals(projectId, from)) {
+            String itemId = totals.getItemId();
+            if (totals.getConsumed() != null && totals.getConsumed().signum() != 0) {
+                consumed.put(itemId, totals.getConsumed());
             }
-            String itemId = movement.getItemId();
-            if (CONSUMPTION.contains(movement.getTransactionType())) {
-                lastConsumed.merge(itemId, at, (a, b) -> a.isAfter(b) ? a : b);
-                if (!at.isBefore(from) && movement.getQuantityDelta() != null) {
-                    consumed.merge(itemId, movement.getQuantityDelta().negate(), BigDecimal::add);
-                }
-            } else if (RECEIVING.contains(movement.getTransactionType())) {
-                lastReceived.merge(itemId, at, (a, b) -> a.isAfter(b) ? a : b);
-                firstReceived.merge(itemId, at, (a, b) -> a.isBefore(b) ? a : b);
-            }
+            putIfPresent(lastConsumed, itemId, totals.getLastConsumedAt());
+            putIfPresent(firstReceived, itemId, totals.getFirstReceivedAt());
+            putIfPresent(lastReceived, itemId, totals.getLastReceivedAt());
         }
 
         // On hand counts every record; usable leaves out what cannot be used, as the reorder list does.
@@ -199,6 +183,21 @@ public class StockMovementAnalysisService {
 
     private static BigDecimal unitCostOf(Item item) {
         return item.getUnitCost() != null && item.getUnitCost().signum() > 0 ? item.getUnitCost() : null;
+    }
+
+    /** Reads a timestamptz as the driver returned it. */
+    private static void putIfPresent(Map<String, OffsetDateTime> into, String itemId, Object value) {
+        OffsetDateTime at = switch (value) {
+            case null -> null;
+            case OffsetDateTime time -> time;
+            case Instant instant -> instant.atOffset(ZoneOffset.UTC);
+            case Timestamp timestamp -> timestamp.toInstant().atOffset(ZoneOffset.UTC);
+            case LocalDateTime local -> local.atZone(ZoneId.systemDefault()).toOffsetDateTime();
+            default -> throw new IllegalStateException("Unexpected time type " + value.getClass().getName());
+        };
+        if (at != null) {
+            into.put(itemId, at);
+        }
     }
 
     private static boolean positive(BigDecimal value) {

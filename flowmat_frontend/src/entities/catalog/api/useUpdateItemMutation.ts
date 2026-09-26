@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
-import type { ApiEnvelope, ItemDto } from '../../../shared/types/api'
+import type { ApiEnvelope, ItemDetailsDto, ItemDto } from '../../../shared/types/api'
 
 export interface UpdateItemInput {
   itemId: string
@@ -20,6 +20,14 @@ export interface UpdateItemInput {
   leadTimeDays?: number
   /** Omitted: unchanged. */
   unitCost?: number
+  /** Must not be another item's code (409). */
+  itemCode?: string
+  /** Omitted: unchanged. Present: replaces every detail, so null clears. */
+  details?: ItemDetailsDto
+  /** Omitted: unchanged. Empty: bought in the stock unit again. */
+  purchaseUnit?: string
+  /** Omitted: unchanged. Needs a purchase unit. */
+  purchaseUnitQty?: number
 }
 
 async function updateItem({ itemId, projectId: _pid, ...payload }: UpdateItemInput): Promise<ItemDto> {

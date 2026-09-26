@@ -1,6 +1,7 @@
 package org.myweb.flowmat.domain.catalog.api.dto.response;
 
 import java.math.BigDecimal;
+import org.myweb.flowmat.domain.catalog.api.dto.request.ItemDetails;
 
 public record ItemResponse(
     String itemId,
@@ -16,6 +17,12 @@ public record ItemResponse(
     String lotManageYn,
     BigDecimal safetyStockQty,
     Integer leadTimeDays,
-    BigDecimal unitCost
+    BigDecimal unitCost,
+    /** Never null; fields not recorded are null. */
+    ItemDetails details,
+    /** Null when the item is bought in its stock unit. */
+    String purchaseUnit,
+    /** Stock units in one purchase unit; null without a purchase unit. */
+    BigDecimal purchaseUnitQty
 ) {
 }

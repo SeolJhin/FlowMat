@@ -17,6 +17,7 @@ import {
   type CorrectionDraft,
 } from '../model/correctionModel'
 import { formatQty } from './runDisplay'
+import { ItemScanInput } from '../../inventory/ui/ItemScanInput'
 
 const EMPTY_DRAFT: CorrectionDraft = { reason: '', voidRunItemIds: [], adds: [], outputQty: '' }
 const EMPTY_ADD: CorrectionAddDraft = { direction: 'input', itemId: '', inventoryId: '', qty: '', unit: '' }
@@ -217,6 +218,10 @@ export function RunCorrectionsPanel({ projectId, run, runItems, items, inventori
                       Remove
                     </button>
                   </div>
+                  <ItemScanInput
+                    items={items}
+                    onPick={(item) => updateAdd(index, { itemId: item.itemId, inventoryId: '', unit: itemUnitCode(item.itemId) ?? add.unit })}
+                  />
                   <label style={{ display: 'grid', gap: 4 }}>
                     <span>Item</span>
                     <select

@@ -103,6 +103,13 @@ class FlowRunIntegrationTest extends IntegrationTestSupport {
                 .contentType(MediaType.APPLICATION_JSON).content("{}")))
             .andExpect(status().isConflict());
 
+        data(post("/workflows/" + workflowId + "/revisions/" + revisionId + "/retire"));
+        mockMvc.perform(auth(post("/production-runs/start")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"projectId\":\"" + DEMO_PROJECT + "\",\"workflowId\":\"" + workflowId
+                    + "\",\"workflowRevisionId\":\"" + revisionId + "\",\"plannedOutputQty\":2}")))
+            .andExpect(status().isConflict());
+
         data(post("/production-runs/" + productionRunId + "/finish")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"actualOutputQty\":1}"));

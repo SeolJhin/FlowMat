@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useItemsQuery } from '../../../entities/catalog/api/useItemsQuery'
 import { useStockSnapshotQuery } from '../../../entities/inventory/api/useStockSnapshot'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
-import { endOfDay, snapshotCsv, totalsByItem } from '../model/snapshotModel'
+import { endOfDay, snapshotCsv, totalsByItem, totalsByItemGroup, totalsByLocation } from '../model/snapshotModel'
 
 const cell = { padding: '6px 6px' } as const
 const num = { ...cell, textAlign: 'right', whiteSpace: 'nowrap' } as const
@@ -19,7 +20,12 @@ function today(): string {
  */
 export function StockSnapshotPanel({ projectId }: { projectId: string }) {
   const [date, setDate] = useState(today())
-  const [byItem, setByItem] = useState(true)
+  const [group, setGroup] = useState<'item' | 'itemGroup' | 'location' | 'record'>('item')
+  const items = useItemsQuery(projectId).data
+  const groupOf = useMemo(() => {
+    const groups = new Map((items ?? []).map((item) => [item.itemId, item.details?.itemGroup ?? null]))
+    return (itemId: string) => groups.get(itemId) ?? null
+  }, [items])
   const at = date ? endOfDay(date) : null
   const snapshotQuery = useStockSnapshotQuery(projectId, at)
   const snapshot = snapshotQuery.data
@@ -42,9 +48,14 @@ export function StockSnapshotPanel({ projectId }: { projectId: string }) {
           <span>Stock at the end of</span>
           <input type="date" value={date} max={today()} onChange={(e) => setDate(e.target.value)} />
         </label>
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <input type="checkbox" checked={byItem} onChange={(e) => setByItem(e.target.checked)} />
-          Total per item
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span>Group by</span>
+          <select value={group} onChange={(e) => setGroup(e.target.value as typeof group)}>
+            <option value="item">item</option>
+            <option value="itemGroup">item group</option>
+            <option value="location">location</option>
+            <option value="record">record</option>
+          </select>
         </label>
         <button type="button" disabled={!snapshot || snapshot.rows.length === 0} onClick={download}>
           Download CSV
@@ -64,7 +75,7 @@ export function StockSnapshotPanel({ projectId }: { projectId: string }) {
       )}
       {snapshot && snapshot.rows.length === 0 && <p className="inspector-hint">There was no stock at that time.</p>}
 
-      {snapshot && snapshot.rows.length > 0 && byItem && (
+      {snapshot && snapshot.rows.length > 0 && group === 'item' && (
         <table aria-label="Stock per item" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr>
@@ -95,7 +106,59 @@ export function StockSnapshotPanel({ projectId }: { projectId: string }) {
         </table>
       )}
 
-      {snapshot && snapshot.rows.length > 0 && !byItem && (
+      {snapshot && snapshot.rows.length > 0 && group === 'itemGroup' && (
+        <table aria-label="Stock per item group" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr>
+              <th style={head}>Item group</th>
+              <th style={{ ...head, textAlign: 'right' }}>Records</th>
+              <th style={{ ...head, textAlign: 'right' }}>Items</th>
+              <th style={{ ...head, textAlign: 'right' }}>Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {totalsByItemGroup(snapshot.rows, groupOf).map((total) => (
+              <tr key={total.group ?? ''} style={{ borderBottom: '1px solid var(--border)' }}>
+                <td style={cell}>{total.group ?? <span style={{ opacity: 0.6 }}>no group</span>}</td>
+                <td style={num}>{total.records}</td>
+                <td style={num}>{total.items}</td>
+                <td style={num} title={total.uncosted ? `${total.uncosted} record(s) without a unit cost left out` : undefined}>
+                  {formatQty(total.value)}
+                  {total.uncosted > 0 && <span style={{ opacity: 0.6 }}> +{total.uncosted} no cost</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {snapshot && snapshot.rows.length > 0 && group === 'location' && (
+        <table aria-label="Stock per location" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr>
+              <th style={head}>Location</th>
+              <th style={{ ...head, textAlign: 'right' }}>Records</th>
+              <th style={{ ...head, textAlign: 'right' }}>Items</th>
+              <th style={{ ...head, textAlign: 'right' }}>Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {totalsByLocation(snapshot.rows).map((total) => (
+              <tr key={total.location ?? ''} style={{ borderBottom: '1px solid var(--border)' }}>
+                <td style={cell}>{total.location ?? <span style={{ opacity: 0.6 }}>no location</span>}</td>
+                <td style={num}>{total.records}</td>
+                <td style={num}>{total.items}</td>
+                <td style={num} title={total.uncosted ? `${total.uncosted} record(s) without a unit cost left out` : undefined}>
+                  {formatQty(total.value)}
+                  {total.uncosted > 0 && <span style={{ opacity: 0.6 }}> +{total.uncosted} no cost</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {snapshot && snapshot.rows.length > 0 && group === 'record' && (
         <table aria-label="Stock per record" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr>

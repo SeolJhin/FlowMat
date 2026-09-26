@@ -119,6 +119,11 @@ class QualityIntegrationTest extends IntegrationTestSupport {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.resultStatus").value("fail"))
             .andExpect(jsonPath("$.data.lotId").value(nullValue()));
+        // Lists narrow to one item.
+        call(get("/quality-inspections?projectId=" + DEMO_PROJECT + "&itemId=" + loose))
+            .andExpect(jsonPath("$.data.length()").value(1))
+            .andExpect(jsonPath("$.data[0].inspectionType").value("Weight"));
+        call(get("/defects?projectId=" + DEMO_PROJECT + "&itemId=" + loose)).andExpect(jsonPath("$.data.length()").value(0));
         // The run's own input LOT belongs to it too.
         inspect("{\"productionRunId\":\"" + batch.runId + "\",\"lotId\":\"" + batch.rawLot + "\",\"inspectionType\":\"Visual\","
             + "\"result\":\"pass\"}")
@@ -261,7 +266,15 @@ class QualityIntegrationTest extends IntegrationTestSupport {
             .andExpect(jsonPath("$.data.failuresByCheck.length()").value(1))
             .andExpect(jsonPath("$.data.failuresByCheck[0].inspectionType").value(equalToIgnoringCase(moisture)))
             .andExpect(jsonPath("$.data.failuresByCheck[0].inspections").value(2))
-            .andExpect(jsonPath("$.data.failuresByCheck[0].failed").value(2));
+            .andExpect(jsonPath("$.data.failuresByCheck[0].failed").value(2))
+            // Per item: its four inspections (two failed) and three defects (one resolved), 2 + 1 + 3 in its own unit.
+            .andExpect(jsonPath("$.data.byItem.length()").value(1))
+            .andExpect(jsonPath("$.data.byItem[0].itemId").value(loose))
+            .andExpect(jsonPath("$.data.byItem[0].inspections").value(4))
+            .andExpect(jsonPath("$.data.byItem[0].failed").value(2))
+            .andExpect(jsonPath("$.data.byItem[0].defects").value(3))
+            .andExpect(jsonPath("$.data.byItem[0].openDefects").value(2))
+            .andExpect(jsonPath("$.data.byItem[0].defectQuantity").value(6));
 
         // A window with nothing in it has no pass rate.
         call(get("/quality/summary").param("projectId", DEMO_PROJECT).param("to", from))
@@ -269,7 +282,8 @@ class QualityIntegrationTest extends IntegrationTestSupport {
         call(get("/quality/summary").param("projectId", DEMO_PROJECT).param("from", from).param("to", from))
             .andExpect(jsonPath("$.data.inspections").value(0))
             .andExpect(jsonPath("$.data.passRate").value(nullValue()))
-            .andExpect(jsonPath("$.data.defectsByType.length()").value(0));
+            .andExpect(jsonPath("$.data.defectsByType.length()").value(0))
+            .andExpect(jsonPath("$.data.byItem.length()").value(0));
         callAs(OUTSIDER, get("/quality/summary").param("projectId", DEMO_PROJECT), null).andExpect(status().isForbidden());
     }
 

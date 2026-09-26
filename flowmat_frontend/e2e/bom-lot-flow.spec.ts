@@ -24,7 +24,7 @@ async function login(page: Page) {
 async function addItem(page: Page, code: string, unit: string, lotTracked: boolean) {
   await page.getByRole('textbox', { name: 'Code *' }).fill(code)
   await page.getByRole('textbox', { name: 'Name *' }).fill(code.toLowerCase())
-  await page.getByLabel('Unit').selectOption({ label: unit })
+  await page.getByRole('combobox', { name: /^Unit/ }).selectOption({ label: unit })
   await page.getByRole('checkbox', { name: 'Track stock per LOT' }).setChecked(lotTracked)
   const createResponse = page.waitForResponse((response) =>
     response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/api/items')
