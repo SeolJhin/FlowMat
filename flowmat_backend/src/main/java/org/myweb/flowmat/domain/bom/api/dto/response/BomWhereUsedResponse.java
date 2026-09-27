@@ -16,6 +16,8 @@ public record BomWhereUsedResponse(
     String bomLineId,
     BigDecimal lineQuantity,
     String lineUnit,
-    BigDecimal scrapRate
+    BigDecimal scrapRate,
+    /** material, by_product or waste: whether the BOM uses the item or gives it off. */
+    String lineType
 ) {
 }

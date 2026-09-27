@@ -37,6 +37,7 @@ public class InventoryTransferService {
     private final InventoryCommandService inventoryCommandService;
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
+    private final StorageLocationService storageLocationService;
 
     @Transactional
     public InventoryTransferResponse transfer(InventoryTransferRequest request) {
@@ -63,6 +64,12 @@ public class InventoryTransferService {
         }
 
         String toLocation = trimToNull(request.toLocation());
+        if (toLocation != null && toLocation.equalsIgnoreCase(Objects.toString(trimToNull(from.getLocation()), ""))) {
+            toLocation = trimToNull(from.getLocation());
+        } else if (toLocation != null) {
+            // A project with a location list moves stock only to an active listed place (docs/domain/storage-location.md).
+            toLocation = storageLocationService.resolveForStock(from.getProjectId(), toLocation);
+        }
         if (Objects.equals(toLocation, trimToNull(from.getLocation()))) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 "The stock is already " + (toLocation == null ? "without a location" : "at " + toLocation) + "; pick another place.");

@@ -11,6 +11,7 @@ import { useUpdateProcessIoMutation } from '../../../entities/workflow/api/useUp
 import { useUpdateProcessMutation } from '../../../entities/workflow/api/useUpdateProcessMutation'
 import { useUpdateProcessPositionMutation } from '../../../entities/workflow/api/useUpdateProcessPositionMutation'
 import { useCommandHistory } from './commandHistory'
+import { connectionUndoInput } from './connectionUndo'
 import {
   buildDefaultConnectionPayload,
   getRelatedConnectionIds,
@@ -466,16 +467,7 @@ export function useWorkflowCanvasActions({
     }
 
     if (edge) {
-      const oldInput: UpdateProcessConnectionInput = {
-        connectionId: input.connectionId,
-        ...(input.connectionLabel !== undefined && { connectionLabel: edge.label ?? undefined }),
-        ...(input.connectionType !== undefined && { connectionType: edge.connectionType }),
-        ...(input.flowRate !== undefined && { flowRate: edge.flowRate !== null ? Number(edge.flowRate) : null }),
-        ...(input.unit !== undefined && { unit: edge.unit }),
-        ...(input.delayTimeSec !== undefined && { delayTimeSec: edge.delayTimeSec }),
-        ...(input.lossRate !== undefined && { lossRate: edge.lossRate }),
-        ...(input.priority !== undefined && { priority: edge.priority }),
-      }
+      const oldInput = connectionUndoInput(edge, input)
       commandHistory.push({
         label: 'Edit connection',
         undo: async () => { await updateConnectionMutation.mutateAsync(oldInput) },

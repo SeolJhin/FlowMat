@@ -154,6 +154,7 @@ export interface CreateProcessIoInput {
 }
 
 export interface UpdateProcessIoInput extends Partial<Omit<CreateProcessIoInput, 'processId'>> {
+  clearSchema?: boolean
   processIoId: string
 }
 

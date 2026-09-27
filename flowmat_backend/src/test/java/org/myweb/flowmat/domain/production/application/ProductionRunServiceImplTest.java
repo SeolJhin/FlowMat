@@ -72,6 +72,8 @@ class ProductionRunServiceImplTest {
     @Mock private BomService bomService;
     @Mock private org.myweb.flowmat.domain.inventory.application.LotService lotService;
     @Mock private ProductionFlowRunAdapter productionFlowRunAdapter;
+    @Mock private StockAllocationService stockAllocationService;
+    @Mock private RunInstructionService runInstructionService;
 
     @InjectMocks
     private ProductionRunServiceImpl productionRunService;

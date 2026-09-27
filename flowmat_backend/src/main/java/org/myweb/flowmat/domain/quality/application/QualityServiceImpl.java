@@ -35,6 +35,7 @@ import org.myweb.flowmat.domain.quality.api.dto.request.QualityInspectionCreateR
 import org.myweb.flowmat.domain.quality.api.dto.response.DefectResponse;
 import org.myweb.flowmat.domain.quality.api.dto.response.QualityInspectionResponse;
 import org.myweb.flowmat.domain.quality.domain.entity.DefectLog;
+import org.myweb.flowmat.domain.quality.domain.entity.InspectionStandard;
 import org.myweb.flowmat.domain.quality.domain.entity.QualityInspection;
 import org.myweb.flowmat.domain.quality.repository.DefectLogRepository;
 import org.myweb.flowmat.domain.quality.repository.QualityInspectionRepository;
@@ -67,6 +68,7 @@ public class QualityServiceImpl implements QualityService {
     private final InventoryRepository inventoryRepository;
     private final InventoryCommandService inventoryCommandService;
     private final IdGenerator idGenerator;
+    private final InspectionStandardService inspectionStandardService;
 
     @Override
     public List<QualityInspectionResponse> listInspections(String projectId, String productionRunId, String lotId, String itemId) {
@@ -96,9 +98,21 @@ public class QualityServiceImpl implements QualityService {
         String projectId = request.projectId().trim();
         projectAccessService.requireProjectWriteAccess(projectId);
         String actor = projectAccessService.requireCurrentUserId();
-        Target target = resolveTarget(projectId, request.productionRunId(), request.lotId(), request.itemId());
+        // A standard sets the check, its limits and unit, and names the item when nothing else does
+        // (docs/domain/inspection-standard.md).
+        InspectionStandard standard = trimToNull(request.standardId()) == null ? null
+            : inspectionStandardService.requireUsable(projectId, request.standardId().trim());
+        String itemId = standard != null && trimToNull(request.lotId()) == null && trimToNull(request.itemId()) == null
+            ? standard.getItemId() : request.itemId();
+        Target target = resolveTarget(projectId, request.productionRunId(), request.lotId(), itemId);
         if (target.run() == null && target.lot() == null && target.item() == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Pick what was inspected: a LOT, a run or an item.");
+        }
+        if (standard != null) {
+            if (target.item() == null || !standard.getItemId().equals(target.item().getItemId())) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "This standard is for a different item.");
+            }
+            request = InspectionStandardService.applyTo(standard, request);
         }
         String result = decideResult(request);
         boolean quarantine = Boolean.TRUE.equals(request.quarantineLot());
@@ -124,6 +138,7 @@ public class QualityServiceImpl implements QualityService {
         inspection.setNote(trimToNull(request.note()));
         inspection.setInspectedBy(actor);
         inspection.setInspectedAt(OffsetDateTime.now());
+        inspection.setStandardId(standard == null ? null : standard.getStandardId());
         QualityInspection saved = inspectionRepository.saveAndFlush(inspection);
         if (quarantine) {
             quarantine(target.lot(), saved, actor);
@@ -423,7 +438,8 @@ public class QualityServiceImpl implements QualityService {
             inspection.getUnit(),
             inspection.getNote(),
             inspection.getInspectedBy(),
-            inspection.getInspectedAt()
+            inspection.getInspectedAt(),
+            inspection.getStandardId()
         );
     }
 

@@ -6,6 +6,7 @@ import type { InventoryDto } from '../../../shared/types/api'
 import type { LotRecord } from '../model/fefoModel'
 import { fromPacks } from '../model/stockAlertModel'
 import { MOVEMENT_LABELS, MOVEMENT_TYPES, type MovementType } from '../model/stockModel'
+import { LOCATION_OPTIONS_ID } from './LocationOptions'
 
 type Action = MovementType | 'move'
 
@@ -113,6 +114,7 @@ export function StockMovementForm({
           <input
             value={toLocation}
             maxLength={100}
+            list={LOCATION_OPTIONS_ID}
             onChange={(e) => setToLocation(e.target.value)}
             placeholder={`from ${inventory.location ?? 'no location'}, e.g. WH-B / Rack 2`}
             required

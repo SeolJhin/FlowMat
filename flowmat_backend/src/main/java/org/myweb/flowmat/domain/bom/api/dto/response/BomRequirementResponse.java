@@ -18,8 +18,23 @@ public record BomRequirementResponse(
     /** Sum of the lines' costs, 4 decimals (docs/domain/material-cost.md). */
     BigDecimal materialCost,
     /** False when some material has no unit cost, so {@link #materialCost} leaves it out. */
-    boolean costComplete
+    boolean costComplete,
+    /** By-products and waste the batch gives off (docs/domain/bom-by-products.md); not in {@link #lines}. */
+    List<Output> outputs
 ) {
+
+    /** A by-product or waste line scaled like a material: in the line's unit and in the item's own unit (4 decimals). */
+    public record Output(
+        String bomLineId,
+        String itemId,
+        String lineType,
+        BigDecimal lineQuantity,
+        String lineUnit,
+        BigDecimal quantity,
+        String itemUnit,
+        BigDecimal itemQuantity
+    ) {
+    }
 
     public record Line(
         String bomLineId,

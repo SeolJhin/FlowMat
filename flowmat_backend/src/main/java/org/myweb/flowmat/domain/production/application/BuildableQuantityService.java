@@ -11,6 +11,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomLineResponse;
+import org.myweb.flowmat.domain.bom.application.BomTree;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomResponse;
 import org.myweb.flowmat.domain.bom.application.BomService;
 import org.myweb.flowmat.domain.bom.domain.enums.BomStatus;
@@ -78,7 +79,7 @@ public class BuildableQuantityService {
 
     private Stock stock(String projectId, List<BomResponse> boms) {
         Set<String> materials = boms.stream()
-            .flatMap(bom -> bom.lines().stream().map(BomLineResponse::childItemId))
+            .flatMap(bom -> bom.lines().stream().filter(line -> BomTree.isMaterial(line.lineType())).map(BomLineResponse::childItemId))
             .collect(Collectors.toSet());
         Set<String> itemIds = new HashSet<>(materials);
         boms.forEach(bom -> itemIds.add(bom.targetItemId()));
@@ -106,6 +107,9 @@ public class BuildableQuantityService {
         BigDecimal least = null;
         String limiting = null;
         for (BomLineResponse line : bom.lines()) {
+            if (!BomTree.isMaterial(line.lineType())) {
+                continue;
+            }
             Item child = stock.items().get(line.childItemId());
             if (child == null) {
                 throw new BusinessException(ErrorCode.BAD_REQUEST, "Material " + line.childItemId() + " no longer exists.");

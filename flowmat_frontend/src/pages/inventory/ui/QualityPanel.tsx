@@ -10,6 +10,9 @@ import {
 } from '../../../entities/quality/api/useQuality'
 import type { InspectionTarget } from '../../../entities/quality/model/qualityModel'
 import { DefectForm, DefectList, InspectionForm } from '../../../entities/quality/ui/QualityRecords'
+import { useInspectionStandardsQuery } from '../../../entities/quality/api/useInspectionStandards'
+import { InspectionStandardsPanel } from './InspectionStandardsPanel'
+import { NonconformityPanel } from './NonconformityPanel'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
 import { errorMessage } from '../../../shared/lib/errorMessage'
@@ -34,6 +37,7 @@ export function QualityPanel({ projectId, items }: { projectId: string; items: I
   const openQuery = useDefectsQuery(projectId, {}, true)
   const inventoriesQuery = useInventoriesQuery(projectId)
   const resolveMutation = useResolveDefectMutation(projectId)
+  const standardsQuery = useInspectionStandardsQuery(projectId)
 
   const itemLabel = useMemo(() => {
     const labels = new Map(items.map((item) => [item.itemId, `${item.itemCode} · ${item.itemName}`]))
@@ -120,6 +124,7 @@ export function QualityPanel({ projectId, items }: { projectId: string; items: I
             targets={targets}
             targetLabel={targetLabel}
             productionRunId={null}
+            standards={standardsQuery.data ?? []}
             pending={recordMutation.isPending}
             onSubmit={async (body) => {
               await recordMutation.mutateAsync(body)
@@ -268,6 +273,9 @@ export function QualityPanel({ projectId, items }: { projectId: string; items: I
           </p>
         )}
       </section>
+
+      <NonconformityPanel projectId={projectId} />
+      <InspectionStandardsPanel projectId={projectId} items={items} />
     </div>
   )
 }

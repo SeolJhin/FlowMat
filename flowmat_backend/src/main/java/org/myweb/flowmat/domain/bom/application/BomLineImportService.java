@@ -70,11 +70,9 @@ public class BomLineImportService {
         Set<String> taken = request.replace()
             ? new HashSet<>()
             : current.stream().map(BomLine::getChildItemId).collect(Collectors.toCollection(HashSet::new));
-        Set<String> producedByBom = bomHeaderRepository
-            .findAllByProjectIdAndBomStatusAndDeletedYn(header.getProjectId(), BomStatus.APPROVED.code(), NOT_DELETED).stream()
-            .map(BomHeader::getTargetItemId)
-            .filter(target -> !target.equals(header.getTargetItemId()))
-            .collect(Collectors.toSet());
+        // A material may have its own approved BOM, as long as that does not lead back to this BOM's item.
+        Map<String, List<String>> tree = BomTree.approvedChildren(bomHeaderRepository, bomLineRepository, header.getProjectId(),
+            header.getTargetItemId());
 
         List<BomLineImportResponse.RowResult> results = new ArrayList<>();
         List<BomLineCreateRequest> additions = new ArrayList<>();
@@ -83,7 +81,7 @@ public class BomLineImportService {
             BomLineImportRequest.Row row = rows.get(index);
             String code = trimToNull(row.itemCode());
             List<String> problems = new ArrayList<>();
-            BomLineCreateRequest line = check(row, code, header, byCode, taken, producedByBom, problems);
+            BomLineCreateRequest line = check(row, code, header, byCode, taken, tree, problems);
             if (problems.isEmpty()) {
                 additions.add(line);
                 results.add(new BomLineImportResponse.RowResult(index + 1, code, "add", null));
@@ -114,7 +112,7 @@ public class BomLineImportService {
         BomHeader header,
         Map<String, List<Item>> byCode,
         Set<String> taken,
-        Set<String> producedByBom,
+        Map<String, List<String>> tree,
         List<String> problems
     ) {
         if (code == null) {
@@ -158,8 +156,8 @@ public class BomLineImportService {
         if (!taken.add(material.getItemId())) {
             problems.add(code + " is already a material of this BOM; combine the lines");
         }
-        if (producedByBom.contains(material.getItemId())) {
-            problems.add(code + " has its own approved BOM; multi-level BOMs are not supported yet");
+        if (BomTree.pathTo(material.getItemId(), header.getTargetItemId(), tree) != null) {
+            problems.add(code + " is made from this BOM's item through its own BOM; a BOM cannot contain itself");
         }
         if (unit != null) {
             try {
@@ -169,7 +167,7 @@ public class BomLineImportService {
             }
         }
         return problems.isEmpty()
-            ? new BomLineCreateRequest(material.getItemId(), quantity, unit, null, null, null, null, trimToNull(row.note()))
+            ? new BomLineCreateRequest(material.getItemId(), quantity, unit, null, null, null, null, trimToNull(row.note()), null)
             : null;
     }
 

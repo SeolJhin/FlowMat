@@ -23,6 +23,8 @@ public record QualityInspectionResponse(
     String unit,
     String note,
     String inspectedBy,
-    OffsetDateTime inspectedAt
+    OffsetDateTime inspectedAt,
+    /** The inspection standard followed, if any (docs/domain/inspection-standard.md). */
+    String standardId
 ) {
 }

@@ -94,6 +94,8 @@ export interface WorkOrderDto {
   bomId: string | null
   /** Link to the written work instruction; http or https only. */
   instructionUrl?: string | null
+  /** The equipment the order runs on; readiness checks its time in the planned window (docs/domain/equipment-schedule.md). */
+  equipmentId?: string | null
 }
 
 export interface ProductionRunItemDto {
@@ -264,6 +266,8 @@ export interface QualityInspectionDto {
   note: string | null
   inspectedBy: string
   inspectedAt: string
+  /** The inspection standard followed, if any. */
+  standardId?: string | null
 }
 
 export interface QualityInspectionCreateRequest {
@@ -281,6 +285,8 @@ export interface QualityInspectionCreateRequest {
   note?: string | null
   /** Failed inspections of a LOT only: quarantine the whole LOT in the same request. */
   quarantineLot?: boolean
+  /** The inspection standard followed; it sets the check, limits and unit (docs/domain/inspection-standard.md). */
+  standardId?: string | null
 }
 
 /** A logged defect; logging one moves no stock. */
@@ -557,8 +563,14 @@ export interface MaterialRequirementDto {
     unit: string | null
     required: number
     usable: number
+    /** required − usable − plannedSupply, never below zero. */
     shortage: number
-    orders: { workOrderId: string; workOrderTitle: string; required: number }[]
+    /** A work order's share, or (with viaItemCode, no work order) the share from making a short sub-assembly. */
+    orders: { workOrderId: string | null; workOrderTitle: string | null; required: number; viaItemId?: string | null; viaItemCode?: string | null }[]
+    /** What open orders making this item still have to make (docs/domain/multi-level-bom.md). */
+    plannedSupply?: number
+    /** The item has its own approved BOM: what stock and planned supply leave short is made from its materials. */
+    madeHere?: boolean
   }[]
   /** Work orders whose BOM could not be worked out, with the reason. */
   problems: string[]
@@ -579,6 +591,8 @@ export interface BomWhereUsedDto {
   lineQuantity: number
   lineUnit: string
   scrapRate: number | null
+  /** Whether the BOM uses the item or gives it off. */
+  lineType?: BomLineType
 }
 
 /** A stock row outside its thresholds (docs/domain/stock-alert.md); it closes by itself when the row is back inside. */
@@ -630,9 +644,26 @@ export interface InventoryDto {
 
 export type BomStatus = 'draft' | 'pending_approval' | 'approved' | 'retired'
 
+/** A line the BOM consumes, or one a batch gives off (docs/domain/bom-by-products.md). */
+export type BomLineType = 'material' | 'by_product' | 'waste'
+
+/** A by-product or waste line scaled to a batch: in the line's unit and in the item's own unit. */
+export interface BomOutputDto {
+  bomLineId: string
+  itemId: string
+  lineType: BomLineType
+  lineQuantity: number
+  lineUnit: string
+  quantity: number
+  itemUnit: string
+  itemQuantity: number
+}
+
 export interface BomLineDto {
   bomLineId: string
   childItemId: string
+  /** Missing on lines from before line types: a material. */
+  lineType?: BomLineType
   quantity: number
   unit: string
   scrapRate: number | null
@@ -684,6 +715,8 @@ export interface BomRequirementDto {
   materialCost?: number
   /** False when some material has no unit cost, so materialCost leaves it out. */
   costComplete?: boolean
+  /** By-products and waste the batch gives off; not in lines. */
+  outputs?: BomOutputDto[]
 }
 
 /** GET /boms/{id}/buildable: how much of the product usable stock could make now (docs/domain/material-requirements.md). */

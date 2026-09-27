@@ -1,0 +1,97 @@
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+
+test.skip(!process.env.REAL_API_E2E, 'Needs the real backend and demo seed')
+
+/**
+ * Changeover times through the real UI (docs/domain/equipment-changeover.md): a rule set on the equipment's schedule is
+ * added to the time a work order needs when the order planned before it on the same equipment makes another item. The
+ * orders are cancelled and the equipment deleted at the end.
+ */
+const PROJECT = 'prj_demo_main'
+const suffix = Date.now().toString(36).toUpperCase()
+const FIRST_ITEM = `CO-A-${suffix}`
+const NEXT_ITEM = `CO-B-${suffix}`
+const CODE = `EQ-CO-${suffix}`
+
+async function api(request: APIRequestContext) {
+  const login = await request.post('/api/auth/login', { data: { userIdOrEmail: 'demo-owner', password: 'demo1234' } })
+  expect(login.ok(), await login.text()).toBeTruthy()
+  const headers = { Authorization: `Bearer ${(await login.json()).data.accessToken}` }
+  return async (method: string, path: string, data?: unknown) => {
+    const response = await request.fetch('/api' + path, { method, headers, data })
+    const body = await response.json()
+    expect(response.ok(), `${method} ${path}: ${body.message}`).toBeTruthy()
+    return body.data
+  }
+}
+
+async function login(page: Page) {
+  await page.goto('/')
+  await page.getByRole('textbox', { name: 'demo-owner' }).fill('demo-owner')
+  await page.getByRole('textbox', { name: '••••••••' }).fill('demo1234')
+  await page.getByRole('button', { name: 'Log in' }).click()
+  await expect(page.getByText('안녕하세요, Demo Owner님')).toBeVisible({ timeout: 15_000 })
+  await page.waitForLoadState('networkidle')
+}
+
+test('a changeover from the previous order on the equipment is added to the time an order needs', async ({ page, request }) => {
+  const call = await api(request)
+  const item = async (code: string) => call('POST', '/items', {
+    projectId: PROJECT, itemCode: code, itemName: `changeover e2e ${code}`, itemType: 'product', unitId: 'unit_ea',
+  })
+  const first = await item(FIRST_ITEM)
+  const next = await item(NEXT_ITEM)
+  const equipment = await call('POST', '/equipments', {
+    projectId: PROJECT, equipmentCode: CODE, equipmentName: `changeover e2e ${suffix}`, equipmentType: 'line',
+    details: { capacityPerHour: 10 },
+  })
+  await call('PUT', `/equipments/${equipment.equipmentId}/calendar`, { shiftStart: '09:00', shiftEnd: '17:00', workDays: [1, 2, 3, 4, 5] })
+  const order = async (title: string, itemId: string, start: string, end: string) => {
+    const created = await call('POST', '/work-orders', {
+      projectId: PROJECT, workOrderTitle: title, targetItemId: itemId, targetQuantity: 100, plannedStartAt: start, plannedEndAt: end,
+    })
+    await call('PUT', `/work-orders/${created.workOrderId}/equipment`, { equipmentId: equipment.equipmentId })
+    return created
+  }
+  // First item on Monday (approved), the next item Tuesday to Wednesday: 10 h of work in two 8 h shifts.
+  const earlier = await order(`Earlier ${suffix}`, first.itemId, '2030-01-07T09:00:00+09:00', '2030-01-07T17:00:00+09:00')
+  await call('POST', `/work-orders/${earlier.workOrderId}/approve`, {})
+  const later = await order(`Later ${suffix}`, next.itemId, '2030-01-08T09:00:00+09:00', '2030-01-09T17:00:00+09:00')
+  try {
+    await login(page)
+    await page.goto(`/projects/${PROJECT}/inventory?tab=equipment`)
+    await page.getByRole('row', { name: new RegExp(CODE) }).getByRole('button', { name: 'Schedule' }).click()
+    const changeovers = page.getByRole('group', { name: 'Changeovers' })
+    await expect(changeovers).toContainText('No changeover times set')
+
+    await changeovers.getByLabel('From').selectOption({ label: `${FIRST_ITEM} · changeover e2e ${FIRST_ITEM}` })
+    await changeovers.getByLabel('To').selectOption({ label: `${NEXT_ITEM} · changeover e2e ${NEXT_ITEM}` })
+    await changeovers.getByLabel('Minutes').fill('90')
+    await changeovers.getByLabel('Note').fill('Line flush')
+    await changeovers.getByRole('button', { name: 'Add changeover' }).click()
+    const rule = changeovers.getByRole('table', { name: 'Changeover list' }).getByRole('row', { name: new RegExp(NEXT_ITEM) })
+    await expect(rule).toContainText('1 h 30 min')
+
+    // The same pair again is refused before it is sent; the time is changed on the row instead.
+    await changeovers.getByLabel('From').selectOption({ label: `${FIRST_ITEM} · changeover e2e ${FIRST_ITEM}` })
+    await changeovers.getByLabel('To').selectOption({ label: `${NEXT_ITEM} · changeover e2e ${NEXT_ITEM}` })
+    await changeovers.getByLabel('Minutes').fill('30')
+    await changeovers.getByRole('button', { name: 'Add changeover' }).click()
+    await expect(changeovers.getByRole('alert')).toContainText('This pair already has a changeover')
+    await rule.getByRole('button', { name: 'Change time' }).click()
+    await rule.getByLabel('New minutes').fill('120')
+    await rule.getByRole('button', { name: 'Save' }).click()
+    await expect(rule).toContainText('2 h')
+
+    await page.goto(`/projects/${PROJECT}/runs?view=work-orders`)
+    await page.getByRole('row', { name: new RegExp(`Later ${suffix}`) }).getByRole('button', { name: 'Readiness' }).click()
+    const readiness = page.locator('[aria-label="Readiness"]')
+    await expect(readiness).toContainText(`${earlier.workOrderNumber}`)
+    await expect(readiness).toContainText(`120 min changeover from ${FIRST_ITEM} to ${NEXT_ITEM}`)
+    await expect(readiness).toContainText('needs 12 h (with 2 h changeover) of the 16 h available in the planned window')
+  } finally {
+    await call('POST', `/work-orders/${later.workOrderId}/cancel`, {})
+    await call('POST', `/work-orders/${earlier.workOrderId}/cancel`, {})
+    await call('DELETE', `/equipments/${equipment.equipmentId}`)
+  }
+})

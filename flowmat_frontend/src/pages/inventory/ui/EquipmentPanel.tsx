@@ -8,6 +8,8 @@ import type { ApiEnvelope, EquipmentDto } from '../../../shared/types/api'
 import {
   EMPTY_DETAILS_FORM, detailsForm, detailsPayload, equipmentCsv, filterEquipment, makerModel, perHour, type EquipmentDetailsForm,
 } from '../model/equipmentModel'
+import { EquipmentSchedulePanel } from './EquipmentSchedulePanel'
+import { EquipmentLoadBoard } from './EquipmentLoadBoard'
 
 const emptyForm = { equipmentCode: '', equipmentName: '', equipmentType: '', equipmentStatus: 'active' }
 
@@ -36,8 +38,11 @@ export function EquipmentPanel({ projectId }: { projectId: string }) {
   const [details, setDetails] = useState(EMPTY_DETAILS_FORM)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [scheduleId, setScheduleId] = useState<string | null>(null)
+  const [loadOpen, setLoadOpen] = useState(false)
   const all = equipmentQuery.data ?? []
   const shown = filterEquipment(all, search, statusFilter)
+  const scheduled = all.find((equipment) => equipment.equipmentId === scheduleId)
 
   function download() {
     const url = URL.createObjectURL(new Blob([equipmentCsv(shown)], { type: 'text/csv;charset=utf-8' }))
@@ -125,11 +130,19 @@ export function EquipmentPanel({ projectId }: { projectId: string }) {
           <td>{equipment.details?.location ?? '—'}</td>
           <td>{perHour(equipment.details, formatQty) || '—'}</td>
           <td style={{ whiteSpace: 'nowrap' }}><button type="button" onClick={() => edit(equipment)}>Edit</button>{' '}
+            <button type="button" aria-pressed={scheduleId === equipment.equipmentId}
+              onClick={() => setScheduleId((current) => (current === equipment.equipmentId ? null : equipment.equipmentId))}>
+              Schedule</button>{' '}
             <button type="button" disabled={remove.isPending} onClick={() => {
               if (window.confirm(`Delete ${equipment.equipmentName}?`)) remove.mutate(equipment.equipmentId)
             }}>Delete</button></td>
         </tr>)}</tbody>
       </table>
+      {scheduled && <EquipmentSchedulePanel key={scheduled.equipmentId} equipment={scheduled} onClose={() => setScheduleId(null)} />}
+      <details style={{ marginTop: 16 }} onToggle={(event) => setLoadOpen(event.currentTarget.open)}>
+        <summary>Load by week</summary>
+        {loadOpen && <EquipmentLoadBoard projectId={projectId} />}
+      </details>
     </section>
     <form onSubmit={submit} style={{ display: 'grid', gap: 10, alignContent: 'start' }}>
       <h2>{editingId ? 'Edit equipment' : 'Add equipment'}</h2>

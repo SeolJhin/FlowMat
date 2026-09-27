@@ -14,6 +14,9 @@ import { approvedRevision } from '../../inventory/model/bomModel'
 import { ItemScanInput } from '../../inventory/ui/ItemScanInput'
 import { pickableItems } from '../../inventory/model/itemStatusModel'
 import { WorkOrderReadiness } from './WorkOrderReadiness'
+import { WorkOrderEquipmentPicker } from './WorkOrderEquipmentPicker'
+import { WorkOrderAllocations } from './WorkOrderAllocations'
+import { useEquipmentQuery } from '../../../entities/catalog/api/useEquipment'
 
 const PRIORITIES = ['low', 'normal', 'high', 'urgent']
 
@@ -101,6 +104,11 @@ export function WorkOrdersPanel({
   const orders = ordersQuery.data ?? []
   const itemLabel = useMemo(() => new Map(items.map((item) => [item.itemId, `${item.itemCode} · ${item.itemName}`])), [items])
   const workflowLabel = useMemo(() => new Map(workflows.map((wf) => [wf.workflowId, wf.workflowName])), [workflows])
+  const equipmentList = useEquipmentQuery(projectId).data
+  const equipmentCode = useMemo(
+    () => new Map((equipmentList ?? []).map((one) => [one.equipmentId, one.equipmentCode ?? one.equipmentName])),
+    [equipmentList],
+  )
   const boms = useBomsQuery(projectId).data ?? []
   const bomById = new Map(boms.map((bom) => [bom.bomId, bom]))
   // Retired revisions can no longer be chosen; draft / pending ones can, but must be approved before the order is.
@@ -264,6 +272,7 @@ export function WorkOrdersPanel({
                     <td style={{ ...cell, fontSize: 11, opacity: 0.7, whiteSpace: 'nowrap' }}>
                       <div>{formatDate(order.plannedStartAt)}</div>
                       <div>→ {formatDate(order.plannedEndAt)}</div>
+                      {order.equipmentId && <div>on {equipmentCode.get(order.equipmentId) ?? order.equipmentId}</div>}
                     </td>
                     <td style={{ ...cell, whiteSpace: 'nowrap' }}>
                       {isWorkOrderEditable(order.workOrderStatus) && (
@@ -303,7 +312,9 @@ export function WorkOrdersPanel({
                   {readinessFor === order.workOrderId && (
                     <tr style={{ borderBottom: '1px solid var(--border)' }}>
                       <td colSpan={6} style={{ ...cell, background: 'var(--accent-bg)' }}>
+                        <WorkOrderEquipmentPicker order={order} projectId={projectId} />
                         <WorkOrderReadiness workOrderId={order.workOrderId} />
+                        <WorkOrderAllocations order={order} projectId={projectId} />
                       </td>
                     </tr>
                   )}

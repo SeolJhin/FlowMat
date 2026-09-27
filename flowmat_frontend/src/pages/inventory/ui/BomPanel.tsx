@@ -9,7 +9,7 @@ import {
   useCreateBomMutation,
   type BomAction,
 } from '../../../entities/bom/api/useBoms'
-import type { BomDto, BuildableQuantityDto, ItemDto, UnitDto } from '../../../shared/types/api'
+import type { BomDto, BomLineType, BuildableQuantityDto, ItemDto, UnitDto } from '../../../shared/types/api'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import { BOM_ACTION_LABELS, bomActions, groupByTarget, isEditable } from '../model/bomModel'
@@ -18,6 +18,9 @@ import { BomRevisionCompare } from './BomRevisionCompare'
 import { BomLineImport } from './BomLineImport'
 import { BomCopyForm } from './BomCopyForm'
 import { BomWhereUsed } from './BomWhereUsed'
+import { BomExplosion } from './BomExplosion'
+import { hasSubAssemblies, subAssemblyIds } from '../model/bomExplosionModel'
+import { LINE_TYPE_OPTIONS, lineSummary, lineTypeTag } from '../model/bomLineTypeModel'
 import { ItemScanInput } from './ItemScanInput'
 import { pickableItems } from '../model/itemStatusModel'
 
@@ -52,6 +55,7 @@ export function BomPanel({ projectId, items, units }: { projectId: string; items
   const bomsQuery = useBomsQuery(projectId)
   const boms = useMemo(() => bomsQuery.data ?? [], [bomsQuery.data])
   const groups = useMemo(() => groupByTarget(boms), [boms])
+  const subAssemblies = useMemo(() => subAssemblyIds(boms), [boms])
   const itemLabel = useMemo(() => new Map(items.map((item) => [item.itemId, `${item.itemCode} · ${item.itemName}`])), [items])
   const unitCodes = useMemo(() => units.filter((unit) => unit.activeYn === 'Y').map((unit) => unit.unitCode), [units])
   const unitCodeById = useMemo(() => new Map(units.map((unit) => [unit.unitId, unit.unitCode])), [units])
@@ -92,7 +96,7 @@ export function BomPanel({ projectId, items, units }: { projectId: string; items
                     <td style={cell}>
                       {formatQty(bom.baseQuantity)} {bom.baseUnit}
                     </td>
-                    <td style={cell}>{bom.lines.length} materials</td>
+                    <td style={cell}>{lineSummary(bom.lines)}</td>
                     <td style={{ ...cell, fontSize: 12 }}>
                       <BuildableCell entry={buildableById.get(bom.bomId)} itemLabel={itemLabel} />
                     </td>
@@ -116,6 +120,7 @@ export function BomPanel({ projectId, items, units }: { projectId: string; items
             bom={selected}
             revisions={(groups.get(selected.targetItemId) ?? []).filter((bom) => bom.bomId !== selected.bomId)}
             productsWithBom={new Set(groups.keys())}
+            subAssemblies={subAssemblies}
             items={items}
             itemLabel={itemLabel}
             unitCodes={unitCodes}
@@ -236,6 +241,7 @@ function BomDetail({
   bom,
   revisions,
   productsWithBom,
+  subAssemblies,
   items,
   itemLabel,
   unitCodes,
@@ -249,6 +255,8 @@ function BomDetail({
   revisions: BomDto[]
   /** Products that already have a BOM, which a copy cannot go to. */
   productsWithBom: Set<string>
+  /** Items with an approved BOM of their own; as materials they are sub-assemblies (docs/domain/multi-level-bom.md). */
+  subAssemblies: Set<string>
   items: ItemDto[]
   itemLabel: Map<string, string>
   unitCodes: string[]
@@ -259,7 +267,7 @@ function BomDetail({
   const { add, remove } = useBomLineMutations(projectId)
   const actionMutation = useBomActionMutation(projectId)
   const editable = isEditable(bom)
-  const [line, setLine] = useState({ childItemId: '', quantity: '', unit: unitCodes[0] ?? 'kg' })
+  const [line, setLine] = useState({ childItemId: '', quantity: '', unit: unitCodes[0] ?? 'kg', lineType: 'material' as BomLineType })
   const [productionQty, setProductionQty] = useState(String(bom.baseQuantity))
   const requirementsQuery = useBomRequirementsQuery(bom.bomStatus === 'draft' ? null : bom.bomId, Number(productionQty))
   const buildableQuery = useBomBuildableQuery(projectId, bom.bomStatus === 'draft' ? null : bom.bomId)
@@ -269,7 +277,9 @@ function BomDetail({
   async function handleAddLine(e: FormEvent) {
     e.preventDefault()
     try {
-      await add.mutateAsync({ bomId: bom.bomId, childItemId: line.childItemId, quantity: Number(line.quantity), unit: line.unit })
+      await add.mutateAsync({
+        bomId: bom.bomId, childItemId: line.childItemId, quantity: Number(line.quantity), unit: line.unit, lineType: line.lineType,
+      })
       setLine((l) => ({ ...l, childItemId: '', quantity: '' }))
     } catch {
       // Shown below.
@@ -320,7 +330,11 @@ function BomDetail({
           )}
           {bom.lines.map((l) => (
             <tr key={l.bomLineId} style={{ borderBottom: '1px solid var(--border)' }}>
-              <td style={cell}>{itemLabel.get(l.childItemId) ?? l.childItemId}</td>
+              <td style={cell}>
+                {itemLabel.get(l.childItemId) ?? l.childItemId}
+                {subAssemblies.has(l.childItemId) && <span className="inspector-hint"> · has its own BOM</span>}
+                {lineTypeTag(l.lineType) && <span className="inspector-hint"> · {lineTypeTag(l.lineType)}</span>}
+              </td>
               <td style={{ ...cell, textAlign: 'right' }}>{formatQty(l.quantity)} {l.unit}</td>
               {editable && (
                 <td style={{ ...cell, width: 1 }}>
@@ -349,6 +363,14 @@ function BomDetail({
               setLine((l) => ({ ...l, childItemId: item.itemId, unit: code ?? l.unit }))
             }}
           />
+          <select
+            aria-label="Line type"
+            value={line.lineType}
+            onChange={(e) => setLine((l) => ({ ...l, lineType: e.target.value as BomLineType }))}
+            style={{ gridColumn: '1 / -1', fontSize: 12 }}
+          >
+            {LINE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
           <select
             aria-label="Material"
             value={line.childItemId}
@@ -475,6 +497,24 @@ function BomDetail({
                 </tr>
               </tbody>
             </table>
+          )}
+          {(requirementsQuery.data?.outputs ?? []).length > 0 && (
+            <table aria-label="Comes out of the batch" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginTop: 6 }}>
+              <tbody>
+                {(requirementsQuery.data?.outputs ?? []).map((output) => (
+                  <tr key={output.bomLineId} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={cell}>
+                      {itemLabel.get(output.itemId) ?? output.itemId}
+                      <span className="inspector-hint"> · {lineTypeTag(output.lineType)}</span>
+                    </td>
+                    <td style={{ ...cell, textAlign: 'right' }}>comes out {formatQty(output.itemQuantity)} {output.itemUnit}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {bom.bomStatus === 'approved' && hasSubAssemblies(bom, subAssemblies) && Number(productionQty) > 0 && (
+            <BomExplosion bomId={bom.bomId} quantity={Number(productionQty)} />
           )}
         </div>
       )}

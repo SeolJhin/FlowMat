@@ -106,7 +106,8 @@ public class BomServiceImpl implements BomService {
                     line.getBomLineId(),
                     line.getQuantity(),
                     line.getUnit(),
-                    line.getScrapRate()
+                    line.getScrapRate(),
+                    line.getLineType() == null ? BomTree.MATERIAL : line.getLineType()
                 );
             })
             .sorted(Comparator.comparingInt((BomWhereUsedResponse used) -> statusRank(used.bomStatus()))
@@ -203,7 +204,7 @@ public class BomServiceImpl implements BomService {
         line.setBomLineId(idGenerator.generate());
         line.setBomId(header.getBomId());
         line.setChildItemId(child.getItemId());
-        line.setLineType("material");
+        line.setLineType(lineType(request.lineType()));
         line.setQuantity(request.quantity());
         line.setUnit(request.unit().trim());
         line.setScrapRate(request.scrapRate() != null ? request.scrapRate() : BigDecimal.ZERO);
@@ -325,12 +326,20 @@ public class BomServiceImpl implements BomService {
         BigDecimal factor = productionQuantity.divide(base, FACTOR_SCALE, RoundingMode.HALF_UP);
 
         List<BomRequirementResponse.Line> result = new ArrayList<>();
+        List<BomRequirementResponse.Output> outputs = new ArrayList<>();
         BigDecimal materialCost = BigDecimal.ZERO;
         boolean costComplete = true;
         for (BomLine line : lines(header.getBomId())) {
             Item child = findProjectItem(line.getChildItemId(), header.getProjectId());
             BigDecimal required = factor.multiply(line.getQuantity()).setScale(8, RoundingMode.HALF_UP).stripTrailingZeros();
             UnitConverter.Conversion conversion = unitConverter.toItemUnit(required, line.getUnit(), child.getUnitId());
+            if (!BomTree.isMaterial(line.getLineType())) {
+                // By-products and waste come out of the batch; nothing is consumed or costed for them.
+                outputs.add(new BomRequirementResponse.Output(line.getBomLineId(), child.getItemId(), line.getLineType(),
+                    line.getQuantity(), line.getUnit(), required, conversion.toUnitCode(),
+                    conversion.quantity().setScale(STOCK_SCALE, RoundingMode.HALF_UP)));
+                continue;
+            }
             BigDecimal rate = unitConverter.toItemUnit(BigDecimal.ONE, line.getUnit(), child.getUnitId()).quantity();
             BigDecimal itemQuantity = conversion.quantity().setScale(STOCK_SCALE, RoundingMode.HALF_UP);
             // Unit cost is per the item's own unit, so it multiplies the quantity already converted to that unit.
@@ -356,7 +365,7 @@ public class BomServiceImpl implements BomService {
         }
         return new BomRequirementResponse(
             header.getBomId(), header.getBomVersion(), header.getTargetItemId(), productionQuantity, base, result,
-            materialCost.setScale(STOCK_SCALE, RoundingMode.HALF_UP), costComplete);
+            materialCost.setScale(STOCK_SCALE, RoundingMode.HALF_UP), costComplete, outputs);
     }
 
     private BomHeader findEditableBom(String bomId) {
@@ -415,9 +424,22 @@ public class BomServiceImpl implements BomService {
                 line.getOptionalYn(),
                 line.getSubstituteGroup(),
                 line.getSortOrder(),
-                line.getNote()
+                line.getNote(),
+                line.getLineType() == null ? BomTree.MATERIAL : line.getLineType()
             )).toList()
         );
+    }
+
+    /** Blank is a material; otherwise material, by_product or waste (docs/domain/bom-by-products.md). */
+    static String lineType(String value) {
+        if (value == null || value.isBlank()) {
+            return BomTree.MATERIAL;
+        }
+        String type = value.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!BomTree.LINE_TYPES.contains(type)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "lineType is material, by_product or waste.");
+        }
+        return type;
     }
 
     static void requirePositive(BigDecimal value, String label) {

@@ -11,6 +11,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.myweb.flowmat.global.security.JwtProvider;
 import org.myweb.flowmat.domain.workflow.repository.ProcessConnectionRepository;
+import org.myweb.flowmat.domain.workflow.repository.ProcessIoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
@@ -23,6 +24,7 @@ class WorkflowValidationIntegrationTest extends IntegrationTestSupport {
     @Autowired private ObjectMapper mapper;
     @Autowired private JwtProvider tokens;
     @Autowired private ProcessConnectionRepository connections;
+    @Autowired private ProcessIoRepository portRepository;
 
     @Test
     void demoGraphHasNoErrorsAndMissingSchemasAreWarnings() throws Exception {
@@ -97,6 +99,30 @@ class WorkflowValidationIntegrationTest extends IntegrationTestSupport {
         mockMvc.perform(auth(get("/workflows/" + workflow + "/validation"), DEMO_OWNER))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.issues[?(@.code == 'CONNECTION_INCOMPATIBLE')]").isNotEmpty());
+    }
+
+    @Test
+    void invalidLegacyPortIsReportedAndCannotBePublished() throws Exception {
+        String workflow = data(post("/workflows").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"projectId\":\"" + DEMO_PROJECT + "\",\"workflowName\":\"Invalid legacy port "
+                + UUID.randomUUID() + "\"}")) .path("workflowId").asText();
+        String process = data(post("/processes").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"workflowId\":\"" + workflow + "\",\"processName\":\"Source\"}"))
+            .path("processId").asText();
+        String portId = data(post("/process-ios").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"processId\":\"" + process + "\",\"itemId\":\"itm_demo_mix_output\","
+                + "\"direction\":\"output\",\"quantity\":1,\"unit\":\"kg\"}"))
+            .path("processIoId").asText();
+        var port = portRepository.findById(portId).orElseThrow();
+        port.setDirection("sideways");
+        portRepository.saveAndFlush(port);
+
+        mockMvc.perform(auth(get("/workflows/" + workflow + "/validation"), DEMO_OWNER))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.errors").value(1))
+            .andExpect(jsonPath("$.data.issues[?(@.code == 'PORT_INVALID')]").isNotEmpty());
+        mockMvc.perform(auth(post("/workflows/" + workflow + "/revisions"), DEMO_OWNER))
+            .andExpect(status().isConflict());
     }
 
     private JsonNode data(MockHttpServletRequestBuilder request) throws Exception {

@@ -109,14 +109,21 @@ export function reorderCsv(rows: ReorderRow[]): string {
  * shortfall first as the server sends them, with the shortage rounded up to the purchase unit and the item's status,
  * since an item that is not active is not reordered.
  */
+/** "Bread 30" for a work order's share, "via SPONGE 3" for the share from making a short sub-assembly. */
+export function needLabel(need: MaterialRequirementDto['lines'][number]['orders'][number], quantity: string | number = need.required): string {
+  return need.viaItemCode ? `via ${need.viaItemCode} ${quantity}` : `${need.workOrderTitle ?? ''} ${quantity}`
+}
+
 export function needsCsv(lines: MaterialRequirementDto['lines'], items: Map<string, ItemDto>): string {
-  const header = ['item_code', 'item_name', 'unit', 'needed', 'usable', 'short', 'purchase_unit', 'packs', 'item_status', 'work_orders']
+  const header = ['item_code', 'item_name', 'unit', 'needed', 'usable', 'short', 'purchase_unit', 'packs', 'item_status', 'work_orders',
+    'being_made', 'made_here']
   const rows = lines.map((line) => {
     const item = items.get(line.itemId)
     const packs = line.shortage > 0 && item?.purchaseUnit ? packsFor(line.shortage, item.purchaseUnitQty) : null
     return [
       line.itemCode, line.itemName, line.unit, line.required, line.usable, line.shortage, packs == null ? null : item?.purchaseUnit ?? null,
-      packs, item?.itemStatus ?? null, line.orders.map((order) => `${order.workOrderTitle} ${order.required}`).join('; '),
+      packs, item?.itemStatus ?? null, line.orders.map((order) => needLabel(order)).join('; '), line.plannedSupply ?? 0,
+      line.madeHere ? 'yes' : 'no',
     ]
       .map(csvCell)
       .join(',')

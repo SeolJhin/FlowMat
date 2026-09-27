@@ -89,6 +89,30 @@ class ProductionRunRevisionIntegrationTest extends IntegrationTestSupport {
             .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void runItemsCanUseAPublishedPortThatHasADataSchema() throws Exception {
+        String workflowId = data(post("/workflows")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"projectId\":\"" + DEMO_PROJECT + "\",\"workflowName\":\"Schema port "
+                + UUID.randomUUID() + "\"}"))
+            .path("workflowId").asText();
+        String processId = createProcess(workflowId, "Schema process");
+        // The snapshot stores schemaJson as an object; recording must still read the frozen port.
+        String processIoId = data(post("/process-ios")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"processId\":\"" + processId + "\",\"itemId\":\"itm_demo_mix_output\","
+                + "\"direction\":\"input\",\"quantity\":1,\"unit\":\"kg\",\"requiredYn\":\"N\","
+                + "\"schemaJson\":{\"type\":\"object\",\"properties\":{\"lot\":{\"type\":\"string\"}}}}"))
+            .path("processIoId").asText();
+        String revisionId = data(post("/workflows/" + workflowId + "/revisions"))
+            .path("workflowRevisionId").asText();
+        String runId = data(start(workflowId, revisionId)).path("productionRunId").asText();
+
+        mockMvc.perform(auth(record(runId, processId, processIoId)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.processIoId").value(processIoId));
+    }
+
     private String createProcess(String workflowId, String name) throws Exception {
         return data(post("/processes")
             .contentType(MediaType.APPLICATION_JSON)

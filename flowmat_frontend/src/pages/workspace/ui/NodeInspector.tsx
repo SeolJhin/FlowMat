@@ -299,7 +299,7 @@ export function NodeInspector({
 
             <label style={{ display: 'grid', gap: '4px' }}>
               <span>Port Name</span>
-              <input value={portForm.ioName} onChange={(event) => setPortForm((current) => ({ ...current, ioName: event.target.value }))} />
+              <input maxLength={100} value={portForm.ioName} onChange={(event) => setPortForm((current) => ({ ...current, ioName: event.target.value }))} />
             </label>
 
             <label style={{ display: 'grid', gap: '4px' }}>
@@ -320,11 +320,11 @@ export function NodeInspector({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
               <label style={{ display: 'grid', gap: '4px' }}>
                 <span>Role</span>
-                <input value={portForm.role} onChange={(event) => setPortForm((current) => ({ ...current, role: event.target.value }))} placeholder="feed, product..." />
+                <input maxLength={50} value={portForm.role} onChange={(event) => setPortForm((current) => ({ ...current, role: event.target.value }))} placeholder="feed, product..." />
               </label>
               <label style={{ display: 'grid', gap: '4px' }}>
                 <span>Resource Type</span>
-                <input value={portForm.resourceType} onChange={(event) => setPortForm((current) => ({ ...current, resourceType: event.target.value }))} />
+                <input maxLength={50} value={portForm.resourceType} onChange={(event) => setPortForm((current) => ({ ...current, resourceType: event.target.value }))} />
               </label>
             </div>
 
@@ -333,7 +333,8 @@ export function NodeInspector({
                 <span>Quantity</span>
                 <input
                   type="number"
-                  step="0.01"
+                  min="0"
+                  step="0.0001"
                   value={portForm.quantity}
                   onChange={(event) => setPortForm((current) => ({ ...current, quantity: event.target.value }))}
                 />
@@ -341,7 +342,7 @@ export function NodeInspector({
 
               <label style={{ display: 'grid', gap: '4px' }}>
                 <span>Unit</span>
-                <input value={portForm.unit} onChange={(event) => setPortForm((current) => ({ ...current, unit: event.target.value }))} />
+                <input maxLength={20} value={portForm.unit} onChange={(event) => setPortForm((current) => ({ ...current, unit: event.target.value }))} />
               </label>
             </div>
 
@@ -353,12 +354,12 @@ export function NodeInspector({
             <label style={{ display: 'grid', gap: '4px' }}>
               <span>Data schema (JSON object contract)</span>
               <textarea value={portForm.schemaJson} onChange={(event) => setPortForm((current) => ({ ...current, schemaJson: event.target.value }))} rows={4} aria-invalid={!isValidSchemaJson(portForm.schemaJson)} />
-              {!isValidSchemaJson(portForm.schemaJson) && <small role="alert">Enter a valid JSON object.</small>}
+              {!isValidSchemaJson(portForm.schemaJson) && <small role="alert">Enter an object schema with valid properties and required names.</small>}
             </label>
 
             <label style={{ display: 'grid', gap: '4px' }}>
               <span>Validation rule</span>
-              <input value={portForm.validationRule} onChange={(event) => setPortForm((current) => ({ ...current, validationRule: event.target.value }))} />
+              <input maxLength={2000} value={portForm.validationRule} onChange={(event) => setPortForm((current) => ({ ...current, validationRule: event.target.value }))} />
             </label>
 
             <label style={{ display: 'grid', gap: '4px' }}>

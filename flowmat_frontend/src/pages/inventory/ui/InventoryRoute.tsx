@@ -16,6 +16,8 @@ import { UnitsPanel } from './UnitsPanel'
 import { LotPanel } from './LotPanel'
 import { BomPanel } from './BomPanel'
 import { EquipmentPanel } from './EquipmentPanel'
+import { LocationsPanel } from './LocationsPanel'
+import { WarehouseTasksPanel } from './WarehouseTasksPanel'
 import { QualityPanel } from './QualityPanel'
 import { ItemCsvPanel } from './ItemCsvPanel'
 import { ItemDetail } from './ItemDetail'
@@ -25,20 +27,25 @@ import { EMPTY_ITEM_FILTER, duplicateCodes, filterItems, type ItemFilter } from 
 import { StockAnalysisPanel } from './StockAnalysisPanel'
 import { StockValueTrend } from './StockValueTrend'
 import { StockWastePanel } from './StockWastePanel'
+import { WorkInstructionsPanel } from './WorkInstructionsPanel'
 
-const TABS = ['items', 'stock', 'count', 'movements', 'analysis', 'lots', 'quality', 'boms', 'units', 'equipment'] as const
+const TABS = ['items', 'stock', 'tasks', 'count', 'movements', 'analysis', 'lots', 'quality', 'boms', 'instructions', 'units', 'equipment',
+  'locations'] as const
 type Tab = (typeof TABS)[number]
 const TAB_LABELS: Record<Tab, string> = {
   items: 'Items',
   stock: 'Stock',
+  tasks: 'Tasks',
   count: 'Count',
   movements: 'Movements',
   analysis: 'Analysis',
   lots: 'LOTs',
   quality: 'Quality',
   boms: 'BOMs',
+  instructions: 'Instructions',
   units: 'Units',
   equipment: 'Equipment',
+  locations: 'Locations',
 }
 
 const ITEM_TYPE_SUGGESTIONS = ['generic', 'raw_material', 'component', 'semi_finished', 'finished_good', 'consumable']
@@ -205,6 +212,7 @@ export function InventoryRoute() {
       </div>
 
       {tab === 'stock' && <StockPanel projectId={projectId} items={items} />}
+      {tab === 'tasks' && <WarehouseTasksPanel projectId={projectId} items={items} />}
       {tab === 'count' && (
         <>
           <CountPanel projectId={projectId} items={items} />
@@ -222,8 +230,10 @@ export function InventoryRoute() {
       {tab === 'lots' && <LotPanel projectId={projectId} items={items} />}
       {tab === 'quality' && <QualityPanel projectId={projectId} items={items} />}
       {tab === 'boms' && <BomPanel projectId={projectId} items={items} units={units} />}
+      {tab === 'instructions' && <WorkInstructionsPanel projectId={projectId} items={items} />}
       {tab === 'units' && <UnitsPanel canManage={canManageMasterData} />}
       {tab === 'equipment' && <EquipmentPanel projectId={projectId} />}
+      {tab === 'locations' && <LocationsPanel projectId={projectId} />}
 
       {tab === 'items' && (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>

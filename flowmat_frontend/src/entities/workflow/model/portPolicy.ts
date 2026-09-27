@@ -103,13 +103,14 @@ export function toUpdateProcessIoInput(state: PortFormState): UpdateProcessIoInp
     ioName: state.ioName.trim(),
     direction: state.direction,
     ioType: state.ioType.trim().toLowerCase(),
-    role: normalizeOptionalText(state.role),
+    role: state.role.trim(),
     resourceType: state.resourceType.trim().toLowerCase(),
     schemaJson: parseSchemaJson(state.schemaJson),
-    validationRule: normalizeOptionalText(state.validationRule),
+    clearSchema: !state.schemaJson.trim(),
+    validationRule: state.validationRule.trim(),
     quantity: normalizeQuantity(state.quantity),
     unit: state.unit.trim(),
-    formula: normalizeOptionalText(state.formula),
+    formula: state.formula.trim(),
     colorScheme: state.colorScheme.trim().toLowerCase(),
     requiredYn: state.requiredYn,
     allowShortageYn: state.allowShortageYn,
@@ -118,17 +119,38 @@ export function toUpdateProcessIoInput(state: PortFormState): UpdateProcessIoInp
 
 export function hasValidPortSelection(state: PortFormState): boolean {
   return Boolean(state.itemId.trim()) && Boolean(state.unit.trim()) && Boolean(state.resourceType.trim())
-    && !Number.isNaN(Number(state.quantity)) && isValidSchemaJson(state.schemaJson)
+    && isValidQuantity(state.quantity)
+    && state.ioName.trim().length <= 100 && state.ioType.trim().length <= 30
+    && state.role.trim().length <= 50 && state.resourceType.trim().length <= 50
+    && state.unit.trim().length <= 20 && state.colorScheme.trim().length <= 30
+    && state.validationRule.trim().length <= 2000
+    && isValidSchemaJson(state.schemaJson)
 }
 
 export function isValidSchemaJson(value: string): boolean {
   if (!value.trim()) return true
   try {
     const parsed: unknown = JSON.parse(value)
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+    if (!isObject(parsed) || parsed.type !== 'object' || JSON.stringify(parsed).length > 65536) return false
+    const properties = parsed.properties
+    if (properties !== undefined && !isObject(properties)) return false
+    const declared = properties ?? {}
+    for (const [name, definition] of Object.entries(declared)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || !isObject(definition)
+        || !['string', 'number', 'boolean'].includes(String(definition.type))) return false
+    }
+    const required = parsed.required
+    if (required !== undefined && (!Array.isArray(required) || required.some(
+      (name: unknown) => typeof name !== 'string'
+        || !Object.prototype.hasOwnProperty.call(declared, name)))) return false
+    return true
   } catch {
     return false
   }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function parseSchemaJson(value: string): Record<string, unknown> | undefined {
@@ -141,8 +163,16 @@ function parseSchemaJson(value: string): Record<string, unknown> | undefined {
 }
 
 function normalizeQuantity(value: string): number {
-  const numeric = Number(value)
-  return Number.isFinite(numeric) ? numeric : 0
+  if (!isValidQuantity(value)) {
+    throw new Error('Port quantity must fit 10 integer and 4 decimal digits.')
+  }
+  return Number(value)
+}
+
+function isValidQuantity(value: string): boolean {
+  const normalized = value.trim()
+  return /^\d+(?:\.\d{1,4})?$/.test(normalized)
+    && Number(normalized) <= 9999999999.9999
 }
 
 function normalizeOptionalText(value: string): string | undefined {

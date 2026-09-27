@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useBomWhereUsedQuery } from '../../../entities/bom/api/useBoms'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
+import { lineTypeTag } from '../model/bomLineTypeModel'
 import type { ItemDto } from '../../../shared/types/api'
 
 const cell = { padding: '6px 6px' } as const
@@ -69,7 +70,9 @@ export function BomWhereUsed({
                 </td>
                 <td style={cell}>{row.bomStatus.replace('_', ' ')}</td>
                 <td style={{ ...cell, textAlign: 'right' }}>
+                  {lineTypeTag(row.lineType) ? 'gives off ' : ''}
                   {formatQty(row.lineQuantity)} {row.lineUnit} per {formatQty(row.baseQuantity)} {row.baseUnit}
+                  {lineTypeTag(row.lineType) && <span className="inspector-hint"> ({lineTypeTag(row.lineType)})</span>}
                 </td>
               </tr>
             ))}

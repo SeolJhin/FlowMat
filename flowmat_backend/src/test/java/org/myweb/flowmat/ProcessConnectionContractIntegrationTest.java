@@ -11,12 +11,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.UUID;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.myweb.flowmat.domain.workflow.repository.ProcessConnectionRepository;
 import org.myweb.flowmat.global.security.JwtProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @AutoConfigureMockMvc
 class ProcessConnectionContractIntegrationTest extends IntegrationTestSupport {
@@ -24,6 +28,8 @@ class ProcessConnectionContractIntegrationTest extends IntegrationTestSupport {
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private JwtProvider jwtProvider;
+    @Autowired private ProcessConnectionRepository connectionRepository;
+    @Autowired private PlatformTransactionManager transactionManager;
 
     @Test
     void connectionContractIsFrozenInRevisionAndRejectsNegativeCapacity() throws Exception {
@@ -58,6 +64,14 @@ class ProcessConnectionContractIntegrationTest extends IntegrationTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"capacity\":-1}")))
             .andExpect(status().isBadRequest());
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"capacity\":5,\"clearCapacity\":true}")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("capacity cannot be supplied with clearCapacity."));
+        mockMvc.perform(auth(get("/process-connections/" + connectionId)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.capacity").value(20));
     }
 
     @Test
@@ -159,6 +173,199 @@ class ProcessConnectionContractIntegrationTest extends IntegrationTestSupport {
                 .content(base + ",\"unit\":\"ea\"}")))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.message").value("Connection unit type must match port units."));
+    }
+
+    @Test
+    void unitCanBeClearedExplicitlyWithoutClearingItWhenOmitted() throws Exception {
+        String workflowId = data(post("/workflows").contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of("projectId", DEMO_PROJECT,
+                "workflowName", "Connection unit " + UUID.randomUUID())))).path("workflowId").asText();
+        String source = createProcess(workflowId, "Source");
+        String target = createProcess(workflowId, "Target");
+        String connectionId = data(post("/process-connections").contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of("workflowId", workflowId,
+                "fromProcessId", source, "toProcessId", target, "unit", "kg"))))
+            .path("connectionId").asText();
+
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"priority\":2}")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.unit").value("kg"));
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"unit\":null}")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.unit").value(org.hamcrest.Matchers.nullValue()));
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"unit\":7}")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("unit must be a string or null."));
+    }
+
+    @Test
+    void staleConnectionLoadedBeforeWorkflowLockDoesNotOverwriteACommittedChange() throws Exception {
+        String workflowId = data(post("/workflows").contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of("projectId", DEMO_PROJECT,
+                "workflowName", "Concurrent connection " + UUID.randomUUID())))).path("workflowId").asText();
+        String source = createProcess(workflowId, "Source");
+        String target = createProcess(workflowId, "Target");
+        String connectionId = data(post("/process-connections").contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of("workflowId", workflowId,
+                "fromProcessId", source, "toProcessId", target, "priority", 1))))
+            .path("connectionId").asText();
+
+        TransactionTemplate outer = new TransactionTemplate(transactionManager);
+        outer.execute(status -> {
+            org.junit.jupiter.api.Assertions.assertEquals(1,
+                connectionRepository.findById(connectionId).orElseThrow().getPriority());
+            TransactionTemplate concurrent = new TransactionTemplate(transactionManager);
+            concurrent.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            concurrent.execute(otherStatus -> {
+                try {
+                    mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"priority\":2}")))
+                        .andExpect(status().isOk());
+                } catch (Exception exception) {
+                    throw new RuntimeException(exception);
+                }
+                return null;
+            });
+            try {
+                mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"connectionLabel\":\"after\"}")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.priority").value(2));
+            } catch (Exception exception) {
+                throw new RuntimeException(exception);
+            }
+            return null;
+        });
+        mockMvc.perform(auth(get("/process-connections/" + connectionId)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.priority").value(2))
+            .andExpect(jsonPath("$.data.connectionLabel").value("after"));
+    }
+
+    @Test
+    void changingPortRebindsGeneratedHandleToTheNewPort() throws Exception {
+        String workflowId = data(post("/workflows").contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of("projectId", DEMO_PROJECT,
+                "workflowName", "Connection handle " + UUID.randomUUID())))).path("workflowId").asText();
+        String source = createProcess(workflowId, "Source");
+        String target = createProcess(workflowId, "Target");
+        String firstOutput = createPort(source, "output", "material");
+        String secondOutput = createPort(source, "output", "material");
+        String firstInput = createPort(target, "input", "material");
+        String secondInput = createPort(target, "input", "material");
+        String connectionId = data(connect(workflowId, source, target, firstOutput, firstInput))
+            .path("connectionId").asText();
+
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("fromIoId", secondOutput,
+                    "toIoId", secondInput)))))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.fromIoId").value(secondOutput))
+            .andExpect(jsonPath("$.data.toIoId").value(secondInput))
+            .andExpect(jsonPath("$.data.sourceHandle").value(secondOutput))
+            .andExpect(jsonPath("$.data.targetHandle").value(secondInput));
+        data(put("/process-connections/" + connectionId).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"sourceHandle\":\"custom-source\"}"));
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("fromIoId", firstOutput)))))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.sourceHandle").value("custom-source"));
+
+        String unboundConnectionId = data(post("/process-connections")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of("workflowId", workflowId,
+                "fromProcessId", source, "toProcessId", target)))).path("connectionId").asText();
+        mockMvc.perform(auth(put("/process-connections/" + unboundConnectionId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("fromIoId", firstOutput,
+                    "toIoId", firstInput)))))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.sourceHandle").value(firstOutput))
+            .andExpect(jsonPath("$.data.targetHandle").value(firstInput));
+        mockMvc.perform(auth(put("/process-connections/" + unboundConnectionId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"fromIoId\":\"\",\"toIoId\":\"\"}")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.sourceHandle").value("out-default"))
+            .andExpect(jsonPath("$.data.targetHandle").value("in-default"));
+    }
+
+    @Test
+    void numericFieldsPreserveOmittedValuesAndClearExplicitNulls() throws Exception {
+        String workflowId = data(post("/workflows").contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of("projectId", DEMO_PROJECT,
+                "workflowName", "Connection numbers " + UUID.randomUUID())))).path("workflowId").asText();
+        String source = createProcess(workflowId, "Source");
+        String target = createProcess(workflowId, "Target");
+        String connectionId = data(post("/process-connections").contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of("workflowId", workflowId,
+                "fromProcessId", source, "toProcessId", target, "flowRate", 12.5,
+                "delayTimeSec", 3.5, "lossRate", 0.2, "priority", 4))))
+            .path("connectionId").asText();
+
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"connectionLabel\":\"changed\"}")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.flowRate").value(12.5))
+            .andExpect(jsonPath("$.data.delayTimeSec").value(3.5))
+            .andExpect(jsonPath("$.data.lossRate").value(0.2))
+            .andExpect(jsonPath("$.data.priority").value(4));
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"flowRate\":null,\"delayTimeSec\":null,\"lossRate\":null,\"priority\":null}")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.flowRate").value(org.hamcrest.Matchers.nullValue()))
+            .andExpect(jsonPath("$.data.delayTimeSec").value(0))
+            .andExpect(jsonPath("$.data.lossRate").value(0))
+            .andExpect(jsonPath("$.data.priority").value(0));
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"flowRate\":\"fast\"}")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("flowRate must be a number or null."));
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"lossRate\":10}")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("lossRate must fit numeric(5,4)."));
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"priority\":1.5}")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("priority must be an integer."));
+    }
+
+    @Test
+    void updatingOtherFieldsPreservesLabelButExplicitNullClearsIt() throws Exception {
+        String workflowId = data(post("/workflows").contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of("projectId", DEMO_PROJECT,
+                "workflowName", "Connection label " + UUID.randomUUID())))).path("workflowId").asText();
+        String source = createProcess(workflowId, "Source");
+        String target = createProcess(workflowId, "Target");
+        String connectionId = data(post("/process-connections").contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of("workflowId", workflowId,
+                "fromProcessId", source, "toProcessId", target, "connectionLabel", "Keep me"))))
+            .path("connectionId").asText();
+
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"priority\":2}")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.connectionLabel").value("Keep me"));
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"connectionLabel\":null}")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.connectionLabel").value(org.hamcrest.Matchers.nullValue()));
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"connectionLabel\":42}")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("connectionLabel must be a string or null."));
+        mockMvc.perform(auth(put("/process-connections/" + connectionId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("connectionLabel", "x".repeat(101))))))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("connectionLabel must be at most 100 characters."));
     }
 
     @Test

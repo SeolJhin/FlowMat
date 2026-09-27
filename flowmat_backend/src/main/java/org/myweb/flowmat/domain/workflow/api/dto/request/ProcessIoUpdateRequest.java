@@ -6,18 +6,19 @@ import java.math.BigDecimal;
 
 public record ProcessIoUpdateRequest(
     String itemId,
-    String ioName,
+    @Size(max = 100, message = "ioName must be at most 100 characters.") String ioName,
     String direction,
-    String ioType,
+    @Size(max = 30, message = "ioType must be at most 30 characters.") String ioType,
     BigDecimal quantity,
-    String unit,
+    @Size(max = 20, message = "unit must be at most 20 characters.") String unit,
     String formula,
-    String colorScheme,
+    @Size(max = 30, message = "colorScheme must be at most 30 characters.") String colorScheme,
     String requiredYn,
     String allowShortageYn,
     @Size(max = 50) String role,
     @Size(max = 50) String resourceType,
     JsonNode schemaJson,
+    Boolean clearSchema,
     @Size(max = 2000) String validationRule
 ) {
 }

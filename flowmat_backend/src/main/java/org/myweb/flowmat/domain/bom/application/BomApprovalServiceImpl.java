@@ -168,27 +168,34 @@ public class BomApprovalServiceImpl implements BomApprovalService {
             }
         }
 
-        // Single level only: no material may have its own approved BOM, and this item may not be another BOM's material.
-        List<BomHeader> otherApproved = bomHeaderRepository
-            .findAllByProjectIdAndBomStatusAndDeletedYn(header.getProjectId(), BomStatus.APPROVED.code(), NOT_DELETED).stream()
-            .filter(other -> !other.getTargetItemId().equals(header.getTargetItemId()))
-            .toList();
-        Set<String> producedByBom = otherApproved.stream().map(BomHeader::getTargetItemId).collect(Collectors.toSet());
-        for (BomLine line : lines) {
-            if (producedByBom.contains(line.getChildItemId())) {
-                Item child = items.get(line.getChildItemId());
-                problems.add("Material " + (child != null ? child.getItemCode() : line.getChildItemId())
-                    + " has its own approved BOM; multi-level BOMs are not supported yet.");
+        // Multi-level (docs/domain/multi-level-bom.md): a material may have its own approved BOM, but no BOM may contain its
+        // own item through its materials' BOMs, and the tree may be at most MAX_LEVELS deep. This revision replaces the
+        // approved one of the same item, so that one is left out of the tree.
+        Map<String, List<String>> tree = BomTree.approvedChildren(bomHeaderRepository, bomLineRepository, header.getProjectId(),
+            header.getTargetItemId());
+        List<BomLine> materials = lines.stream().filter(line -> BomTree.isMaterial(line.getLineType())).toList();
+        for (BomLine line : materials) {
+            List<String> loop = BomTree.pathTo(line.getChildItemId(), header.getTargetItemId(), tree);
+            if (loop != null) {
+                Map<String, String> codes = codes(loop);
+                problems.add("Material " + codes.get(line.getChildItemId()) + " is made from "
+                    + codes.get(header.getTargetItemId()) + " through its own BOM ("
+                    + loop.stream().map(codes::get).collect(Collectors.joining(" → ")) + "); a BOM cannot contain itself.");
             }
         }
-        if (!otherApproved.isEmpty()) {
-            boolean usedAsMaterial = bomLineRepository.findAllByBomIdIn(otherApproved.stream().map(BomHeader::getBomId).toList())
-                .stream().anyMatch(line -> line.getChildItemId().equals(header.getTargetItemId()));
-            if (usedAsMaterial) {
-                problems.add("This item is a material in another approved BOM; multi-level BOMs are not supported yet.");
-            }
+        int depth = 1 + materials.stream().mapToInt(line -> BomTree.depth(line.getChildItemId(), tree)).max().orElse(0);
+        if (depth > BomTree.MAX_LEVELS) {
+            problems.add("With its materials' own BOMs this BOM would be " + depth + " levels deep; at most "
+                + BomTree.MAX_LEVELS + " are allowed.");
         }
         return problems;
+    }
+
+    private Map<String, String> codes(List<String> itemIds) {
+        Map<String, String> codes = new java.util.HashMap<>();
+        itemRepository.findAllById(itemIds).forEach(item -> codes.put(item.getItemId(), item.getItemCode()));
+        itemIds.forEach(id -> codes.putIfAbsent(id, id));
+        return codes;
     }
 
     private void convertible(BigDecimal quantity, String unit, Item item, String label, List<String> problems) {

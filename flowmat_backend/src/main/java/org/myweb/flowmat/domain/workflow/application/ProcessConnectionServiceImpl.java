@@ -1,9 +1,11 @@
 package org.myweb.flowmat.domain.workflow.application;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +42,10 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     private static final String NOT_DELETED = "N";
     private static final String DELETED = "Y";
     private static final Set<String> FAILURE_POLICIES = Set.of("stop", "skip", "retry");
+    private static final BigDecimal MAX_FLOW_RATE = new BigDecimal("9999999999.9999");
+    private static final BigDecimal MAX_DELAY_TIME_SEC = new BigDecimal("99999999.99");
+    private static final BigDecimal MAX_LOSS_RATE = new BigDecimal("9.9999");
+    private static final BigDecimal MAX_CAPACITY = new BigDecimal("999999999999999.9999");
 
     private final ProcessConnectionRepository processConnectionRepository;
     private final WorkflowRepository workflowRepository;
@@ -109,10 +115,11 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     @Transactional
     public ProcessConnectionResponse updateConnection(String connectionId, ProcessConnectionUpdateRequest request) {
         ProcessConnection connection = projectAccessService.requireConnectionWriteAccess(connectionId);
-        Workflow workflow = projectAccessService.requireWorkflowWriteAccess(connection.getWorkflowId());
-        entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
+        lockWorkflowForConnection(connection);
         Process fromProcess = projectAccessService.requireProcessWriteAccess(connection.getFromProcessId());
         Process toProcess = projectAccessService.requireProcessWriteAccess(connection.getToProcessId());
+        String previousFromIoId = connection.getFromIoId();
+        String previousToIoId = connection.getToIoId();
 
         if (request.fromIoId() != null) {
             connection.setFromIoId(validateProcessIo(request.fromIoId(), fromProcess.getProcessId(), "output"));
@@ -125,23 +132,32 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         }
         if (request.sourceHandle() != null) {
             connection.setSourceHandle(resolveHandle(request.sourceHandle(), connection.getFromIoId(), "out"));
-        } else if (connection.getSourceHandle() == null) {
+        } else if (connection.getSourceHandle() == null
+            || (request.fromIoId() != null && !Objects.equals(previousFromIoId, connection.getFromIoId())
+                && Objects.equals(connection.getSourceHandle(), resolveHandle(null, previousFromIoId, "out")))) {
             connection.setSourceHandle(resolveHandle(null, connection.getFromIoId(), "out"));
         }
         if (request.targetHandle() != null) {
             connection.setTargetHandle(resolveHandle(request.targetHandle(), connection.getToIoId(), "in"));
-        } else if (connection.getTargetHandle() == null) {
+        } else if (connection.getTargetHandle() == null
+            || (request.toIoId() != null && !Objects.equals(previousToIoId, connection.getToIoId())
+                && Objects.equals(connection.getTargetHandle(), resolveHandle(null, previousToIoId, "in")))) {
             connection.setTargetHandle(resolveHandle(null, connection.getToIoId(), "in"));
         }
         if (hasText(request.connectionType())) {
             connection.setConnectionType(request.connectionType().trim().toLowerCase());
         }
-        connection.setConnectionLabel(trimToNull(request.connectionLabel()));
+        if (request.connectionLabel() != null) {
+            connection.setConnectionLabel(optionalText(request.connectionLabel(), "connectionLabel", 100));
+        }
         if (request.flowRate() != null) {
-            connection.setFlowRate(request.flowRate());
+            connection.setFlowRate(decimalOrNull(request.flowRate(), "flowRate", MAX_FLOW_RATE, 4, "numeric(14,4)"));
         }
         if (request.conditionExpr() != null) {
             connection.setConditionExpr(trimToNull(request.conditionExpr()));
+        }
+        if (Boolean.TRUE.equals(request.clearCapacity()) && request.capacity() != null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "capacity cannot be supplied with clearCapacity.");
         }
         if (Boolean.TRUE.equals(request.clearCapacity())) {
             connection.setCapacity(null);
@@ -152,16 +168,18 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
             connection.setFailurePolicy(normalizeFailurePolicy(request.failurePolicy()));
         }
         if (request.unit() != null) {
-            connection.setUnit(trimToNull(request.unit()));
+            connection.setUnit(optionalText(request.unit(), "unit", 20));
         }
         if (request.delayTimeSec() != null) {
-            connection.setDelayTimeSec(request.delayTimeSec());
+            connection.setDelayTimeSec(defaultIfNull(decimalOrNull(request.delayTimeSec(), "delayTimeSec",
+                MAX_DELAY_TIME_SEC, 2, "numeric(10,2)"), BigDecimal.ZERO));
         }
         if (request.lossRate() != null) {
-            connection.setLossRate(request.lossRate());
+            connection.setLossRate(defaultIfNull(decimalOrNull(request.lossRate(), "lossRate",
+                MAX_LOSS_RATE, 4, "numeric(5,4)"), BigDecimal.ZERO));
         }
         if (request.priority() != null) {
-            connection.setPriority(request.priority());
+            connection.setPriority(integerOrZero(request.priority()));
         }
         connection.setVersion(connection.getVersion() + 1);
         connection.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
@@ -175,10 +193,20 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     @Transactional
     public void deleteConnection(String connectionId) {
         ProcessConnection connection = projectAccessService.requireConnectionWriteAccess(connectionId);
+        lockWorkflowForConnection(connection);
         String workflowId = connection.getWorkflowId();
         connection.setDeletedYn(DELETED);
         processConnectionRepository.save(connection);
         graphSyncService.broadcast(Type.CONNECTION_DELETED, workflowId, connectionId);
+    }
+
+    private void lockWorkflowForConnection(ProcessConnection connection) {
+        Workflow workflow = projectAccessService.requireWorkflowWriteAccess(connection.getWorkflowId());
+        entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
+        entityManager.refresh(connection);
+        if (!NOT_DELETED.equals(connection.getDeletedYn())) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
     }
 
     private String validateProcessIo(String processIoId, String processId, String direction) {
@@ -197,6 +225,46 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         return processIo.getProcessIoId();
     }
 
+    private static String optionalText(JsonNode value, String field, int maxLength) {
+        if (value.isNull()) {
+            return null;
+        }
+        if (!value.isTextual()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, field + " must be a string or null.");
+        }
+        if (value.textValue().length() > maxLength) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                field + " must be at most " + maxLength + " characters.");
+        }
+        return trimToNull(value.textValue());
+    }
+
+    private static BigDecimal decimalOrNull(JsonNode value, String field, BigDecimal max,
+        int fractionDigits, String columnType) {
+        if (value.isNull()) {
+            return null;
+        }
+        if (!value.isNumber()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, field + " must be a number or null.");
+        }
+        BigDecimal decimal = value.decimalValue();
+        if (decimal.abs().compareTo(max) > 0 || decimal.stripTrailingZeros().scale() > fractionDigits) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, field + " must fit " + columnType + ".");
+        }
+        return decimal;
+    }
+
+    private static int integerOrZero(JsonNode value) {
+        if (value.isNull()) {
+            return 0;
+        }
+        if (!value.isIntegralNumber() || !value.canConvertToInt()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "priority must be an integer.");
+        }
+        return value.intValue();
+    }
+
+    @Transactional(readOnly = true, noRollbackFor = BusinessException.class)
     void validateConnectionContract(ProcessConnection connection, String excludedConnectionId) {
         validateConnectionContract(connection, excludedConnectionId, false);
     }
@@ -335,6 +403,10 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     private static BigDecimal requireNonNegativeCapacity(BigDecimal capacity) {
         if (capacity != null && capacity.signum() < 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Connection capacity cannot be negative.");
+        }
+        if (capacity != null && (capacity.compareTo(MAX_CAPACITY) > 0
+            || capacity.stripTrailingZeros().scale() > 4)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Connection capacity must fit numeric(19,4).");
         }
         return capacity;
     }

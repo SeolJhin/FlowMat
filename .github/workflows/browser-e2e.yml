@@ -113,6 +113,60 @@ jobs:
           REAL_API_E2E: '1'
         run: npm run test:e2e -- e2e/lot-genealogy.spec.ts
 
+      - name: Run real storage location E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/storage-locations.spec.ts
+
+      - name: Run real inspection standard E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/inspection-standards.spec.ts
+
+      - name: Run real nonconformity E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/nonconformity.spec.ts
+
+      - name: Run real warehouse task E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/warehouse-tasks.spec.ts
+
+      - name: Run real equipment schedule E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/equipment-schedule.spec.ts
+
+      - name: Run real equipment changeover E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/equipment-changeover.spec.ts
+
+      - name: Run real equipment load E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/equipment-load.spec.ts
+
+      - name: Run real work instruction E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/work-instructions.spec.ts
+
+      - name: Run real stock allocation E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/stock-allocations.spec.ts
+
       - name: Upload backend log
         if: always()
         uses: actions/upload-artifact@v4

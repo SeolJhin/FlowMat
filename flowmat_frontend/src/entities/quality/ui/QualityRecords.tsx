@@ -8,6 +8,8 @@ import type {
   QualityInspectionDto,
 } from '../../../shared/types/api'
 import type { DefectResolution } from '../api/useQuality'
+import type { InspectionStandardDto } from '../api/useInspectionStandards'
+import { standardLabel, usableStandards } from '../model/standardModel'
 import {
   EMPTY_DEFECT,
   EMPTY_INSPECTION,
@@ -245,12 +247,33 @@ export function InspectionForm({
   pending,
   onSubmit,
   onCancel,
-}: FormProps<Omit<QualityInspectionCreateRequest, 'projectId'>>) {
+  standards,
+}: FormProps<Omit<QualityInspectionCreateRequest, 'projectId'>> & {
+  /** The project's inspection standards; those of the inspected item can be followed (docs/domain/inspection-standard.md). */
+  standards?: InspectionStandardDto[]
+}) {
   const [draft, setDraft] = useState<InspectionDraft>({ ...EMPTY_INSPECTION, targetKey: targets[0]?.key ?? '' })
   const [error, setError] = useState<string | null>(null)
   const measured = measuredResult(draft)
   const failed = (measured ?? draft.result) === 'fail'
   const target = targets.find((t) => t.key === draft.targetKey)
+  const offered = usableStandards(standards ?? [], target?.itemId)
+  const followed = offered.find((one) => one.standardId === draft.standardId)
+
+  // Following a standard fills in its check, limits and unit, which the server then insists on.
+  function follow(standardId: string) {
+    const standard = offered.find((one) => one.standardId === standardId)
+    setDraft(standard
+      ? {
+          ...draft,
+          standardId,
+          inspectionType: standard.inspectionType,
+          standardMin: standard.standardMin === null ? '' : String(standard.standardMin),
+          standardMax: standard.standardMax === null ? '' : String(standard.standardMax),
+          unit: standard.unit ?? '',
+        }
+      : { ...draft, standardId: '' })
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -273,10 +296,23 @@ export function InspectionForm({
       {targets.length > 1 && (
         <label style={field}>
           <span>What was inspected</span>
-          <select value={draft.targetKey} onChange={(e) => setDraft({ ...draft, targetKey: e.target.value, quarantineLot: false })}>
+          <select value={draft.targetKey} onChange={(e) => setDraft({ ...draft, targetKey: e.target.value, quarantineLot: false, standardId: '' })}>
             {targets.map((t) => (
               <option key={t.key} value={t.key}>
                 {targetLabel(t)}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {offered.length > 0 && (
+        <label style={field}>
+          <span>Standard</span>
+          <select value={draft.standardId ?? ''} onChange={(e) => follow(e.target.value)}>
+            <option value="">(none, type the check)</option>
+            {offered.map((one) => (
+              <option key={one.standardId} value={one.standardId}>
+                {standardLabel(one)}
               </option>
             ))}
           </select>
@@ -287,6 +323,7 @@ export function InspectionForm({
         <input
           value={draft.inspectionType}
           maxLength={50}
+          readOnly={Boolean(followed)}
           placeholder="Moisture, Visual, Weight..."
           onChange={(e) => setDraft({ ...draft, inspectionType: e.target.value })}
         />
@@ -301,12 +338,17 @@ export function InspectionForm({
         ).map(([label, key]) => (
           <label key={key} style={field}>
             <span>{label}</span>
-            <input inputMode="decimal" value={draft[key]} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />
+            <input
+              inputMode="decimal"
+              value={draft[key]}
+              readOnly={Boolean(followed) && key !== 'measuredValue'}
+              onChange={(e) => setDraft({ ...draft, [key]: e.target.value })}
+            />
           </label>
         ))}
         <label style={field}>
           <span>Unit</span>
-          <input value={draft.unit} maxLength={20} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} />
+          <input value={draft.unit} maxLength={20} readOnly={Boolean(followed?.unit)} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} />
         </label>
       </div>
       {measured ? (

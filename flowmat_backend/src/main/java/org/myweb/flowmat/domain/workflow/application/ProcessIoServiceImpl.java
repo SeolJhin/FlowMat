@@ -1,9 +1,12 @@
 package org.myweb.flowmat.domain.workflow.application;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
@@ -14,6 +17,7 @@ import org.myweb.flowmat.domain.workflow.api.dto.response.ProcessIoResponse;
 import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessConnection;
+import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
 import org.myweb.flowmat.domain.workflow.domain.contract.PortSchema;
 import org.myweb.flowmat.domain.workflow.domain.expression.ConditionExpression;
 import org.myweb.flowmat.domain.workflow.collab.GraphSyncService;
@@ -37,6 +41,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     private static final String INPUT_DEFAULT_COLOR = "sky";
     private static final String OUTPUT_DEFAULT_COLOR = "emerald";
     private static final String DEFAULT_COLOR = "slate";
+    private static final BigDecimal MAX_QUANTITY = new BigDecimal("9999999999.9999");
 
     private final ProcessIoRepository processIoRepository;
     private final ProcessConnectionRepository processConnectionRepository;
@@ -46,6 +51,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     private final ItemRepository itemRepository;
     private final IdGenerator idGenerator;
     private final ProjectAccessService projectAccessService;
+    private final EntityManager entityManager;
 
     @Override
     public List<ProcessIoResponse> listProcessIos(String processId) {
@@ -67,7 +73,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         processIo.setProcessId(process.getProcessId());
         processIo.setItemId(item.getItemId());
         processIo.setIoName(trimToNull(request.ioName()));
-        processIo.setDirection(request.direction().trim().toLowerCase());
+        processIo.setDirection(normalizeDirection(request.direction()));
         processIo.setIoType(defaultIfBlank(request.ioType(), "material"));
         processIo.setRole(trimToNull(request.role()));
         processIo.setResourceType(defaultIfBlank(request.resourceType(), processIo.getIoType()));
@@ -76,9 +82,9 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         processIo.setFormula(trimToNull(request.formula()));
         processIo.setSchemaJson(writeSchema(request.schemaJson()));
         processIo.setValidationRule(trimToNull(request.validationRule()));
-        processIo.setColorScheme(defaultColorScheme(request.colorScheme(), request.direction()));
-        processIo.setRequiredYn(defaultYn(request.requiredYn(), "Y"));
-        processIo.setAllowShortageYn(defaultYn(request.allowShortageYn(), "N"));
+        processIo.setColorScheme(defaultColorScheme(request.colorScheme(), processIo.getDirection()));
+        processIo.setRequiredYn(normalizeYn(request.requiredYn(), "Y", "requiredYn"));
+        processIo.setAllowShortageYn(normalizeYn(request.allowShortageYn(), "N", "allowShortageYn"));
         processIo.setDeletedYn(NOT_DELETED);
         validatePortContract(processIo);
         ProcessIoResponse response = ProcessIoResponse.from(processIoRepository.save(processIo));
@@ -95,6 +101,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     @Transactional
     public ProcessIoResponse updateProcessIo(String processIoId, ProcessIoUpdateRequest request) {
         ProcessIo processIo = projectAccessService.requireProcessIoWriteAccess(processIoId);
+        lockWorkflowForPort(processIo);
         List<String> contractBefore = contractFields(processIo);
 
         if (hasText(request.itemId())) {
@@ -106,8 +113,8 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         if (request.ioName() != null) {
             processIo.setIoName(trimToNull(request.ioName()));
         }
-        if (hasText(request.direction())) {
-            processIo.setDirection(request.direction().trim().toLowerCase());
+        if (request.direction() != null) {
+            processIo.setDirection(normalizeDirection(request.direction()));
         }
         if (hasText(request.ioType())) {
             processIo.setIoType(request.ioType().trim().toLowerCase());
@@ -127,7 +134,12 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         if (request.formula() != null) {
             processIo.setFormula(trimToNull(request.formula()));
         }
-        if (request.schemaJson() != null) {
+        if (Boolean.TRUE.equals(request.clearSchema()) && request.schemaJson() != null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "schemaJson cannot be supplied with clearSchema.");
+        }
+        if (Boolean.TRUE.equals(request.clearSchema())) {
+            processIo.setSchemaJson(null);
+        } else if (request.schemaJson() != null) {
             processIo.setSchemaJson(writeSchema(request.schemaJson()));
         }
         if (request.validationRule() != null) {
@@ -139,10 +151,10 @@ public class ProcessIoServiceImpl implements ProcessIoService {
             processIo.setColorScheme(defaultColorScheme(null, processIo.getDirection()));
         }
         if (request.requiredYn() != null) {
-            processIo.setRequiredYn(defaultYn(request.requiredYn(), processIo.getRequiredYn()));
+            processIo.setRequiredYn(normalizeYn(request.requiredYn(), processIo.getRequiredYn(), "requiredYn"));
         }
         if (request.allowShortageYn() != null) {
-            processIo.setAllowShortageYn(defaultYn(request.allowShortageYn(), processIo.getAllowShortageYn()));
+            processIo.setAllowShortageYn(normalizeYn(request.allowShortageYn(), processIo.getAllowShortageYn(), "allowShortageYn"));
         }
         validatePortContract(processIo);
         if (!Objects.equals(contractBefore, contractFields(processIo))) {
@@ -165,6 +177,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     @Transactional
     public void deleteProcessIo(String processIoId) {
         ProcessIo processIo = projectAccessService.requireProcessIoWriteAccess(processIoId);
+        lockWorkflowForPort(processIo);
         Process parentProcess = projectAccessService.requireProcessWriteAccess(processIo.getProcessId());
         String workflowId = parentProcess.getWorkflowId();
         for (ProcessConnection connection : processConnectionRepository.findLiveConnectionsForPort(processIoId)) {
@@ -196,11 +209,35 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         return schema.toString();
     }
 
+    private void lockWorkflowForPort(ProcessIo port) {
+        Process process = projectAccessService.requireProcessWriteAccess(port.getProcessId());
+        Workflow workflow = projectAccessService.requireWorkflowWriteAccess(process.getWorkflowId());
+        entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
+        entityManager.refresh(port);
+        if (!NOT_DELETED.equals(port.getDeletedYn())) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+    }
+
     private static void validatePortContract(ProcessIo port) {
+        validatePortValues(port);
         PortSchema schema = PortSchema.parseStored(port.getSchemaJson());
         if (hasText(port.getValidationRule())) {
             ConditionExpression rule = ConditionExpression.compile(port.getValidationRule());
             rule.requireDeclaredAttributes(schema == null ? null : schema.properties().keySet());
+        }
+    }
+
+    static void validatePortValues(ProcessIo port) {
+        normalizeDirection(port.getDirection());
+        normalizeYn(port.getRequiredYn(), "Y", "requiredYn");
+        normalizeYn(port.getAllowShortageYn(), "N", "allowShortageYn");
+        if (port.getQuantity() == null || port.getQuantity().signum() < 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "quantity must be zero or greater.");
+        }
+        if (port.getQuantity().compareTo(MAX_QUANTITY) > 0
+            || port.getQuantity().stripTrailingZeros().scale() > 4) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "quantity must fit numeric(14,4).");
         }
     }
 
@@ -240,8 +277,20 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         return value != null ? value : defaultValue;
     }
 
-    private static String defaultYn(String value, String defaultValue) {
-        return hasText(value) ? value.trim().toUpperCase() : defaultValue;
+    private static String normalizeDirection(String value) {
+        String normalized = value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!Set.of("input", "output").contains(normalized)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "direction must be input or output.");
+        }
+        return normalized;
+    }
+
+    private static String normalizeYn(String value, String defaultValue, String field) {
+        String normalized = value == null ? defaultValue : value.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!Set.of("Y", "N").contains(normalized)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, field + " must be Y or N.");
+        }
+        return normalized;
     }
 
     private static String defaultColorScheme(String value, String direction) {

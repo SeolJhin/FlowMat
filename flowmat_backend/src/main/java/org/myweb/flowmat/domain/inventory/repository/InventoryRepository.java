@@ -162,4 +162,38 @@ public interface InventoryRepository extends JpaRepository<Inventory, String> {
         @Param("status") String status,
         @Param("now") OffsetDateTime now
     );
+
+    /**
+     * Per lower-cased location: stock records holding stock (on hand or reserved) and their different items. Locations
+     * are compared case-insensitively, as the location list matches them (docs/domain/storage-location.md).
+     */
+    @Query("""
+        select lower(i.location), count(i), count(distinct i.itemId) from Inventory i
+        where i.projectId = :projectId and i.deletedYn = 'N' and i.location is not null
+          and (i.quantity <> 0 or i.reservedQuantity <> 0)
+        group by lower(i.location)
+        """)
+    List<Object[]> summarizeHeldStockByLocation(@Param("projectId") String projectId);
+
+    @Query("""
+        select count(i) from Inventory i
+        where i.projectId = :projectId and i.deletedYn = 'N' and lower(i.location) = lower(:location)
+          and (i.quantity <> 0 or i.reservedQuantity <> 0)
+        """)
+    long countHeldStockAtLocation(@Param("projectId") String projectId, @Param("location") String location);
+
+    @Query("""
+        select count(distinct i.itemId) from Inventory i
+        where i.projectId = :projectId and i.deletedYn = 'N' and lower(i.location) = lower(:location)
+          and (i.quantity <> 0 or i.reservedQuantity <> 0)
+        """)
+    long countHeldItemsAtLocation(@Param("projectId") String projectId, @Param("location") String location);
+
+    /** Every location text the project's live stock records name, empty or not. */
+    @Query("""
+        select distinct i.location from Inventory i
+        where i.projectId = :projectId and i.deletedYn = 'N' and i.location is not null
+        order by i.location
+        """)
+    List<String> findUsedLocations(@Param("projectId") String projectId);
 }

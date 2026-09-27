@@ -44,6 +44,8 @@ export interface InspectionDraft {
   result: InspectionResult | ''
   note: string
   quarantineLot: boolean
+  /** The inspection standard followed; empty for a free check. It fixes the check, limits and unit. */
+  standardId?: string
 }
 
 export const EMPTY_INSPECTION: InspectionDraft = {
@@ -116,6 +118,7 @@ export function buildInspectionRequest(
       unit: draft.unit.trim() || null,
       note: draft.note.trim() || null,
       quarantineLot: draft.quarantineLot,
+      ...(draft.standardId ? { standardId: draft.standardId } : {}),
     },
   }
 }

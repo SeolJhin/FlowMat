@@ -125,15 +125,19 @@ class BomIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    void multiLevelBomsAreRefused() throws Exception {
+    void multiLevelBomsAreApprovedButLoopsAreNot() throws Exception {
         String product = item("unit_ea");
         String subAssembly = item("unit_ea");
-        approvedBom(subAssembly, "1", "ea", line(item("unit_kg"), "1", "kg"));
-        String bomId = draftBom(product, "1", "ea", line(subAssembly, "2", "ea"));
+        String subAssemblyBom = approvedBom(subAssembly, "1", "ea", line(item("unit_kg"), "1", "kg"));
+        // A material with its own approved BOM is a sub-assembly (docs/domain/multi-level-bom.md).
+        approvedBom(product, "1", "ea", line(subAssembly, "2", "ea"));
 
-        call(post("/boms/" + bomId + "/submit"))
+        // A new revision of the sub-assembly made from the product would contain itself.
+        String loop = data(call(post("/boms/" + subAssemblyBom + "/revisions")).andExpect(status().isOk())).path("bomId").asText();
+        call(post("/boms/" + loop + "/lines"), line(product, "1", "ea")).andExpect(status().isOk());
+        call(post("/boms/" + loop + "/submit"))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value(containsString("multi-level BOMs are not supported")));
+            .andExpect(jsonPath("$.message").value(containsString("a BOM cannot contain itself")));
     }
 
     @Test

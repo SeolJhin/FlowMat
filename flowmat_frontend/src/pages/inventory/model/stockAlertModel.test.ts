@@ -119,6 +119,10 @@ describe('needsCsv', () => {
       orders: [{ workOrderId: 'w1', workOrderTitle: 'Bread', required: 30 }, { workOrderId: 'w2', workOrderTitle: 'Buns', required: 10 }],
     },
     { itemId: 'salt', itemCode: 'SA', itemName: 'Salt', unit: 'kg', required: 1, usable: 5, shortage: 0, orders: [] },
+    {
+      itemId: 'dough', itemCode: 'DO', itemName: 'Dough', unit: 'kg', required: 8, usable: 2, shortage: 1, plannedSupply: 5, madeHere: true,
+      orders: [{ workOrderId: null, workOrderTitle: null, required: 8, viaItemId: 'loaf', viaItemCode: 'LOAF' }],
+    },
   ]
   const items = new Map<string, ItemDto>([
     ['flour', { itemId: 'flour', purchaseUnit: 'bag', purchaseUnitQty: 25, itemStatus: 'active' } as ItemDto],
@@ -127,9 +131,11 @@ describe('needsCsv', () => {
 
   it('lists every material with the shortage in purchase units and the orders that need it', () => {
     const rows = needsCsv(lines, items).replace('\ufeff', '').trim().split('\r\n')
-    expect(rows[0]).toBe('item_code,item_name,unit,needed,usable,short,purchase_unit,packs,item_status,work_orders')
-    expect(rows[1]).toBe('FL,"Flour, fine",kg,40,12,28,bag,2,active,Bread 30; Buns 10')
+    expect(rows[0]).toBe('item_code,item_name,unit,needed,usable,short,purchase_unit,packs,item_status,work_orders,being_made,made_here')
+    expect(rows[1]).toBe('FL,"Flour, fine",kg,40,12,28,bag,2,active,Bread 30; Buns 10,0,no')
     // Covered: no packs to buy.
-    expect(rows[2]).toBe('SA,Salt,kg,1,5,0,,,discontinued,')
+    expect(rows[2]).toBe('SA,Salt,kg,1,5,0,,,discontinued,,0,no')
+    // A sub-assembly: its need comes from making a short item above it, and open orders already make 5.
+    expect(rows[3]).toBe('DO,Dough,kg,8,2,1,,,,via LOAF 8,5,yes')
   })
 })

@@ -11,6 +11,8 @@ public record BomLineResponse(
     String optionalYn,
     String substituteGroup,
     Integer sortOrder,
-    String note
+    String note,
+    /** material, by_product or waste (docs/domain/bom-by-products.md). */
+    String lineType
 ) {
 }

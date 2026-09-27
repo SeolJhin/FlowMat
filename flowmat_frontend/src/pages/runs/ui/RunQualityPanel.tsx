@@ -3,6 +3,7 @@ import { useInventoriesQuery } from '../../../entities/inventory/api/useInventor
 import { useLotsQuery } from '../../../entities/inventory/api/useLots'
 import { inspectionTargets, type InspectionTarget } from '../../../entities/quality/model/qualityModel'
 import { QualitySection } from '../../../entities/quality/ui/QualitySection'
+import { RunQualityChecklist } from './RunQualityChecklist'
 import type { ProductionRunDto, ProductionRunItemDto } from '../../../shared/types/api'
 
 interface Props {
@@ -27,6 +28,7 @@ export function RunQualityPanel({ projectId, run, runItems, itemLabel }: Props) 
   return (
     <section aria-label="Quality" style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 18 }}>
       <h3 style={{ marginTop: 0 }}>Quality</h3>
+      <RunQualityChecklist projectId={projectId} productionRunId={run.productionRunId} />
       <QualitySection
         projectId={projectId}
         filter={filter}

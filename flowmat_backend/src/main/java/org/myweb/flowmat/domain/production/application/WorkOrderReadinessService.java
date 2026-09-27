@@ -2,8 +2,11 @@ package org.myweb.flowmat.domain.production.application;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -14,7 +17,11 @@ import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
 import org.myweb.flowmat.domain.bom.application.BomService;
 import org.myweb.flowmat.domain.bom.domain.entity.BomHeader;
 import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
+import org.myweb.flowmat.domain.catalog.application.EquipmentChangeoverService;
+import org.myweb.flowmat.domain.catalog.application.EquipmentScheduleService;
+import org.myweb.flowmat.domain.catalog.domain.entity.Equipment;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
+import org.myweb.flowmat.domain.catalog.repository.EquipmentRepository;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
@@ -27,6 +34,7 @@ import org.myweb.flowmat.domain.production.domain.entity.ProductionRun;
 import org.myweb.flowmat.domain.production.domain.entity.WorkOrder;
 import org.myweb.flowmat.domain.production.domain.enums.WorkOrderStatus;
 import org.myweb.flowmat.domain.production.repository.ProductionRunRepository;
+import org.myweb.flowmat.domain.production.repository.StockAllocationRepository;
 import org.myweb.flowmat.domain.production.repository.WorkOrderRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository;
@@ -57,6 +65,10 @@ public class WorkOrderReadinessService {
     private final InventoryRepository inventoryRepository;
     private final LotMasterRepository lotMasterRepository;
     private final OpenRunInputs openRunInputs;
+    private final EquipmentRepository equipmentRepository;
+    private final EquipmentScheduleService equipmentScheduleService;
+    private final EquipmentChangeoverService equipmentChangeoverService;
+    private final StockAllocationRepository stockAllocationRepository;
 
     /** LOTs expiring within this many days are called out (same setting as the stock alerts). */
     @Value("${app.stock-alert.expiry-warning-days:7}")
@@ -117,8 +129,116 @@ public class WorkOrderReadinessService {
             }
         }
 
+        if (order.getEquipmentId() != null) {
+            equipmentChecks(order, remaining, checks);
+        }
+
         boolean ready = checks.stream().noneMatch(check -> FAIL.equals(check.status()));
         return new WorkOrderReadinessResponse(order.getWorkOrderId(), ready, remaining, checks, materials);
+    }
+
+    /**
+     * Only for an order with equipment assigned (docs/domain/equipment-schedule.md): whether the equipment can work,
+     * whether its available time in the planned window covers what is still to produce, and which other approved or
+     * running orders are planned on it at the same time.
+     */
+    private void equipmentChecks(WorkOrder order, BigDecimal remaining, List<Check> checks) {
+        Equipment equipment = equipmentRepository.findByEquipmentIdAndDeletedYn(order.getEquipmentId(), NOT_DELETED).orElse(null);
+        if (equipment == null) {
+            checks.add(new Check("equipment", FAIL, "The assigned equipment no longer exists; assign other equipment."));
+            return;
+        }
+        String name = "Equipment " + (equipment.getEquipmentCode() != null ? equipment.getEquipmentCode() : equipment.getEquipmentName());
+        if ("inactive".equals(equipment.getEquipmentStatus())) {
+            checks.add(new Check("equipment", FAIL, name + " is inactive; assign other equipment."));
+            return;
+        }
+        if ("maintenance".equals(equipment.getEquipmentStatus())) {
+            checks.add(new Check("equipment", FAIL, name + " is under maintenance."));
+            return;
+        }
+        OffsetDateTime start = order.getPlannedStartAt();
+        OffsetDateTime end = order.getPlannedEndAt();
+        if (start == null || end == null || !end.isAfter(start)) {
+            checks.add(new Check("equipment", WARN, name + " is assigned; set the planned start and end to check its time."));
+            return;
+        }
+        if (Duration.between(start, end).compareTo(EquipmentScheduleService.LONGEST_WINDOW) > 0) {
+            checks.add(new Check("equipment", WARN, "The planned window is longer than 366 days, so " + name + "'s time is not checked."));
+            return;
+        }
+
+        List<WorkOrder> sameEquipment = workOrderRepository.findAllByEquipmentIdAndDeletedYn(equipment.getEquipmentId(), NOT_DELETED)
+            .stream()
+            .filter(other -> !other.getWorkOrderId().equals(order.getWorkOrderId()))
+            .toList();
+        Changeover changeover = changeover(order, equipment, start, sameEquipment);
+        BigDecimal changeoverHours = changeover == null ? BigDecimal.ZERO : changeover.hours();
+
+        EquipmentScheduleService.Availability availability = equipmentScheduleService.window(equipment, start, end);
+        String has = plain(availability.availableHours()) + " h available in the planned window"
+            + (availability.downtimeHours().signum() > 0 ? " (" + plain(availability.downtimeHours()) + " h down)" : "");
+        BigDecimal rate = equipment.getCapacityPerHour();
+        if (rate == null || rate.signum() <= 0) {
+            checks.add(new Check("equipment", availability.availableHours().signum() > 0 ? OK : WARN,
+                name + " has " + has + "; it has no capacity per hour, so the output is not checked."));
+        } else if (remaining == null || remaining.signum() <= 0) {
+            checks.add(new Check("equipment", availability.availableHours().signum() > 0 ? OK : WARN, name + " has " + has + "."));
+        } else {
+            BigDecimal needed = remaining.divide(rate, 2, RoundingMode.UP).add(changeoverHours);
+            String with = changeoverHours.signum() > 0 ? " (with " + plain(changeoverHours) + " h changeover)" : "";
+            checks.add(needed.compareTo(availability.availableHours()) > 0
+                ? new Check("equipment", WARN,
+                    name + " needs " + plain(needed) + " h" + with + " for " + plain(remaining) + " but has only " + has + ".")
+                : new Check("equipment", OK, name + " needs " + plain(needed) + " h" + with + " of the " + has + "."));
+        }
+        if (changeover != null) {
+            checks.add(new Check("changeover", OK, "Follows " + changeover.previous().getWorkOrderNumber() + " on " + name + ": "
+                + changeover.minutes() + " min changeover from " + itemCode(changeover.previous().getTargetItemId()) + " to "
+                + itemCode(order.getTargetItemId()) + "."));
+        }
+
+        List<String> clashes = sameEquipment.stream()
+            .filter(other -> WorkOrderServiceImpl.status(other).acceptsRuns())
+            .filter(other -> other.getPlannedStartAt() != null && other.getPlannedEndAt() != null
+                && other.getPlannedStartAt().isBefore(end) && other.getPlannedEndAt().isAfter(start))
+            .sorted(Comparator.comparing(WorkOrder::getPlannedStartAt))
+            .map(WorkOrder::getWorkOrderNumber)
+            .toList();
+        if (!clashes.isEmpty()) {
+            String listed = String.join(", ", clashes.subList(0, Math.min(3, clashes.size())))
+                + (clashes.size() > 3 ? " and " + (clashes.size() - 3) + " more" : "");
+            checks.add(new Check("schedule", WARN, name + " is also planned for " + listed + " in this window."));
+        }
+    }
+
+    /** The order planned just before this one on the equipment, and the changeover from what it makes. */
+    private record Changeover(WorkOrder previous, int minutes) {
+        BigDecimal hours() {
+            return BigDecimal.valueOf(minutes).divide(BigDecimal.valueOf(60), 2, RoundingMode.UP);
+        }
+    }
+
+    /**
+     * Only approved, running or completed orders count as the one before (docs/domain/equipment-changeover.md): the one
+     * on the same equipment that starts last before this order starts. Null without a target item on either, or when no
+     * rule applies.
+     */
+    private Changeover changeover(WorkOrder order, Equipment equipment, OffsetDateTime start, List<WorkOrder> sameEquipment) {
+        if (order.getTargetItemId() == null) {
+            return null;
+        }
+        WorkOrder previous = EquipmentSequence.previous(start, sameEquipment);
+        if (previous == null) {
+            return null;
+        }
+        return equipmentChangeoverService.changeover(equipment.getEquipmentId(), previous.getTargetItemId(), order.getTargetItemId())
+            .map(match -> new Changeover(previous, match.minutes()))
+            .orElse(null);
+    }
+
+    private String itemCode(String itemId) {
+        return itemRepository.findByItemIdAndDeletedYn(itemId, NOT_DELETED).map(Item::getItemCode).orElse(itemId);
     }
 
     private List<Material> materials(WorkOrder order, BomHeader bom, BigDecimal remaining, List<Check> checks) {
@@ -131,6 +251,10 @@ public class WorkOrderReadinessService {
         }
 
         List<Inventory> stock = inventoryRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(order.getProjectId(), NOT_DELETED);
+        // Stock allocated to this order is reserved for it, so it counts as available here (docs/domain/stock-allocation.md).
+        Map<String, BigDecimal> ownAllocated = new HashMap<>();
+        stockAllocationRepository.findAllByWorkOrderIdAndStatusOrderByCreatedAtAscAllocationIdAsc(order.getWorkOrderId(), "open")
+            .forEach(allocation -> ownAllocated.merge(allocation.getInventoryId(), allocation.remaining(), BigDecimal::add));
         Set<String> lotIds = new HashSet<>();
         stock.forEach(row -> {
             if (row.getLotId() != null) {
@@ -167,7 +291,8 @@ public class WorkOrderReadinessService {
                 if (row.getLotId() != null && ("closed".equals(lotStatus.get(row.getLotId())) || expiredLots.contains(row.getLotId()))) {
                     continue;
                 }
-                BigDecimal free = zeroIfNull(row.getQuantity()).subtract(zeroIfNull(row.getReservedQuantity()));
+                BigDecimal free = zeroIfNull(row.getQuantity()).subtract(zeroIfNull(row.getReservedQuantity()))
+                    .add(ownAllocated.getOrDefault(row.getInventoryId(), BigDecimal.ZERO));
                 if (free.signum() > 0) {
                     available = available.add(free);
                     if (row.getLotId() != null) {

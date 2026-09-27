@@ -155,7 +155,8 @@ draft ──submit──▶ pending_approval ──approve──▶ approved ─
 4. 자재 ≠ 대상 품목
 5. 자재 단위가 자재 품목의 기준 단위로 환산 가능(`UnitConverter`)
 6. **[구현 결정 — 승인 2026-09-24]** 같은 자재 품목 중복 금지. `substitute_group`, `optional_yn = Y`, `scrap_rate ≠ 0`은 1차에서 거절
-7. 다단계 금지: 어떤 자재도 현재 `approved` BOM의 대상 품목이면 안 됨
+7. ~~다단계 금지: 어떤 자재도 현재 `approved` BOM의 대상 품목이면 안 됨~~ → **2026-09-27 [다단계 BOM](multi-level-bom.md)으로 대체**: 자재가 자기 승인 BOM을 가져도 되지만, 승인 BOM을 따라 내려가 이 BOM의 대상 품목에 닿으면(순환) 거절, 10단계 초과 거절. 생산 실행은 여전히 바로 아래 자재만 투입
+8. **2026-09-27 [부산물·폐기물 줄](bom-by-products.md)**: 줄 종류 `material`·`by_product`·`waste`(V34 CHECK). 1–7의 검사는 모든 줄에, 순환·깊이 검사와 소요량·만들 수 있는 양은 자재 줄에만
 
 ### 소요량
 

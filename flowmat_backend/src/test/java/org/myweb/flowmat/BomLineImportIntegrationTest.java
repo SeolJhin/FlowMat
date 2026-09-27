@@ -35,10 +35,10 @@ class BomLineImportIntegrationTest extends IntegrationTestSupport {
         String flour = item("BLI-FLOUR-" + tag, "unit_kg");
         String salt = item("BLI-SALT-" + tag, "unit_kg");
         String dough = item("BLI-DOUGH-" + tag, "unit_kg");
-        // Dough has an approved BOM of its own, so it cannot be a material yet (single level only).
+        // Dough has an approved BOM made from bread, so dough in bread's BOM would contain itself (docs/domain/multi-level-bom.md).
         String doughBom = id(call(post("/boms"), json(Map.of("projectId", DEMO_PROJECT, "targetItemId", dough, "bomName", "Dough " + tag,
             "baseQuantity", 1, "baseUnit", "kg"))), "bomId");
-        call(post("/boms/" + doughBom + "/lines"), json(Map.of("childItemId", flour, "quantity", 1, "unit", "kg"))).andExpect(status().isOk());
+        call(post("/boms/" + doughBom + "/lines"), json(Map.of("childItemId", bread, "quantity", 1, "unit", "ea"))).andExpect(status().isOk());
         call(post("/boms/" + doughBom + "/submit")).andExpect(status().isOk());
         call(post("/boms/" + doughBom + "/approve")).andExpect(status().isOk());
 
@@ -59,7 +59,7 @@ class BomLineImportIntegrationTest extends IntegrationTestSupport {
             .andExpect(jsonPath("$.data.errors").value(5))
             .andExpect(jsonPath("$.data.rows[1].message").value(containsString("already a material")))
             .andExpect(jsonPath("$.data.rows[2].message").value(containsString("item this BOM produces")))
-            .andExpect(jsonPath("$.data.rows[3].message").value(containsString("its own approved BOM")))
+            .andExpect(jsonPath("$.data.rows[3].message").value(containsString("a BOM cannot contain itself")))
             .andExpect(jsonPath("$.data.rows[4].message").value(containsString("No item has code")))
             .andExpect(jsonPath("$.data.rows[5].message").value(containsString("greater than 0")))
             .andExpect(jsonPath("$.data.rows[5].message").value(containsString("Cannot record ea")));

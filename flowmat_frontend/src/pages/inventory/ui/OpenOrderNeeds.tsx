@@ -3,7 +3,7 @@ import { useMaterialRequirementsQuery } from '../../../entities/production/api/u
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import { isActiveItem } from '../model/itemStatusModel'
-import { needsCsv, packsFor } from '../model/stockAlertModel'
+import { needLabel, needsCsv, packsFor } from '../model/stockAlertModel'
 
 const cell = { padding: '4px 6px' } as const
 const num = { ...cell, textAlign: 'right', whiteSpace: 'nowrap' } as const
@@ -59,6 +59,7 @@ export function OpenOrderNeeds({ projectId }: { projectId: string }) {
               <th style={cell}>Material</th>
               <th style={num}>Needed</th>
               <th style={num}>Usable</th>
+              <th style={num}>Being made</th>
               <th style={num}>Short</th>
               <th style={cell}>For</th>
             </tr>
@@ -68,6 +69,10 @@ export function OpenOrderNeeds({ projectId }: { projectId: string }) {
               <tr key={line.itemId} style={{ borderBottom: '1px solid var(--border)' }}>
                 <td style={cell}>
                   {line.itemCode} · {line.itemName}
+                  {line.madeHere && (
+                    // A sub-assembly: what stock and open orders leave short is made from its own BOM (docs/domain/multi-level-bom.md).
+                    <span style={{ display: 'block', fontSize: 11, opacity: 0.7 }}>made here · own BOM</span>
+                  )}
                   {(() => {
                     // A shortage of an item that takes no new stock cannot be ordered away (docs/domain/item-status.md).
                     const item = itemById.get(line.itemId)
@@ -80,6 +85,7 @@ export function OpenOrderNeeds({ projectId }: { projectId: string }) {
                   {formatQty(line.required)} {line.unit ?? ''}
                 </td>
                 <td style={num}>{formatQty(line.usable)}</td>
+                <td style={num}>{line.plannedSupply ? formatQty(line.plannedSupply) : '-'}</td>
                 <td style={{ ...num, color: line.shortage ? '#b91c1c' : undefined, fontWeight: line.shortage ? 600 : 400 }}>
                   {line.shortage ? formatQty(line.shortage) : '-'}
                   {line.shortage > 0 && itemById.get(line.itemId)?.purchaseUnit && (
@@ -89,7 +95,7 @@ export function OpenOrderNeeds({ projectId }: { projectId: string }) {
                   )}
                 </td>
                 <td style={{ ...cell, opacity: 0.8 }}>
-                  {line.orders.map((order) => `${order.workOrderTitle} ${formatQty(order.required)}`).join(', ')}
+                  {line.orders.map((order) => needLabel(order, formatQty(order.required))).join(', ')}
                 </td>
               </tr>
             ))}

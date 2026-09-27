@@ -42,4 +42,7 @@ public class QualityInspection {
     private String note;
     private String inspectedBy;
     private OffsetDateTime inspectedAt;
+
+    /** The inspection standard followed, if any (docs/domain/inspection-standard.md); it set the check, limits and unit. */
+    private String standardId;
 }

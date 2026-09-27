@@ -1,0 +1,137 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { httpClient } from '../../../shared/api/httpClient'
+import { unwrapApiResponse, unwrapApiVoidResponse } from '../../../shared/api/unwrapApiResponse'
+import type { ApiEnvelope } from '../../../shared/types/api'
+
+export interface WorkInstructionStepDto {
+  stepId: string
+  stepNo: number
+  text: string
+  required: boolean
+  recordsValue: boolean
+  /** What the value is, such as "Oven °C". */
+  valueLabel: string | null
+}
+
+/** One revision of a product's work instruction (docs/domain/work-instruction.md). */
+export interface WorkInstructionDto {
+  instructionId: string
+  projectId: string
+  itemId: string
+  itemCode: string | null
+  itemName: string | null
+  revisionNo: number
+  status: 'draft' | 'released' | 'retired'
+  title: string
+  body: string | null
+  documentUrl: string | null
+  releasedBy: string | null
+  releasedAt: string | null
+  updatedAt: string | null
+  steps: WorkInstructionStepDto[]
+  /** A run cannot finish until the required steps are confirmed. */
+  blocksFinish: boolean
+}
+
+/** A run's checklist: the revision it works to and what is confirmed. */
+export interface RunInstructionDto {
+  productionRunId: string
+  /** The run can still be confirmed (pending or running). */
+  open: boolean
+  instruction: WorkInstructionDto | null
+  checks: { stepId: string; value: string | null; note: string | null; checkedBy: string; checkedAt: string }[]
+  requiredSteps: number
+  requiredDone: number
+  complete: boolean
+}
+
+export interface WorkInstructionTextInput {
+  title: string
+  body: string | null
+  documentUrl: string | null
+  blocksFinish: boolean
+}
+
+export interface WorkInstructionStepInput {
+  text: string
+  required: boolean
+  recordsValue: boolean
+  valueLabel: string | null
+}
+
+const listKey = (projectId: string) => ['work-instructions', projectId]
+const runKey = (runId: string) => ['run-instruction', runId]
+const base = (instructionId: string) => `/work-instructions/${encodeURIComponent(instructionId)}`
+
+/** Every revision of the project's instructions, per product with the newest revision first. */
+export function useWorkInstructionsQuery(projectId: string) {
+  return useQuery<WorkInstructionDto[]>({
+    queryKey: listKey(projectId),
+    queryFn: async () =>
+      unwrapApiResponse(await httpClient.get<ApiEnvelope<WorkInstructionDto[]>>(`/work-instructions?projectId=${encodeURIComponent(projectId)}`)),
+    enabled: Boolean(projectId),
+  })
+}
+
+export function useWorkInstructionMutations(projectId: string) {
+  const queryClient = useQueryClient()
+  const onSuccess = () => {
+    void queryClient.invalidateQueries({ queryKey: listKey(projectId) })
+    void queryClient.invalidateQueries({ queryKey: ['run-instruction'] })
+  }
+  const post = async (path: string, body: unknown = {}) => unwrapApiResponse(await httpClient.post<ApiEnvelope<WorkInstructionDto>>(path, body))
+  return {
+    create: useMutation({
+      mutationFn: ({ itemId, title }: { itemId: string; title: string }) =>
+        post('/work-instructions', { projectId, itemId, title, body: null, documentUrl: null }),
+      onSuccess,
+    }),
+    update: useMutation({
+      mutationFn: async ({ instructionId, ...text }: WorkInstructionTextInput & { instructionId: string }) =>
+        unwrapApiResponse(await httpClient.put<ApiEnvelope<WorkInstructionDto>>(base(instructionId), text)),
+      onSuccess,
+    }),
+    addStep: useMutation({
+      mutationFn: ({ instructionId, ...step }: WorkInstructionStepInput & { instructionId: string }) => post(`${base(instructionId)}/steps`, step),
+      onSuccess,
+    }),
+    removeStep: useMutation({
+      mutationFn: async ({ instructionId, stepId }: { instructionId: string; stepId: string }) =>
+        unwrapApiResponse(await httpClient.delete<ApiEnvelope<WorkInstructionDto>>(`${base(instructionId)}/steps/${encodeURIComponent(stepId)}`)),
+      onSuccess,
+    }),
+    release: useMutation({ mutationFn: (instructionId: string) => post(`${base(instructionId)}/release`), onSuccess }),
+    revise: useMutation({ mutationFn: (instructionId: string) => post(`${base(instructionId)}/revise`), onSuccess }),
+    remove: useMutation({
+      mutationFn: async (instructionId: string) => unwrapApiVoidResponse(await httpClient.delete<ApiEnvelope<null>>(base(instructionId))),
+      onSuccess,
+    }),
+  }
+}
+
+export function useRunInstructionQuery(runId: string) {
+  return useQuery<RunInstructionDto>({
+    queryKey: runKey(runId),
+    queryFn: async () =>
+      unwrapApiResponse(await httpClient.get<ApiEnvelope<RunInstructionDto>>(`/production-runs/${encodeURIComponent(runId)}/instruction`)),
+    enabled: Boolean(runId),
+  })
+}
+
+/** Confirming or undoing a step returns the whole checklist. */
+export function useRunInstructionMutations(runId: string) {
+  const queryClient = useQueryClient()
+  const onSuccess = (checklist: RunInstructionDto) => queryClient.setQueryData(runKey(runId), checklist)
+  const path = (stepId: string) => `/production-runs/${encodeURIComponent(runId)}/instruction/steps/${encodeURIComponent(stepId)}/check`
+  return {
+    check: useMutation({
+      mutationFn: async ({ stepId, value, note }: { stepId: string; value: string | null; note: string | null }) =>
+        unwrapApiResponse(await httpClient.post<ApiEnvelope<RunInstructionDto>>(path(stepId), { value, note })),
+      onSuccess,
+    }),
+    uncheck: useMutation({
+      mutationFn: async (stepId: string) => unwrapApiResponse(await httpClient.delete<ApiEnvelope<RunInstructionDto>>(path(stepId))),
+      onSuccess,
+    }),
+  }
+}

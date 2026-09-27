@@ -12,12 +12,14 @@ import { useInventoriesQuery } from '../../../entities/inventory/api/useInventor
 import { useLotsQuery } from '../../../entities/inventory/api/useLots'
 import { useUnitsQuery } from '../../../entities/catalog/api/useUnitsQuery'
 import { errorMessage } from '../../../shared/lib/errorMessage'
-import type { ProductionRunItemDto } from '../../../shared/types/api'
+import type { BomOutputDto, ProductionRunItemDto } from '../../../shared/types/api'
 import { cancelSummary, recordedAgainstPlan, remainingOfPlan } from '../model/runPlan'
 import { inputLotOptions } from '../model/correctionModel'
 import { RunCorrectionsPanel } from './RunCorrectionsPanel'
 import { RunQualityPanel } from './RunQualityPanel'
 import { RunCostPanel } from './RunCostPanel'
+import { RunExpectedOutputs } from './RunExpectedOutputs'
+import { ChecklistFinishNote, RunInstructionChecklist } from './RunInstructionChecklist'
 import { RunStatusBadge, formatQty, isRunOpen } from './runDisplay'
 import { ItemScanInput } from '../../inventory/ui/ItemScanInput'
 
@@ -59,6 +61,19 @@ export function RunDetailRoute() {
       plannedQty: String(planned.plannedQty),
       actualQty: String(remaining > 0 ? remaining : planned.plannedQty),
       unit: planned.unit,
+      inventoryId: '',
+    })
+    document.getElementById('record-run-item')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  /** Copies an expected by-product or waste into the record form as an output (docs/domain/bom-by-products.md). */
+  function fillFromOutput(output: BomOutputDto, remaining: number) {
+    setItemForm({
+      itemId: output.itemId,
+      direction: 'output',
+      plannedQty: String(output.itemQuantity),
+      actualQty: String(remaining > 0 ? remaining : output.itemQuantity),
+      unit: output.itemUnit,
       inventoryId: '',
     })
     document.getElementById('record-run-item')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -284,6 +299,15 @@ export function RunDetailRoute() {
                   </tbody>
                 </table>
               )}
+              <RunExpectedOutputs
+                bomId={run.bomId}
+                plannedOutputQty={Number(run.plannedOutputQty)}
+                runItems={runItems}
+                items={itemsQuery.data ?? []}
+                open={isRunOpen(run.runStatus)}
+                onRecord={fillFromOutput}
+              />
+              <RunInstructionChecklist runId={runId} />
             </section>
 
             <div style={{ display: 'grid', gap: 16 }}>
@@ -459,6 +483,7 @@ export function RunDetailRoute() {
                           onChange={(e) => setActualOutputQty(e.target.value)}
                         />
                       </label>
+                      <ChecklistFinishNote runId={runId} />
                       <button type="submit" disabled={finishMutation.isPending}>
                         {finishMutation.isPending ? 'Finishing...' : 'Finish'}
                       </button>

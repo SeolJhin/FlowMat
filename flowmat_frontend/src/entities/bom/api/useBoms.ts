@@ -6,6 +6,7 @@ import type {
   BomDto,
   BomLineImportResultDto,
   BomLineImportRowDto,
+  BomLineType,
   BomRequirementDto,
   BomWhereUsedDto,
   BuildableQuantityDto,
@@ -25,6 +26,8 @@ export interface BomLineInput {
   childItemId: string
   quantity: number
   unit: string
+  /** Blank is a material (docs/domain/bom-by-products.md). */
+  lineType?: BomLineType
 }
 
 /** submit needs write access; approve / reject / retire need project owner access. */

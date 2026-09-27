@@ -54,6 +54,13 @@ public class WorkflowValidationService {
         List<ProcessConnection> usableConnections = new ArrayList<>();
 
         for (ProcessIo port : activePorts) {
+            try {
+                ProcessIoServiceImpl.validatePortValues(port);
+            } catch (BusinessException exception) {
+                issues.add(issue("error", "PORT_INVALID", port.getProcessId(), port.getProcessIoId(), null,
+                    exception.getMessage()));
+                continue;
+            }
             PortSchema schema;
             try {
                 schema = PortSchema.parseStored(port.getSchemaJson());

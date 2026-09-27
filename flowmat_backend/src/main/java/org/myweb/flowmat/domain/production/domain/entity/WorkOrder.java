@@ -45,6 +45,8 @@ public class WorkOrder extends CreatedUpdatedAuditEntity {
     private String instructionUrl;
 
     private String assignedTo;
+    /** The equipment the order runs on (V32); readiness checks its time in the planned window. */
+    private String equipmentId;
     private String issuedBy;
     private OffsetDateTime issuedAt;
     private String approvedBy;

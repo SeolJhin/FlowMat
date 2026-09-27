@@ -12,4 +12,6 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, String> {
     Optional<WorkOrder> findByWorkOrderIdAndDeletedYn(String workOrderId, String deletedYn);
 
     boolean existsByWorkOrderNumber(String workOrderNumber);
+
+    List<WorkOrder> findAllByEquipmentIdAndDeletedYn(String equipmentId, String deletedYn);
 }

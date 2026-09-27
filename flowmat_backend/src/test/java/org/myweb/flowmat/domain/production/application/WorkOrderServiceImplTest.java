@@ -45,6 +45,7 @@ class WorkOrderServiceImplTest {
     @Mock private ProjectAccessService projectAccessService;
     @Mock private IdGenerator idGenerator;
     @Mock private org.myweb.flowmat.domain.bom.repository.BomHeaderRepository bomHeaderRepository;
+    @Mock private StockAllocationService stockAllocationService;
 
     @InjectMocks
     private WorkOrderServiceImpl workOrderService;

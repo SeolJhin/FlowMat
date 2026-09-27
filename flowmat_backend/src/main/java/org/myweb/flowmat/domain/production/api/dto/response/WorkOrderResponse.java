@@ -25,6 +25,7 @@ public record WorkOrderResponse(
     BigDecimal producedQuantity,
     int runCount,
     String bomId,
-    String instructionUrl
+    String instructionUrl,
+    String equipmentId
 ) {
 }

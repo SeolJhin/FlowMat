@@ -44,6 +44,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final IdGenerator idGenerator;
     private final LotService lotService;
     private final LotMasterRepository lotMasterRepository;
+    private final StorageLocationService storageLocationService;
 
     @Override
     public List<InventoryResponse> listInventories(String projectId) {
@@ -75,6 +76,12 @@ public class InventoryServiceImpl implements InventoryService {
             )
         );
 
+        // A project with a location list takes new stock only at an active listed place (docs/domain/storage-location.md).
+        String location = trimToNull(request.location());
+        if (location != null) {
+            location = storageLocationService.resolveForStock(item.getProjectId(), location);
+        }
+
         // LOT-tracked items hold stock per LOT; everything else never names one.
         String lotId = trimToNull(request.lotId());
         if ("Y".equals(item.getLotManageYn())) {
@@ -85,11 +92,11 @@ public class InventoryServiceImpl implements InventoryService {
             LotMaster lot = lotService.requireLotForStock(lotId, item.getProjectId(), item.getItemId());
             // One stock record per item + location + LOT (V17 unique index); say so instead of a bare conflict. Taking turns
             // with anything else creating that record (another Add Stock, a transfer) makes the check hold until commit.
-            inventoryRepository.lockStockPlace(item.getProjectId(), item.getItemId(), lotId, trimToNull(request.location()));
-            if (inventoryRepository.existsLotStockAt(item.getProjectId(), item.getItemId(), lotId, trimToNull(request.location()))) {
+            inventoryRepository.lockStockPlace(item.getProjectId(), item.getItemId(), lotId, location);
+            if (inventoryRepository.existsLotStockAt(item.getProjectId(), item.getItemId(), lotId, location)) {
                 throw new BusinessException(ErrorCode.CONFLICT,
                     "LOT " + lot.getLotNo() + " already has a stock record"
-                        + (trimToNull(request.location()) != null ? " at " + request.location().trim() : " without a location")
+                        + (location != null ? " at " + location : " without a location")
                         + ". Receive into that record instead.");
             }
         } else if (lotId != null) {
@@ -103,7 +110,7 @@ public class InventoryServiceImpl implements InventoryService {
         inventory.setItemId(item.getItemId());
         inventory.setLotId(lotId);
         applyQuantities(inventory, request);
-        inventory.setLocation(trimToNull(request.location()));
+        inventory.setLocation(location);
         inventory.setInventoryStatus(defaultIfBlank(request.inventoryStatus(), "available"));
         applyThresholds(inventory, request);
         inventory.setDeletedYn(NOT_DELETED);
@@ -180,7 +187,14 @@ public class InventoryServiceImpl implements InventoryService {
                 });
         }
         applyQuantities(inventory, request);
-        inventory.setLocation(trimToNull(request.location()));
+        // Keeping the place as it is stays allowed even if it is not listed; moving the record goes through the list.
+        String location = trimToNull(request.location());
+        if (location != null && !location.equalsIgnoreCase(Objects.toString(trimToNull(inventory.getLocation()), ""))) {
+            location = storageLocationService.resolveForStock(inventory.getProjectId(), location);
+        } else if (location != null) {
+            location = inventory.getLocation();
+        }
+        inventory.setLocation(location);
         String status = defaultIfBlank(request.inventoryStatus(), inventory.getInventoryStatus());
         if (!Objects.equals(status, inventory.getInventoryStatus())
             && (InventoryCommandService.QUARANTINED.equals(status)

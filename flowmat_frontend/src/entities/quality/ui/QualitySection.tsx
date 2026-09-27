@@ -9,6 +9,7 @@ import {
   useResolveDefectMutation,
   type QualityFilter,
 } from '../api/useQuality'
+import { useInspectionStandardsQuery } from '../api/useInspectionStandards'
 import type { InspectionTarget } from '../model/qualityModel'
 import { DefectForm, DefectList, InspectionForm, InspectionList } from './QualityRecords'
 
@@ -49,6 +50,7 @@ export function QualitySection({
   const recordMutation = useRecordInspectionMutation(projectId)
   const logMutation = useLogDefectMutation(projectId)
   const resolveMutation = useResolveDefectMutation(projectId)
+  const standardsQuery = useInspectionStandardsQuery(projectId)
   const [open, setOpen] = useState<null | 'inspection' | { defectFrom: QualityInspectionDto | null }>(null)
 
   const inspections = inspectionsQuery.data ?? []
@@ -113,6 +115,7 @@ export function QualitySection({
           targets={targets}
           targetLabel={targetLabel}
           productionRunId={productionRunId}
+          standards={standardsQuery.data ?? []}
           pending={recordMutation.isPending}
           onSubmit={async (body) => {
             await recordMutation.mutateAsync(body)

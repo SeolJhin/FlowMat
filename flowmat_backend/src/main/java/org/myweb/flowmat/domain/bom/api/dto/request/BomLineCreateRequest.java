@@ -16,6 +16,8 @@ public record BomLineCreateRequest(
     String optionalYn,
     String substituteGroup,
     Integer sortOrder,
-    String note
+    String note,
+    /** material (default), by_product or waste (docs/domain/bom-by-products.md). */
+    String lineType
 ) {
 }

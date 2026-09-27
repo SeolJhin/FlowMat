@@ -55,6 +55,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
     private final BomHeaderRepository bomHeaderRepository;
+    private final StockAllocationService stockAllocationService;
 
     @Override
     public List<WorkOrderResponse> listWorkOrders(String projectId) {
@@ -143,6 +144,8 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         WorkOrder order = findActiveOrder(workOrderId);
         projectAccessService.requireProjectOwnerAccess(order.getProjectId());
         transition(order, WorkOrderStatus.CANCELLED);
+        // Stock allocated to the order goes back (docs/domain/stock-allocation.md).
+        stockAllocationService.releaseOpenOf(order);
         order.setUpdatedBy(projectAccessService.requireCurrentUserId());
         return toResponse(workOrderRepository.save(order));
     }
@@ -157,6 +160,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Finish every production run of this work order first.");
         }
         transition(order, WorkOrderStatus.COMPLETED);
+        stockAllocationService.releaseOpenOf(order);
         order.setActualEndAt(OffsetDateTime.now());
         order.setUpdatedBy(projectAccessService.requireCurrentUserId());
         return toResponse(workOrderRepository.save(order), runs);
@@ -317,7 +321,8 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             produced,
             runs.size(),
             order.getBomId(),
-            order.getInstructionUrl()
+            order.getInstructionUrl(),
+            order.getEquipmentId()
         );
     }
 

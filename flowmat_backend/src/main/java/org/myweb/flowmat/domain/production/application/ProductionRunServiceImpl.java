@@ -3,6 +3,7 @@ package org.myweb.flowmat.domain.production.application;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import java.math.BigDecimal;
@@ -85,6 +86,8 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     private final BomService bomService;
     private final LotService lotService;
     private final ProductionFlowRunAdapter productionFlowRunAdapter;
+    private final StockAllocationService stockAllocationService;
+    private final RunInstructionService runInstructionService;
 
     @Override
     public List<ProductionRunResponse> listRuns(String workflowId) {
@@ -240,6 +243,11 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         ProductionRunItem savedRunItem = productionRunItemRepository.save(runItem);
 
         if (inventory != null) {
+            if ("input".equals(savedRunItem.getDirection()) && run.getWorkOrderId() != null && conversion.quantity() != null) {
+                // Stock allocated to the run's work order is released into use first (docs/domain/stock-allocation.md).
+                stockAllocationService.consume(run.getWorkOrderId(), inventory.getInventoryId(),
+                    conversion.quantity().setScale(4, RoundingMode.HALF_UP), savedRunItem.getProductionRunItemId());
+            }
             applyInventoryEffect(run, savedRunItem, inventory, conversion);
         }
         if (savedRunItem.getLotId() != null) {
@@ -443,6 +451,8 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         ProductionRun run = findActiveRun(productionRunId);
         projectAccessService.requireProjectWriteAccess(run.getProjectId());
         requireOpenRun(run);
+        // A work instruction can require its steps to be confirmed first (docs/domain/work-instruction.md).
+        runInstructionService.requireCompleteToFinish(run);
         evaluateRunFinishRules(run, request);
         run.setRunStatus("finished");
         if (request != null && request.actualOutputQty() != null) {
@@ -515,10 +525,21 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         }
         try {
             return new RunProcessSelection(objectMapper.treeToValue(processNode, Process.class),
-                ioNode != null ? objectMapper.treeToValue(ioNode, ProcessIo.class) : null);
+                ioNode != null ? toSnapshotProcessIo(ioNode) : null);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Stored workflow revision process is invalid.", exception);
         }
+    }
+
+    /** Snapshots carry schemaJson as a JSON object, while the entity keeps it as JSON text. */
+    private ProcessIo toSnapshotProcessIo(JsonNode ioNode) throws JsonProcessingException {
+        JsonNode schema = ioNode.get("schemaJson");
+        if (ioNode instanceof ObjectNode source && schema != null && !schema.isNull() && !schema.isTextual()) {
+            ObjectNode copy = source.deepCopy();
+            copy.put("schemaJson", schema.toString());
+            return objectMapper.treeToValue(copy, ProcessIo.class);
+        }
+        return objectMapper.treeToValue(ioNode, ProcessIo.class);
     }
 
     private static JsonNode findSnapshotEntry(JsonNode entries, String idField, String id) {

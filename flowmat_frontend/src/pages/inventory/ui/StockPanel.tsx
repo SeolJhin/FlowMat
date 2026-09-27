@@ -8,6 +8,7 @@ import { useLotsQuery, useQuarantineMutation } from '../../../entities/inventory
 import { useReverseTransactionMutation } from '../../../entities/inventory/api/useStockMovements'
 import { canReverse, reversedIds, stockValue } from '../model/stockModel'
 import { StockMovementForm } from './StockMovementForm'
+import { LOCATION_OPTIONS_ID, LocationOptions } from './LocationOptions'
 import { StockAlerts } from './StockAlerts'
 import { ReorderList } from './ReorderList'
 import { StockImportPanel } from './StockImportPanel'
@@ -158,6 +159,7 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>
       <section>
+        <LocationOptions projectId={projectId} />
         <ReorderList projectId={projectId} />
         <OpenOrderNeeds projectId={projectId} />
         <StockAlerts
@@ -474,6 +476,7 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
             <span>Location</span>
             <input
               value={form.location}
+              list={LOCATION_OPTIONS_ID}
               onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
               placeholder="e.g. WH-A / Rack 3"
             />

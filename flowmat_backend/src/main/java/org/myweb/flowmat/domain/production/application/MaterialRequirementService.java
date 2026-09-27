@@ -5,15 +5,21 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
 import org.myweb.flowmat.domain.bom.application.BomService;
+import org.myweb.flowmat.domain.bom.application.BomTree;
+import org.myweb.flowmat.domain.bom.domain.entity.BomHeader;
+import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
+import org.myweb.flowmat.domain.bom.repository.BomLineRepository;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.production.api.dto.response.MaterialRequirementResponse;
@@ -29,8 +35,10 @@ import org.springframework.stereotype.Service;
  * Material needs of all open work orders (docs/domain/material-requirements.md): for each approved or in-progress
  * order with a BOM, what is still to make (target − finished runs' output, as readiness counts it) turned into
  * materials by the BOM, less what the order's unfinished runs already recorded as input, added up per material and set
- * against the usable stock (the reorder list's rule). Like
- * readiness it has no surrounding transaction, so an order whose BOM cannot be worked out is reported, not rolled back.
+ * against the usable stock (the reorder list's rule). A material with its own approved BOM is a sub-assembly
+ * (docs/domain/multi-level-bom.md): what usable stock and the open orders making it do not cover is exploded into its own
+ * materials, level by level. Like readiness it has no surrounding transaction, so an order whose BOM cannot be worked
+ * out is reported, not rolled back.
  */
 @Service
 @RequiredArgsConstructor
@@ -46,20 +54,25 @@ public class MaterialRequirementService {
     private final UsableStock usableStock;
     private final ProjectAccessService projectAccessService;
     private final OpenRunInputs openRunInputs;
+    private final BomHeaderRepository bomHeaderRepository;
+    private final BomLineRepository bomLineRepository;
+    private final StockAllocationService stockAllocationService;
 
     public MaterialRequirementResponse summary(String projectId) {
         projectAccessService.requireProjectReadAccess(projectId);
-        List<WorkOrder> open = workOrderRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtDesc(projectId, NOT_DELETED).stream()
+        List<WorkOrder> active = workOrderRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtDesc(projectId, NOT_DELETED).stream()
             .filter(order -> WorkOrderServiceImpl.status(order).acceptsRuns())
+            .toList();
+        List<WorkOrder> open = active.stream()
             .filter(order -> order.getBomId() != null && order.getTargetQuantity() != null)
             .toList();
         Map<String, BigDecimal> produced = new HashMap<>();
         // Per order and material: what its unfinished runs already recorded as input. That stock is already gone, while
         // the order's remaining quantity still counts it, so it comes off the order's need.
         Map<String, Map<String, BigDecimal>> alreadyUsed = new HashMap<>();
-        if (!open.isEmpty()) {
+        if (!active.isEmpty()) {
             List<ProductionRun> runs = productionRunRepository.findAllByWorkOrderIdInAndDeletedYn(
-                open.stream().map(WorkOrder::getWorkOrderId).toList(), NOT_DELETED);
+                active.stream().map(WorkOrder::getWorkOrderId).toList(), NOT_DELETED);
             for (ProductionRun run : runs) {
                 if ("finished".equalsIgnoreCase(run.getRunStatus()) && run.getActualOutputQty() != null) {
                     produced.merge(run.getWorkOrderId(), run.getActualOutputQty(), BigDecimal::add);
@@ -92,17 +105,35 @@ public class MaterialRequirementService {
                 required.merge(line.childItemId(), need, BigDecimal::add);
                 units.putIfAbsent(line.childItemId(), line.itemUnit());
                 needs.computeIfAbsent(line.childItemId(), id -> new ArrayList<>())
-                    .add(new MaterialRequirementResponse.Need(order.getWorkOrderId(), order.getWorkOrderTitle(), scale(need)));
+                    .add(new MaterialRequirementResponse.Need(order.getWorkOrderId(), order.getWorkOrderTitle(), scale(need), null, null));
             }
         }
 
-        Map<String, BigDecimal> usable = usableStock.byItem(projectId, required.keySet());
+        // What open orders will still make of each item: that supply covers a sub-assembly before its BOM is exploded.
+        Map<String, BigDecimal> supply = new HashMap<>();
+        for (WorkOrder order : active) {
+            if (order.getTargetItemId() != null && order.getTargetQuantity() != null) {
+                BigDecimal remaining = order.getTargetQuantity().subtract(produced.getOrDefault(order.getWorkOrderId(), BigDecimal.ZERO));
+                if (remaining.signum() > 0) {
+                    supply.merge(order.getTargetItemId(), remaining, BigDecimal::add);
+                }
+            }
+        }
+        // Stock allocated to open orders is reserved for the needs counted here, so it counts as usable for them
+        // (docs/domain/stock-allocation.md).
+        Map<String, BigDecimal> allocated = stockAllocationService.openByItem(active.stream().map(WorkOrder::getWorkOrderId).toList());
+        Map<String, BomHeader> approved = BomTree.approvedByItem(bomHeaderRepository, projectId);
+        explodeSubAssemblies(projectId, approved, supply, allocated, required, units, needs, problems);
+
+        Map<String, BigDecimal> usable = new HashMap<>(usableStock.byItem(projectId, required.keySet()));
+        allocated.forEach((itemId, quantity) -> usable.merge(itemId, quantity, BigDecimal::add));
         Map<String, Item> items = StreamSupport.stream(itemRepository.findAllById(required.keySet()).spliterator(), false)
             .collect(Collectors.toMap(Item::getItemId, Function.identity()));
         List<MaterialRequirementResponse.Line> lines = required.entrySet().stream()
             .map(entry -> {
                 Item item = items.get(entry.getKey());
                 BigDecimal free = usable.getOrDefault(entry.getKey(), BigDecimal.ZERO);
+                BigDecimal planned = supply.getOrDefault(entry.getKey(), BigDecimal.ZERO);
                 return new MaterialRequirementResponse.Line(
                     entry.getKey(),
                     item == null ? null : item.getItemCode(),
@@ -110,14 +141,69 @@ public class MaterialRequirementService {
                     units.get(entry.getKey()),
                     scale(entry.getValue()),
                     scale(free),
-                    scale(entry.getValue().subtract(free).max(BigDecimal.ZERO)),
-                    needs.getOrDefault(entry.getKey(), List.of())
+                    scale(entry.getValue().subtract(free).subtract(planned).max(BigDecimal.ZERO)),
+                    needs.getOrDefault(entry.getKey(), List.of()),
+                    scale(planned),
+                    approved.containsKey(entry.getKey())
                 );
             })
             .sorted(Comparator.comparing(MaterialRequirementResponse.Line::shortage).reversed()
                 .thenComparing(MaterialRequirementResponse.Line::itemCode, Comparator.nullsLast(Comparator.naturalOrder())))
             .toList();
         return new MaterialRequirementResponse(counted, lines, problems);
+    }
+
+    /**
+     * Sub-assemblies in low-level-code order, so each one's demand from every item above it is in before its BOM is
+     * exploded: what usable stock and planned supply leave short is made, and its BOM's materials are added as needs
+     * "via" the sub-assembly.
+     */
+    private void explodeSubAssemblies(
+        String projectId,
+        Map<String, BomHeader> approved,
+        Map<String, BigDecimal> supply,
+        Map<String, BigDecimal> allocated,
+        Map<String, BigDecimal> required,
+        Map<String, String> units,
+        Map<String, List<MaterialRequirementResponse.Need>> needs,
+        List<String> problems
+    ) {
+        if (approved.isEmpty()) {
+            return;
+        }
+        Map<String, Integer> levels = BomTree.lowLevelCodes(BomTree.approvedChildren(bomHeaderRepository, bomLineRepository, projectId, null));
+        Set<String> done = new HashSet<>();
+        while (true) {
+            String next = required.keySet().stream()
+                .filter(approved::containsKey)
+                .filter(itemId -> !done.contains(itemId))
+                .min(Comparator.comparingInt(itemId -> levels.getOrDefault(itemId, 0)))
+                .orElse(null);
+            if (next == null) {
+                return;
+            }
+            done.add(next);
+            BigDecimal free = usableStock.byItem(projectId, Set.of(next)).getOrDefault(next, BigDecimal.ZERO)
+                .add(allocated.getOrDefault(next, BigDecimal.ZERO));
+            BigDecimal toMake = required.get(next).subtract(free).subtract(supply.getOrDefault(next, BigDecimal.ZERO));
+            if (toMake.signum() <= 0) {
+                continue;
+            }
+            String code = itemRepository.findByItemIdAndDeletedYn(next, NOT_DELETED).map(Item::getItemCode).orElse(next);
+            BomRequirementResponse below;
+            try {
+                below = bomService.requirementsForRun(approved.get(next).getBomId(), projectId, next, toMake);
+            } catch (BusinessException exception) {
+                problems.add(code + ": " + exception.getMessage());
+                continue;
+            }
+            for (BomRequirementResponse.Line line : below.lines()) {
+                required.merge(line.childItemId(), line.requiredItemQuantity(), BigDecimal::add);
+                units.putIfAbsent(line.childItemId(), line.itemUnit());
+                needs.computeIfAbsent(line.childItemId(), id -> new ArrayList<>())
+                    .add(new MaterialRequirementResponse.Need(null, null, scale(line.requiredItemQuantity()), next, code));
+            }
+        }
     }
 
     private static BigDecimal scale(BigDecimal value) {

@@ -57,6 +57,7 @@ public class StockImportService {
     private final InventoryService inventoryService;
     private final InventoryCommandService inventoryCommandService;
     private final ProjectAccessService projectAccessService;
+    private final StorageLocationService storageLocationService;
 
     /** A checked row. {@code lotNo} with a null {@code lotId} is a LOT the import registers. */
     private record Plan(Item item, String location, String lotNo, String lotId, LocalDate expiry, BigDecimal quantity, String inventoryId) {
@@ -82,6 +83,7 @@ public class StockImportService {
         // LOT numbers the file registers, with the plan of the first row that names each.
         Map<String, Plan> newLots = new HashMap<>();
         Set<String> places = new HashSet<>();
+        StorageLocationService.LocationCheck locations = storageLocationService.locationCheck(projectId);
 
         List<StockImportResponse.RowResult> results = new ArrayList<>();
         List<Plan> plans = new ArrayList<>();
@@ -92,7 +94,7 @@ public class StockImportService {
             StockImportRequest.Row row = rows.get(index);
             String code = trimToNull(row.itemCode());
             List<String> problems = new ArrayList<>();
-            Plan plan = check(projectId, row, code, items, lots, newLots, places, problems);
+            Plan plan = check(projectId, row, code, items, lots, newLots, places, locations, problems);
             if (!problems.isEmpty()) {
                 errors++;
                 results.add(new StockImportResponse.RowResult(index + 1, code, "error", String.join("; ", problems)));
@@ -144,6 +146,7 @@ public class StockImportService {
         Map<String, LotMaster> lots,
         Map<String, Plan> newLots,
         Set<String> places,
+        StorageLocationService.LocationCheck locations,
         List<String> problems
     ) {
         if (code == null) {
@@ -169,6 +172,13 @@ public class StockImportService {
         String location = trimToNull(row.location());
         if (location != null && location.length() > 100) {
             problems.add("Location is longer than 100 characters");
+        } else if (location != null) {
+            // With a location list, the row's place must be listed and active; it is saved as spelled in the list.
+            try {
+                location = locations.resolve(location);
+            } catch (BusinessException exception) {
+                problems.add(exception.getMessage());
+            }
         }
         String lotNo = trimToNull(row.lotNo());
         if (lotNo != null && lotNo.length() > 100) {
