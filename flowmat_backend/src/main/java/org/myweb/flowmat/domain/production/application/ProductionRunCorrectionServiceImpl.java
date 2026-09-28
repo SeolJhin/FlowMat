@@ -212,7 +212,7 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
                     line.setItemId(request.itemId().trim());
                     line.setInventoryId(request.inventoryId() == null || request.inventoryId().isBlank()
                         ? null : request.inventoryId().trim());
-                    line.setQty(request.qty());
+                    line.setQty(ProductionRunServiceImpl.storedQuantity(request.qty(), "qty"));
                     line.setUnit(request.unit().trim());
                 }
                 case ProductionRunCorrectionLine.SET_OUTPUT_QTY -> {
@@ -223,12 +223,13 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
                     if (request.afterQty() == null || request.afterQty().signum() < 0) {
                         throw new BusinessException(ErrorCode.BAD_REQUEST, "The corrected output quantity must be 0 or more.");
                     }
-                    if (sameQuantity(run.getActualOutputQty(), request.afterQty())) {
+                    BigDecimal afterQty = ProductionRunServiceImpl.storedQuantity(request.afterQty(), "afterQty");
+                    if (sameQuantity(run.getActualOutputQty(), afterQty)) {
                         throw new BusinessException(ErrorCode.BAD_REQUEST,
-                            "The run's output is already " + plain(request.afterQty()) + ".");
+                            "The run's output is already " + plain(afterQty) + ".");
                     }
                     line.setBeforeQty(run.getActualOutputQty());
-                    line.setAfterQty(request.afterQty());
+                    line.setAfterQty(afterQty);
                 }
                 default -> throw new BusinessException(ErrorCode.BAD_REQUEST,
                     "Unknown correction kind '" + request.kind() + "'. Use void_item, add_item or set_output_qty.");
@@ -288,12 +289,10 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
                 : " by run " + String.join(", ", laterRuns) + "; correct that run first."));
     }
 
-    /** Other runs with a standing input recording of this LOT (genealogy edges need an output too, so they can miss some). */
+    /** Runs with an unreversed stock consumption of this LOT (genealogy edges also need an output). */
     private List<String> consumingRunNumbers(ProductionRun run, String lotId) {
-        List<String> runIds = productionRunItemRepository.findAllByLotIdAndDirection(lotId, "input").stream()
-            .filter(item -> !item.isCancelled() && !item.getProductionRunId().equals(run.getProductionRunId()))
-            .map(ProductionRunItem::getProductionRunId)
-            .distinct()
+        List<String> runIds = productionRunItemRepository.findConsumingRunIdsByLotId(lotId).stream()
+            .filter(id -> !id.equals(run.getProductionRunId()))
             .toList();
         return productionRunRepository.findAllById(runIds).stream()
             .map(ProductionRun::getRunNumber)

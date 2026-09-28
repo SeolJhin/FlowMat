@@ -21,7 +21,7 @@ public record WorkOrderResponse(
     String assignedTo,
     String approvedBy,
     OffsetDateTime approvedAt,
-    /** Sum of actual output from finished production runs started against this order. */
+    /** Sum of actual output from finished physical production runs started against this order. */
     BigDecimal producedQuantity,
     int runCount,
     String bomId,

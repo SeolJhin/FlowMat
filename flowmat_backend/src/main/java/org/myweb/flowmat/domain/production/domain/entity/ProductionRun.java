@@ -30,8 +30,17 @@ public class ProductionRun extends CreatedUpdatedAuditEntity {
     private String runType;
     private String runStatus;
     private String targetItemId;
+    /** The first successfully confirmed instruction revision, retained even after all checks are undone. */
+    private String workInstructionId;
     private BigDecimal plannedOutputQty;
     private BigDecimal actualOutputQty;
     private String startedBy;
     private String finishedBy;
+
+    /** Legacy run types were physical; only the explicitly non-physical types are isolated. */
+    public boolean affectsPhysicalState() {
+        return !"simulation".equalsIgnoreCase(runType)
+            && !"test".equalsIgnoreCase(runType)
+            && !"dry_run".equalsIgnoreCase(runType);
+    }
 }

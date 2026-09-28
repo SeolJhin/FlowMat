@@ -40,6 +40,7 @@ import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -78,14 +79,14 @@ public class StockAllocationService {
 
     @Transactional
     public StockAllocationResponse allocate(String workOrderId, StockAllocationRequest request) {
-        WorkOrder order = findOrder(workOrderId);
+        WorkOrder order = lockOrder(workOrderId);
         String projectId = order.getProjectId();
         projectAccessService.requireProjectWriteAccess(projectId);
         if (!WorkOrderServiceImpl.status(order).acceptsRuns()) {
             throw new BusinessException(ErrorCode.CONFLICT, "Work order " + order.getWorkOrderNumber() + " is "
                 + order.getWorkOrderStatus() + "; allocate for an approved or started order.");
         }
-        allocationRepository.lockKey("stock-allocation|" + projectId);
+        lockAllocations(order);
         Map<String, BigDecimal> needs = needs(order, request);
         String actor = projectAccessService.requireCurrentUserId();
         Map<String, BigDecimal> before = new HashMap<>();
@@ -137,8 +138,9 @@ public class StockAllocationService {
 
     @Transactional
     public StockAllocationResponse release(String workOrderId, String allocationId) {
-        WorkOrder order = findOrder(workOrderId);
+        WorkOrder order = lockOrder(workOrderId);
         projectAccessService.requireProjectWriteAccess(order.getProjectId());
+        lockAllocations(order);
         StockAllocation allocation = allocationRepository.findById(allocationId)
             .filter(found -> found.getWorkOrderId().equals(order.getWorkOrderId()))
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
@@ -152,8 +154,9 @@ public class StockAllocationService {
     /** Gives back everything still allocated to the order; also for completed or cancelled orders. */
     @Transactional
     public StockAllocationResponse releaseAll(String workOrderId) {
-        WorkOrder order = findOrder(workOrderId);
+        WorkOrder order = lockOrder(workOrderId);
         projectAccessService.requireProjectWriteAccess(order.getProjectId());
+        lockAllocations(order);
         String actor = projectAccessService.requireCurrentUserId();
         for (StockAllocation allocation : allocationRepository.findAllByWorkOrderIdAndStatusOrderByCreatedAtAscAllocationIdAsc(
             order.getWorkOrderId(), OPEN)) {
@@ -169,6 +172,7 @@ public class StockAllocationService {
      */
     @Transactional
     public BigDecimal consume(String workOrderId, String inventoryId, BigDecimal quantity, String runItemId) {
+        lockForConsumption(workOrderId);
         BigDecimal left = quantity;
         BigDecimal released = BigDecimal.ZERO;
         String actor = projectAccessService.requireCurrentUserId();
@@ -198,6 +202,7 @@ public class StockAllocationService {
      */
     @Transactional
     public int releaseOpenOf(WorkOrder order) {
+        lockForConsumption(order.getWorkOrderId());
         List<StockAllocation> open = allocationRepository.findAllByWorkOrderIdAndStatusOrderByCreatedAtAscAllocationIdAsc(
             order.getWorkOrderId(), OPEN);
         if (open.isEmpty()) {
@@ -206,6 +211,15 @@ public class StockAllocationService {
         String actor = projectAccessService.requireCurrentUserId();
         open.forEach(allocation -> releaseRest(order, allocation, actor));
         return open.size();
+    }
+
+    /**
+     * Called after locking a run and checking access, before reading its reservations or locking any stock.
+     * Holds the order and project allocation locks in the caller's transaction, including all LOT split recordings.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void lockForConsumption(String workOrderId) {
+        lockAllocations(lockOrder(workOrderId));
     }
 
     /** Still allocated, per item, to the given work orders. For material needs. */
@@ -249,6 +263,16 @@ public class StockAllocationService {
                 }
                 needs.merge(line.itemId().trim(), line.quantity(), BigDecimal::add);
             }
+            // Sum repeated item lines first, then use the same precision as allocations and stock movements.
+            // Reject amounts that cannot reserve any stock instead of relying on a database constraint failure.
+            needs.replaceAll((itemId, quantity) -> {
+                BigDecimal stored = scale(quantity);
+                if (stored.signum() <= 0) {
+                    throw new BusinessException(ErrorCode.BAD_REQUEST,
+                        "lines.quantity must round to at least 0.0001 in the item's stock unit.");
+                }
+                return stored;
+            });
             return needs;
         }
         if (order.getBomId() == null || order.getTargetQuantity() == null) {
@@ -257,7 +281,7 @@ public class StockAllocationService {
         }
         BigDecimal produced = productionRunRepository.findAllByWorkOrderIdInAndDeletedYn(List.of(order.getWorkOrderId()), NOT_DELETED)
             .stream()
-            .filter(run -> "finished".equalsIgnoreCase(run.getRunStatus()))
+            .filter(run -> run.affectsPhysicalState() && "finished".equalsIgnoreCase(run.getRunStatus()))
             .map(ProductionRun::getActualOutputQty)
             .filter(Objects::nonNull)
             .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -269,7 +293,7 @@ public class StockAllocationService {
             remaining);
         Map<String, BigDecimal> used = openRunInputs.forOrder(order.getWorkOrderId());
         for (BomRequirementResponse.Line line : requirement.lines()) {
-            BigDecimal need = line.requiredItemQuantity().subtract(used.getOrDefault(line.childItemId(), BigDecimal.ZERO));
+            BigDecimal need = scale(line.requiredItemQuantity().subtract(used.getOrDefault(line.childItemId(), BigDecimal.ZERO)));
             if (need.signum() > 0) {
                 needs.merge(line.childItemId(), need, BigDecimal::add);
             }
@@ -323,6 +347,15 @@ public class StockAllocationService {
     private WorkOrder findOrder(String workOrderId) {
         return workOrderRepository.findByWorkOrderIdAndDeletedYn(workOrderId, NOT_DELETED)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+    }
+
+    private WorkOrder lockOrder(String workOrderId) {
+        return workOrderRepository.findForUpdate(workOrderId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+    }
+
+    private void lockAllocations(WorkOrder order) {
+        allocationRepository.lockKey("stock-allocation|" + order.getProjectId());
     }
 
     private static BigDecimal scale(BigDecimal value) {

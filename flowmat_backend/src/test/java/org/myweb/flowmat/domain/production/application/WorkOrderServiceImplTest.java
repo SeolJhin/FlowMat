@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -49,6 +51,21 @@ class WorkOrderServiceImplTest {
 
     @InjectMocks
     private WorkOrderServiceImpl workOrderService;
+
+    @Test
+    void simulatedOutputDoesNotCompleteAWorkOrderTarget() {
+        WorkOrder order = new WorkOrder();
+        order.setWorkOrderId("wo-1");
+        order.setTargetQuantity(BigDecimal.TEN);
+        ProductionRun simulation = new ProductionRun();
+        simulation.setRunType("simulation");
+        simulation.setRunStatus("finished");
+        simulation.setActualOutputQty(BigDecimal.TEN);
+
+        WorkOrderResponse response = WorkOrderServiceImpl.toResponse(order, List.of(simulation));
+
+        assertThat(response.producedQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
+    }
 
     @ParameterizedTest(name = "{0} -> {1} allowed={2}")
     @CsvSource({
@@ -95,6 +112,75 @@ class WorkOrderServiceImplTest {
         assertThatThrownBy(() -> workOrderService.createWorkOrder(createRequest("asap", null, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Priority");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"create, Korean", "update, Korean", "create, emoji", "update, emoji"})
+    void aTitleLongerThanTheDatabaseLimitIsRejectedBeforeSaving(String operation, String characters) {
+        String title = ("emoji".equals(characters) ? "🧱" : "작").repeat(101);
+        lenient().when(workOrderRepository.save(any(WorkOrder.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        if ("update".equals(operation)) {
+            givenOrder("draft");
+        }
+        assertThatThrownBy(() -> {
+            if ("create".equals(operation)) {
+                workOrderService.createWorkOrder(new WorkOrderCreateRequest("project-1", title, null, null, null,
+                    BigDecimal.ONE, null, null, null, null, null, null));
+            } else {
+                workOrderService.updateWorkOrder("wo-1", new WorkOrderUpdateRequest(title, null, null, BigDecimal.ONE,
+                    null, null, null, null, null, null, null));
+            }
+        }).isInstanceOf(BusinessException.class).hasMessageContaining("workOrderTitle").hasMessageContaining("100");
+        verify(workOrderRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"작", "🧱"})
+    void theDatabaseLimitCountsCharactersRatherThanUtf16CodeUnits(String character) {
+        String title = character.repeat(100);
+        when(idGenerator.generate()).thenReturn("wo-1");
+        when(workOrderRepository.save(any(WorkOrder.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        WorkOrderResponse response = workOrderService.createWorkOrder(new WorkOrderCreateRequest("project-1", title,
+            null, null, null, BigDecimal.ONE, null, null, null, null, null, null));
+
+        assertThat(response.workOrderTitle()).isEqualTo(title);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"create, 0.00001", "update, 0.00001", "create, 0.000049", "update, 0.000049",
+        "create, 10000000000", "update, 10000000000", "create, 9999999999.99995", "update, 9999999999.99995"})
+    void aTargetOutsideStoredPrecisionIsRejectedBeforeSaving(String operation, BigDecimal quantity) {
+        lenient().when(workOrderRepository.save(any(WorkOrder.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        if ("update".equals(operation)) {
+            givenOrder("draft");
+        }
+
+        assertThatThrownBy(() -> {
+            if ("create".equals(operation)) {
+                workOrderService.createWorkOrder(targetRequest(quantity));
+            } else {
+                workOrderService.updateWorkOrder("wo-1", new WorkOrderUpdateRequest("Batch 1", null, null, quantity,
+                    null, null, null, null, null, null, null));
+            }
+        }).isInstanceOf(BusinessException.class).hasMessageContaining("targetQuantity");
+        verify(workOrderRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0.00005, 0.0001", "1.23454, 1.2345", "1.23455, 1.2346", "9999999999.9999, 9999999999.9999"})
+    void aTargetUsesTheDatabaseQuantityPrecision(BigDecimal requested, BigDecimal stored) {
+        when(idGenerator.generate()).thenReturn("wo-1");
+        when(workOrderRepository.save(any(WorkOrder.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        WorkOrderResponse response = workOrderService.createWorkOrder(targetRequest(requested));
+
+        assertThat(response.targetQuantity()).isEqualByComparingTo(stored);
+    }
+
+    private WorkOrderCreateRequest targetRequest(BigDecimal quantity) {
+        return new WorkOrderCreateRequest("project-1", "Batch 1", null, null, null, quantity,
+            null, null, null, null, null, null);
     }
 
     @Test
@@ -176,7 +262,7 @@ class WorkOrderServiceImplTest {
         order.setWorkOrderTitle("Batch 1");
         order.setWorkOrderStatus(status);
         order.setDeletedYn("N");
-        when(workOrderRepository.findByWorkOrderIdAndDeletedYn("wo-1", "N")).thenReturn(Optional.of(order));
+        when(workOrderRepository.findForUpdate("wo-1")).thenReturn(Optional.of(order));
         return order;
     }
 

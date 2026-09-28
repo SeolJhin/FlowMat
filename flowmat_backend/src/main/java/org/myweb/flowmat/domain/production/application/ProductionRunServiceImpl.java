@@ -11,8 +11,9 @@ import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.List;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
@@ -66,6 +67,9 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     private static final String NOT_DELETED = "N";
     private static final Set<String> OPEN_RUN_STATUSES = Set.of("pending", "running");
     private static final Set<String> RUN_ITEM_DIRECTIONS = Set.of("input", "output");
+    private static final Set<String> RUN_TYPES = Set.of("actual", "simulation", "test", "dry_run");
+    private static final BigDecimal QUANTITY_OVERFLOW_BOUNDARY = new BigDecimal("9999999999.99995");
+    private static final BigDecimal MIN_ROUNDABLE_QUANTITY = new BigDecimal("0.00005");
 
     private final ProductionRunRepository productionRunRepository;
     private final ProductionRunItemRepository productionRunItemRepository;
@@ -102,6 +106,13 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     @Transactional
     public ProductionRunResponse startRun(ProductionRunStartRequest request) {
         projectAccessService.requireProjectWriteAccess(request.projectId());
+        String runType = defaultIfBlank(request.runType(), "actual");
+        if (!RUN_TYPES.contains(runType)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "runType must be actual, simulation, test or dry_run.");
+        }
+        request = new ProductionRunStartRequest(request.projectId(), request.workflowId(), request.targetItemId(),
+            storedQuantity(request.plannedOutputQty(), "plannedOutputQty"), request.runType(), request.startedBy(),
+            request.workOrderId(), request.bomId(), request.workflowRevisionId());
         Workflow workflow = findActiveWorkflow(request.workflowId());
         validateSameProject(request.projectId(), workflow.getProjectId());
         // Publish and retire lock the workflow; resolve its revision under the same lock.
@@ -131,7 +142,8 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             targetItemId = bom.targetItemId();
         }
 
-        if (workOrder != null && WorkOrderServiceImpl.status(workOrder) == WorkOrderStatus.APPROVED) {
+        if (workOrder != null && "actual".equals(runType)
+            && WorkOrderServiceImpl.status(workOrder) == WorkOrderStatus.APPROVED) {
             // The first run against an approved order starts it.
             WorkOrderServiceImpl.transition(workOrder, WorkOrderStatus.IN_PROGRESS);
             workOrder.setActualStartAt(OffsetDateTime.now());
@@ -144,7 +156,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         run.setWorkflowId(workflow.getWorkflowId());
         run.setWorkflowRevisionId(workflowRevision != null ? workflowRevision.getWorkflowRevisionId() : null);
         run.setRunNumber(generateRunNumber());
-        run.setRunType(defaultIfBlank(request.runType(), "actual"));
+        run.setRunType(runType);
         run.setRunStatus("running");
         run.setTargetItemId(targetItemId);
         run.setWorkOrderId(workOrder != null ? workOrder.getWorkOrderId() : null);
@@ -197,10 +209,13 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     @Override
     @Transactional
     public ProductionRunItemResponse recordRunItem(String productionRunId, ProductionRunItemRecordRequest request) {
-        ProductionRun run = findActiveRun(productionRunId);
+        ProductionRun run = findRunForUpdate(productionRunId);
         projectAccessService.requireProjectWriteAccess(run.getProjectId());
         requireOpenRun(run);
         requireKnownDirection(request.direction());
+        request = new ProductionRunItemRecordRequest(request.processId(), request.processIoId(), request.inventoryId(),
+            request.itemId(), request.direction(), storedQuantity(request.plannedQty(), "plannedQty"),
+            request.actualQty() == null ? null : storedQuantity(request.actualQty(), "actualQty"), request.unit());
         Item item = findActiveItem(request.itemId());
         validateSameProject(run.getProjectId(), item.getProjectId());
         Inventory inventory = null;
@@ -224,6 +239,9 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         // Reject incompatible units before anything is saved, even when no stock record is linked.
         BigDecimal recordedQty = request.actualQty() != null ? request.actualQty() : request.plannedQty();
         UnitConverter.Conversion conversion = unitConverter.toItemUnit(recordedQty, request.unit(), item.getUnitId());
+        if (inventory != null && run.affectsPhysicalState()) {
+            requireNonNegativeQuantity(conversion.quantity(), "stockQuantity");
+        }
 
         evaluateRunItemRules(run, request, item, process, processIo, inventory);
 
@@ -242,7 +260,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         runItem.setLotId(inventory != null ? inventory.getLotId() : null);
         ProductionRunItem savedRunItem = productionRunItemRepository.save(runItem);
 
-        if (inventory != null) {
+        if (inventory != null && run.affectsPhysicalState()) {
             if ("input".equals(savedRunItem.getDirection()) && run.getWorkOrderId() != null && conversion.quantity() != null) {
                 // Stock allocated to the run's work order is released into use first (docs/domain/stock-allocation.md).
                 stockAllocationService.consume(run.getWorkOrderId(), inventory.getInventoryId(),
@@ -250,7 +268,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             }
             applyInventoryEffect(run, savedRunItem, inventory, conversion);
         }
-        if (savedRunItem.getLotId() != null) {
+        if (savedRunItem.getLotId() != null && run.affectsPhysicalState()) {
             linkLotGenealogy(run, savedRunItem);
         }
 
@@ -260,7 +278,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     @Override
     @Transactional
     public ProductionRunItemResponse cancelRunItem(String productionRunId, String productionRunItemId, String reason) {
-        ProductionRun run = findActiveRun(productionRunId);
+        ProductionRun run = findRunForUpdate(productionRunId);
         projectAccessService.requireProjectWriteAccess(run.getProjectId());
         requireOpenRun(run);
         ProductionRunItem item = productionRunItemRepository.findById(productionRunItemId)
@@ -299,8 +317,8 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     }
 
     /**
-     * Drops the run's genealogy and links the remaining (not cancelled) input and output LOTs again. LOTs the run used to
-     * produce lose their "produced by this run" mark when no remaining output makes them.
+     * Drops the run's genealogy and links input and output LOTs with standing stock movements again. LOTs the run used
+     * to produce lose their "produced by this run" mark when no remaining physical output makes them.
      */
     @Transactional
     public void rebuildLotGenealogy(ProductionRun run, Collection<String> formerOutputLotIds) {
@@ -309,13 +327,26 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             .findAllByProductionRunIdOrderByProductionRunItemIdAsc(run.getProductionRunId()).stream()
             .filter(candidate -> candidate.getLotId() != null && !candidate.isCancelled())
             .toList();
-        for (ProductionRunItem output : active) {
+        if (!run.affectsPhysicalState()) {
+            // Also remove genealogy left by older non-physical recordings that wrongly touched real LOTs.
+            active.stream().filter(candidate -> "output".equals(candidate.getDirection()))
+                .map(ProductionRunItem::getLotId).distinct()
+                .forEach(lotId -> lotService.clearProducedBy(lotId, run.getProductionRunId()));
+            formerOutputLotIds.forEach(lotId -> lotService.clearProducedBy(lotId, run.getProductionRunId()));
+            return;
+        }
+        List<ProductionRunItem> physical = productionRunItemRepository
+            .findLotRecordingsWithStandingMovements(run.getProductionRunId());
+        for (ProductionRunItem output : physical) {
             if ("output".equals(output.getDirection())) {
-                linkLotGenealogy(run, output);
+                linkLotGenealogy(run, output, physical);
             }
         }
-        for (String lotId : formerOutputLotIds) {
-            boolean stillProduced = active.stream()
+        Set<String> outputLotIds = new HashSet<>(formerOutputLotIds);
+        active.stream().filter(candidate -> "output".equals(candidate.getDirection()))
+            .map(ProductionRunItem::getLotId).forEach(outputLotIds::add);
+        for (String lotId : outputLotIds) {
+            boolean stillProduced = physical.stream()
                 .anyMatch(candidate -> "output".equals(candidate.getDirection()) && candidate.getLotId().equals(lotId));
             if (!stillProduced) {
                 lotService.clearProducedBy(lotId, run.getProductionRunId());
@@ -345,14 +376,14 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         runItem.setInventoryId(resolved.inventory() != null ? resolved.inventory().getInventoryId() : null);
         runItem.setItemId(resolved.item().getItemId());
         runItem.setDirection(direction.trim().toLowerCase());
-        runItem.setPlannedQty(qty);
-        runItem.setActualQty(qty);
+        runItem.setPlannedQty(resolved.quantity());
+        runItem.setActualQty(resolved.quantity());
         runItem.setUnit(unit.trim());
         runItem.setQuantitySource("correction");
         runItem.setProductionRunCorrectionId(correctionId);
         runItem.setLotId(resolved.inventory() != null ? resolved.inventory().getLotId() : null);
         ProductionRunItem saved = productionRunItemRepository.save(runItem);
-        if (resolved.inventory() != null) {
+        if (resolved.inventory() != null && run.affectsPhysicalState()) {
             applyInventoryEffect(run, saved, resolved.inventory(), resolved.conversion());
         }
         return saved;
@@ -372,7 +403,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         productionRunItemRepository.save(item);
     }
 
-    private record CorrectionRecording(Item item, Inventory inventory, UnitConverter.Conversion conversion) {
+    private record CorrectionRecording(Item item, Inventory inventory, UnitConverter.Conversion conversion, BigDecimal quantity) {
     }
 
     private CorrectionRecording resolveCorrectionRecording(ProductionRun run, String direction, String itemId,
@@ -383,6 +414,10 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         requireKnownDirection(direction);
         if (qty == null || qty.signum() <= 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "The corrected quantity must be greater than 0.");
+        }
+        qty = storedQuantity(qty, "qty");
+        if (qty.signum() == 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "qty must round to at least 0.0001.");
         }
         if (unit == null || unit.isBlank()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Give the unit of the corrected quantity.");
@@ -406,23 +441,31 @@ public class ProductionRunServiceImpl implements ProductionRunService {
                     + " uses.");
         }
         UnitConverter.Conversion conversion = unitConverter.toItemUnit(qty, unit.trim(), item.getUnitId());
-        return new CorrectionRecording(item, inventory, conversion);
+        if (inventory != null && run.affectsPhysicalState()) {
+            requireNonNegativeQuantity(conversion.quantity(), "stockQuantity");
+        }
+        return new CorrectionRecording(item, inventory, conversion, qty);
     }
 
     /**
-     * Connects this LOT to the LOTs already recorded on the other side of the run: every input LOT is a parent of every
-     * output LOT. Works in either recording order; the same edge is stored once.
+     * Connects LOTs with standing stock movements: every consumed LOT is a parent of every produced LOT. Works in
+     * either recording order; a zero or rounded-to-zero recording does not establish physical genealogy.
      */
     private void linkLotGenealogy(ProductionRun run, ProductionRunItem recorded) {
+        linkLotGenealogy(run, recorded, productionRunItemRepository
+            .findLotRecordingsWithStandingMovements(run.getProductionRunId()));
+    }
+
+    private void linkLotGenealogy(ProductionRun run, ProductionRunItem recorded, List<ProductionRunItem> physical) {
+        if (physical.stream().noneMatch(candidate -> candidate.getProductionRunItemId().equals(recorded.getProductionRunItemId()))) {
+            return;
+        }
         boolean isOutput = "output".equals(recorded.getDirection());
         if (isOutput) {
             lotService.markProducedBy(recorded.getLotId(), run.getProductionRunId());
         }
-        for (ProductionRunItem other : productionRunItemRepository.findAllByProductionRunIdOrderByProductionRunItemIdAsc(
-            run.getProductionRunId())) {
-            if (other.getLotId() == null
-                || other.isCancelled()
-                || other.getProductionRunItemId().equals(recorded.getProductionRunItemId())
+        for (ProductionRunItem other : physical) {
+            if (other.getProductionRunItemId().equals(recorded.getProductionRunItemId())
                 || other.getDirection().equals(recorded.getDirection())) {
                 continue;
             }
@@ -448,9 +491,13 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     @Override
     @Transactional
     public ProductionRunResponse finishRun(String productionRunId, ProductionRunFinishRequest request) {
-        ProductionRun run = findActiveRun(productionRunId);
+        ProductionRun run = findRunForUpdate(productionRunId);
         projectAccessService.requireProjectWriteAccess(run.getProjectId());
         requireOpenRun(run);
+        if (request != null && request.actualOutputQty() != null) {
+            request = new ProductionRunFinishRequest(storedQuantity(request.actualOutputQty(), "actualOutputQty"),
+                request.finishedBy());
+        }
         // A work instruction can require its steps to be confirmed first (docs/domain/work-instruction.md).
         runInstructionService.requireCompleteToFinish(run);
         evaluateRunFinishRules(run, request);
@@ -492,6 +539,14 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             }
             Process process = findActiveProcess(processId != null ? processId : io.getProcessId());
             validateSameWorkflow(run.getWorkflowId(), process.getWorkflowId());
+            if (io != null) {
+                if (!request.itemId().equals(io.getItemId())) {
+                    throw new BusinessException(ErrorCode.BAD_REQUEST, "itemId does not match the selected processIoId.");
+                }
+                if (!request.direction().trim().equalsIgnoreCase(io.getDirection())) {
+                    throw new BusinessException(ErrorCode.BAD_REQUEST, "direction does not match the selected processIoId.");
+                }
+            }
             return new RunProcessSelection(process, io);
         }
 
@@ -572,7 +627,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         if (normalized == null) {
             return null;
         }
-        WorkOrder workOrder = workOrderRepository.findByWorkOrderIdAndDeletedYn(normalized, NOT_DELETED)
+        WorkOrder workOrder = workOrderRepository.findForUpdate(normalized)
             .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "Work order does not exist."));
         validateSameProject(projectId.trim(), workOrder.getProjectId());
         if (workOrder.getWorkflowId() != null && !workOrder.getWorkflowId().equals(workflow.getWorkflowId())) {
@@ -589,6 +644,11 @@ public class ProductionRunServiceImpl implements ProductionRunService {
 
     private ProductionRun findActiveRun(String productionRunId) {
         return productionRunRepository.findByProductionRunIdAndDeletedYn(productionRunId, NOT_DELETED)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+    }
+
+    private ProductionRun findRunForUpdate(String productionRunId) {
+        return productionRunRepository.findForUpdate(productionRunId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
@@ -651,7 +711,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         );
     }
 
-    private static void requireOpenRun(ProductionRun run) {
+    static void requireOpenRun(ProductionRun run) {
         String status = run.getRunStatus() == null ? "" : run.getRunStatus().trim().toLowerCase();
         if (!OPEN_RUN_STATUSES.contains(status)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Run " + run.getRunNumber() + " is already " + status + ".");
@@ -662,6 +722,29 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         if (!RUN_ITEM_DIRECTIONS.contains(direction.trim().toLowerCase())) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "direction must be 'input' or 'output'.");
         }
+    }
+
+    static void requireNonNegativeQuantity(BigDecimal quantity, String field) {
+        if (quantity == null || quantity.signum() < 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, field + " must be 0 or more.");
+        }
+        // numeric(14,4) rounds first: even a value below 10^10 can overflow at the half-up boundary.
+        // Compare without rescaling so excessive exponents cannot expand during validation.
+        if (quantity.compareTo(QUANTITY_OVERFLOW_BOUNDARY) >= 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                field + " must round to at most 9999999999.9999.");
+        }
+    }
+
+    static BigDecimal storedQuantity(BigDecimal quantity, String field) {
+        requireNonNegativeQuantity(quantity, field);
+        if (quantity.scale() <= 4) {
+            return quantity;
+        }
+        if (quantity.compareTo(MIN_ROUNDABLE_QUANTITY) < 0) {
+            return BigDecimal.ZERO;
+        }
+        return quantity.setScale(4, RoundingMode.HALF_UP);
     }
 
     private static void validateSameProject(String expectedProjectId, String actualProjectId) {

@@ -32,7 +32,7 @@ public class WorkOrderEquipmentService {
 
     @Transactional
     public WorkOrderResponse assign(String workOrderId, String equipmentId) {
-        WorkOrder order = workOrderRepository.findByWorkOrderIdAndDeletedYn(workOrderId, NOT_DELETED)
+        WorkOrder order = workOrderRepository.findForUpdate(workOrderId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         projectAccessService.requireProjectWriteAccess(order.getProjectId());
         WorkOrderStatus status = WorkOrderServiceImpl.status(order);

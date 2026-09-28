@@ -202,7 +202,8 @@ public class EquipmentLoadService {
         Map<String, BigDecimal> produced = new HashMap<>();
         for (ProductionRun run : productionRunRepository.findAllByWorkOrderIdInAndDeletedYn(
             orders.stream().map(WorkOrder::getWorkOrderId).toList(), NOT_DELETED)) {
-            if (FINISHED_RUN.equalsIgnoreCase(run.getRunStatus()) && run.getActualOutputQty() != null) {
+            if (run.affectsPhysicalState() && FINISHED_RUN.equalsIgnoreCase(run.getRunStatus())
+                && run.getActualOutputQty() != null) {
                 produced.merge(run.getWorkOrderId(), run.getActualOutputQty(), BigDecimal::add);
             }
         }

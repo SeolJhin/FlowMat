@@ -12,7 +12,7 @@ import org.springframework.data.repository.query.Param;
 
 public interface ProductionRunRepository extends JpaRepository<ProductionRun, String> {
 
-    /** Locks the run row so corrections of one run are requested and applied one at a time. */
+    /** Serializes a run's recordings, checklist changes, finishing and corrections under the same row lock. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select r from ProductionRun r where r.productionRunId = :id and r.deletedYn = 'N'")
     Optional<ProductionRun> findForUpdate(@Param("id") String productionRunId);

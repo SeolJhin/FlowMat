@@ -1,6 +1,7 @@
 package org.myweb.flowmat.domain.production.application;
 
 import java.time.OffsetDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -84,6 +85,7 @@ public class RunInstructionService {
         check.setNote(note);
         check.setCheckedBy(projectAccessService.requireCurrentUserId());
         check.setCheckedAt(OffsetDateTime.now());
+        pinRevision(run, instruction);
         checkRepository.saveAndFlush(check);
         return response(run);
     }
@@ -93,6 +95,10 @@ public class RunInstructionService {
         ProductionRun run = findOpenRun(runId);
         RunInstructionCheck check = checkRepository.findByProductionRunIdAndStepId(run.getProductionRunId(), stepId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        // Older application instances may have written checks without the persisted binding.
+        if (run.getWorkInstructionId() == null) {
+            pinRevision(run, bound(run, checkRepository.findAllByProductionRunId(run.getProductionRunId())));
+        }
         checkRepository.delete(check);
         checkRepository.flush();
         return response(run);
@@ -136,10 +142,23 @@ public class RunInstructionService {
 
     /** The revision of the run's first confirmation, or the product's released revision before any. */
     private WorkInstruction bound(ProductionRun run, List<RunInstructionCheck> checks) {
+        if (run.getWorkInstructionId() != null) {
+            return instructionRepository.findById(run.getWorkInstructionId()).orElse(null);
+        }
         if (!checks.isEmpty()) {
-            return instructionRepository.findById(checks.get(0).getInstructionId()).orElse(null);
+            RunInstructionCheck first = checks.stream()
+                .min(Comparator.comparing(RunInstructionCheck::getCheckedAt).thenComparing(RunInstructionCheck::getCheckId))
+                .orElseThrow();
+            return instructionRepository.findById(first.getInstructionId()).orElse(null);
         }
         return workInstructionService.released(run.getTargetItemId());
+    }
+
+    private void pinRevision(ProductionRun run, WorkInstruction instruction) {
+        if (run.getWorkInstructionId() == null && instruction != null) {
+            run.setWorkInstructionId(instruction.getInstructionId());
+            runRepository.save(run);
+        }
     }
 
     private static boolean isOpen(ProductionRun run) {
@@ -147,7 +166,8 @@ public class RunInstructionService {
     }
 
     private ProductionRun findOpenRun(String runId) {
-        ProductionRun run = findRun(runId);
+        ProductionRun run = runRepository.findForUpdate(runId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         projectAccessService.requireProjectWriteAccess(run.getProjectId());
         if (!isOpen(run)) {
             throw new BusinessException(ErrorCode.CONFLICT, "Run " + run.getRunNumber() + " is " + run.getRunStatus()

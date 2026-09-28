@@ -141,7 +141,7 @@ public class WorkInstructionService {
     /** A draft with at least one step becomes the released revision; the one released before it is retired. */
     @Transactional
     public WorkInstructionResponse release(String instructionId) {
-        WorkInstruction instruction = findInstruction(instructionId);
+        WorkInstruction instruction = findInstructionForUpdate(instructionId);
         projectAccessService.requireProjectOwnerAccess(instruction.getProjectId());
         if (!DRAFT.equals(instruction.getStatus())) {
             throw new BusinessException(ErrorCode.CONFLICT, "Revision " + instruction.getRevisionNo() + " is " + instruction.getStatus() + ".");
@@ -165,7 +165,7 @@ public class WorkInstructionService {
     /** A new draft revision copied from a released or retired one. */
     @Transactional
     public WorkInstructionResponse revise(String instructionId) {
-        WorkInstruction source = findInstruction(instructionId);
+        WorkInstruction source = findInstructionForUpdate(instructionId);
         projectAccessService.requireProjectWriteAccess(source.getProjectId());
         if (DRAFT.equals(source.getStatus())) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Revision " + source.getRevisionNo() + " is a draft; edit it instead.");
@@ -310,7 +310,7 @@ public class WorkInstructionService {
     }
 
     private WorkInstruction findDraft(String instructionId) {
-        WorkInstruction instruction = findInstruction(instructionId);
+        WorkInstruction instruction = findInstructionForUpdate(instructionId);
         projectAccessService.requireProjectWriteAccess(instruction.getProjectId());
         if (!DRAFT.equals(instruction.getStatus())) {
             throw new BusinessException(ErrorCode.CONFLICT, "Revision " + instruction.getRevisionNo() + " is " + instruction.getStatus()
@@ -319,8 +319,8 @@ public class WorkInstructionService {
         return instruction;
     }
 
-    private WorkInstruction findInstruction(String instructionId) {
-        return instructionRepository.findByInstructionIdAndDeletedYn(instructionId, NOT_DELETED)
+    private WorkInstruction findInstructionForUpdate(String instructionId) {
+        return instructionRepository.findForUpdate(instructionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 }

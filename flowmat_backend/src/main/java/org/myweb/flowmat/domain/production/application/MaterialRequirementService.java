@@ -74,7 +74,8 @@ public class MaterialRequirementService {
             List<ProductionRun> runs = productionRunRepository.findAllByWorkOrderIdInAndDeletedYn(
                 active.stream().map(WorkOrder::getWorkOrderId).toList(), NOT_DELETED);
             for (ProductionRun run : runs) {
-                if ("finished".equalsIgnoreCase(run.getRunStatus()) && run.getActualOutputQty() != null) {
+                if (run.affectsPhysicalState() && "finished".equalsIgnoreCase(run.getRunStatus())
+                    && run.getActualOutputQty() != null) {
                     produced.merge(run.getWorkOrderId(), run.getActualOutputQty(), BigDecimal::add);
                 }
             }

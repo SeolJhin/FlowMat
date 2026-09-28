@@ -22,7 +22,7 @@ import org.myweb.flowmat.global.exception.BusinessException;
 import org.springframework.stereotype.Component;
 
 /**
- * What work orders' unfinished runs (pending or running) have already recorded as input, per order and material in the
+ * What work orders' unfinished physical runs (pending or running) have already recorded as input, per order and material in the
  * material's own unit. That stock is already gone, while the order's remaining quantity (target − finished output)
  * still counts it, so readiness and the open-order requirements take it off the order's need. Plan rows and cancelled
  * recordings are not inputs; a recording whose unit cannot be converted is skipped.
@@ -48,7 +48,8 @@ public class OpenRunInputs {
     /** For the orders of the given runs: order id → material id → recorded input. */
     public Map<String, Map<String, BigDecimal>> byOrder(Collection<ProductionRun> runs) {
         Map<String, String> orderOfRun = runs.stream()
-            .filter(run -> run.getWorkOrderId() != null && OPEN_RUN_STATUSES.contains(run.getRunStatus()))
+            .filter(run -> run.affectsPhysicalState() && run.getWorkOrderId() != null
+                && OPEN_RUN_STATUSES.contains(run.getRunStatus()))
             .collect(Collectors.toMap(ProductionRun::getProductionRunId, ProductionRun::getWorkOrderId));
         Map<String, Map<String, BigDecimal>> used = new HashMap<>();
         if (orderOfRun.isEmpty()) {

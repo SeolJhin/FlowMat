@@ -337,7 +337,7 @@ public class WorkOrderReadinessService {
         }
         BigDecimal produced = productionRunRepository.findAllByWorkOrderIdInAndDeletedYn(List.of(order.getWorkOrderId()), NOT_DELETED)
             .stream()
-            .filter(run -> "finished".equalsIgnoreCase(run.getRunStatus()))
+            .filter(run -> run.affectsPhysicalState() && "finished".equalsIgnoreCase(run.getRunStatus()))
             .map(ProductionRun::getActualOutputQty)
             .filter(qty -> qty != null)
             .reduce(BigDecimal.ZERO, BigDecimal::add);

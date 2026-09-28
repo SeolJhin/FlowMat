@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -16,6 +17,8 @@ import java.math.BigDecimal;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -103,6 +106,94 @@ class ProductionRunServiceImplTest {
     }
 
     @Test
+    void simulationRecordingKeepsStockUnchanged() {
+        ProductionRun run = givenRun("running");
+        run.setRunType("simulation");
+        givenItem();
+        givenInventory("item-1", "10");
+        when(unitConverter.toItemUnit(BigDecimal.ONE, "kg", "unit_kg"))
+            .thenReturn(new UnitConverter.Conversion(BigDecimal.ONE, "kg", "kg", false));
+        when(idGenerator.generate()).thenReturn("simulation-item-1");
+        when(productionRunItemRepository.save(any(ProductionRunItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        productionRunService.recordRunItem("run-1",
+            new ProductionRunItemRecordRequest(null, null, "inv-1", "item-1", "input", BigDecimal.ONE, null, "kg"));
+
+        verifyNoInteractions(inventoryCommandService, stockAllocationService, lotService);
+    }
+
+    @Test
+    void simulationOutputDoesNotMarkARealLotAsProduced() {
+        ProductionRun run = givenRun("running");
+        run.setRunType("simulation");
+        Item item = givenItem();
+        item.setLotManageYn("Y");
+        Inventory inventory = givenInventory("item-1", "0");
+        inventory.setLotId("lot-1");
+        when(unitConverter.toItemUnit(BigDecimal.ONE, "kg", "unit_kg"))
+            .thenReturn(new UnitConverter.Conversion(BigDecimal.ONE, "kg", "kg", false));
+        when(idGenerator.generate()).thenReturn("simulation-output-1");
+        when(productionRunItemRepository.save(any(ProductionRunItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        productionRunService.recordRunItem("run-1",
+            new ProductionRunItemRecordRequest(null, null, "inv-1", "item-1", "output", BigDecimal.ONE, null, "kg"));
+
+        verifyNoInteractions(lotService, inventoryCommandService);
+    }
+
+    @Test
+    void simulationStartDoesNotStartItsWorkOrder() {
+        givenWorkflow();
+        WorkOrder order = givenWorkOrder("approved", null);
+        when(idGenerator.generate()).thenReturn("simulation-run-1");
+        when(productionRunRepository.save(any(ProductionRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        productionRunService.startRun(new ProductionRunStartRequest("project-1", "workflow-1", null,
+            BigDecimal.TEN, "simulation", null, "wo-1", null, null));
+
+        assertEquals("approved", order.getWorkOrderStatus());
+        verify(workOrderRepository, never()).save(any());
+    }
+
+    @Test
+    void simulationCorrectionDoesNotMoveInventory() {
+        ProductionRun run = new ProductionRun();
+        run.setProductionRunId("simulation-1");
+        run.setProjectId("project-1");
+        run.setRunType("simulation");
+        givenItem();
+        givenInventory("item-1", "10");
+        when(unitConverter.toItemUnit(BigDecimal.ONE, "kg", "unit_kg"))
+            .thenReturn(new UnitConverter.Conversion(BigDecimal.ONE, "kg", "kg", false));
+        when(idGenerator.generate()).thenReturn("correction-item-1");
+        when(productionRunItemRepository.save(any(ProductionRunItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        productionRunService.recordCorrectionItem(run, "correction-1", "input", "item-1", "inv-1",
+            BigDecimal.ONE, "kg");
+
+        verifyNoInteractions(inventoryCommandService, stockAllocationService, lotService);
+    }
+
+    @Test
+    void unknownRunTypeIsRejectedEvenWithoutAPublishedWorkflowRevision() {
+        Workflow workflow = new Workflow();
+        workflow.setWorkflowId("workflow-1");
+        workflow.setProjectId("project-1");
+        lenient().when(workflowRepository.findByWorkflowIdAndDeletedYn("workflow-1", "N"))
+            .thenReturn(Optional.of(workflow));
+        lenient().when(idGenerator.generate()).thenReturn("virtual-run-1");
+        lenient().when(productionRunRepository.save(any(ProductionRun.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> productionRunService.startRun(
+            new ProductionRunStartRequest("project-1", "workflow-1", null, BigDecimal.TEN,
+                "virtual", null, null, null, null)));
+
+        assertEquals("runType must be actual, simulation, test or dry_run.", exception.getMessage());
+        verify(productionRunRepository, never()).save(any());
+    }
+
+    @Test
     void cannotRecordAgainstAnotherItemsStock() {
         givenRun("running");
         givenItem();
@@ -133,12 +224,49 @@ class ProductionRunServiceImplTest {
         verify(productionRunItemRepository, never()).save(any());
     }
 
-    private void givenItem() {
+    @ParameterizedTest
+    @CsvSource({
+        "actual, item-2, input, itemId",
+        "actual, item-1, output, direction",
+        "simulation, item-2, input, itemId",
+        "simulation, item-1, output, direction"
+    })
+    void legacyRunRejectsRecordingThatDoesNotMatchItsPort(String runType, String portItemId,
+        String portDirection, String field) {
+        givenRun("running").setRunType(runType);
+        givenItem();
+        Process process = new Process();
+        process.setProcessId("process-1");
+        process.setWorkflowId("workflow-1");
+        ProcessIo io = new ProcessIo();
+        io.setProcessIoId("io-1");
+        io.setProcessId("process-1");
+        io.setItemId(portItemId);
+        io.setDirection(portDirection);
+        when(processIoRepository.findByProcessIoIdAndDeletedYn("io-1", "N")).thenReturn(Optional.of(io));
+        when(processRepository.findByProcessIdAndDeletedYn("process-1", "N")).thenReturn(Optional.of(process));
+        lenient().when(unitConverter.toItemUnit(BigDecimal.ONE, "kg", "unit_kg"))
+            .thenReturn(new UnitConverter.Conversion(BigDecimal.ONE, "kg", "kg", false));
+        lenient().when(idGenerator.generate()).thenReturn("mismatched-item");
+        lenient().when(productionRunItemRepository.save(any(ProductionRunItem.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> productionRunService.recordRunItem("run-1",
+            new ProductionRunItemRecordRequest(null, "io-1", null, "item-1", "input", BigDecimal.ONE, null, "kg")));
+
+        assertEquals(ErrorCode.BAD_REQUEST, exception.getErrorCode());
+        assertEquals(field + " does not match the selected processIoId.", exception.getMessage());
+        verify(productionRunItemRepository, never()).save(any());
+        verifyNoInteractions(inventoryCommandService, stockAllocationService, lotService);
+    }
+
+    private Item givenItem() {
         Item item = new Item();
         item.setItemId("item-1");
         item.setProjectId("project-1");
         item.setUnitId("unit_kg");
         when(itemRepository.findByItemIdAndDeletedYn("item-1", "N")).thenReturn(Optional.of(item));
+        return item;
     }
 
     private Inventory givenInventory(String itemId, String quantity) {
@@ -203,7 +331,7 @@ class ProductionRunServiceImplTest {
         order.setProjectId("project-1");
         order.setWorkflowId(workflowId);
         order.setWorkOrderStatus(status);
-        when(workOrderRepository.findByWorkOrderIdAndDeletedYn("wo-1", "N")).thenReturn(Optional.of(order));
+        when(workOrderRepository.findForUpdate("wo-1")).thenReturn(Optional.of(order));
         return order;
     }
 
@@ -266,6 +394,64 @@ class ProductionRunServiceImplTest {
     }
 
     @Test
+    void finishRejectsNegativeOutputWithoutClosingTheRun() {
+        ProductionRun run = givenRun("running");
+        lenient().when(productionRunRepository.save(any(ProductionRun.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> productionRunService.finishRun("run-1",
+            new ProductionRunFinishRequest(new BigDecimal("-1"), null)));
+
+        assertEquals(ErrorCode.BAD_REQUEST, exception.getErrorCode());
+        assertEquals("actualOutputQty must be 0 or more.", exception.getMessage());
+        assertEquals("running", run.getRunStatus());
+        verify(productionRunRepository, never()).save(any());
+        verifyNoInteractions(flowRuleEngineService, productionFlowRunAdapter);
+    }
+
+    @Test
+    void startRejectsNegativePlannedOutputBeforeStartingAnOrder() {
+        lenient().when(idGenerator.generate()).thenReturn("negative-run");
+        lenient().when(productionRunRepository.save(any(ProductionRun.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        Workflow workflow = new Workflow();
+        workflow.setWorkflowId("workflow-1");
+        workflow.setProjectId("project-1");
+        lenient().when(workflowRepository.findByWorkflowIdAndDeletedYn("workflow-1", "N"))
+            .thenReturn(Optional.of(workflow));
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> productionRunService.startRun(
+            new ProductionRunStartRequest("project-1", "workflow-1", null, new BigDecimal("-1"), null, null, null, null, null)));
+
+        assertEquals(ErrorCode.BAD_REQUEST, exception.getErrorCode());
+        assertEquals("plannedOutputQty must be 0 or more.", exception.getMessage());
+        verify(productionRunRepository, never()).save(any());
+        verifyNoInteractions(workOrderRepository, bomService, productionFlowRunAdapter, flowRuleEngineService);
+    }
+
+    @Test
+    void positiveActualQuantityCannotHideANegativePlannedQuantity() {
+        givenRun("running");
+        Item item = new Item();
+        item.setItemId("item-1");
+        item.setProjectId("project-1");
+        item.setUnitId("unit_kg");
+        lenient().when(itemRepository.findByItemIdAndDeletedYn("item-1", "N")).thenReturn(Optional.of(item));
+        lenient().when(unitConverter.toItemUnit(BigDecimal.ONE, "kg", "unit_kg"))
+            .thenReturn(new UnitConverter.Conversion(BigDecimal.ONE, "kg", "kg", false));
+        lenient().when(productionRunItemRepository.save(any(ProductionRunItem.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> productionRunService.recordRunItem("run-1",
+            new ProductionRunItemRecordRequest(null, null, null, "item-1", "input", new BigDecimal("-1"), BigDecimal.ONE, "kg")));
+
+        assertEquals(ErrorCode.BAD_REQUEST, exception.getErrorCode());
+        assertEquals("plannedQty must be 0 or more.", exception.getMessage());
+        verify(productionRunItemRepository, never()).save(any());
+        verifyNoInteractions(inventoryCommandService, stockAllocationService, flowRuleEngineService);
+    }
+
+    @Test
     void getRunRequiresProjectReadAccess() {
         givenRun("running");
         when(projectAccessService.requireProjectReadAccess("project-1"))
@@ -301,17 +487,20 @@ class ProductionRunServiceImplTest {
         verifyNoInteractions(itemRepository, productionRunItemRepository);
     }
 
-    private void givenRun(String status) {
+    private ProductionRun givenRun(String status) {
         ProductionRun run = new ProductionRun();
         run.setProductionRunId("run-1");
         run.setProjectId("project-1");
         run.setWorkflowId("workflow-1");
         run.setRunNumber("RUN-1");
         run.setRunStatus(status);
+        run.setRunType("actual");
         run.setPlannedOutputQty(BigDecimal.TEN);
         run.setActualOutputQty(BigDecimal.ZERO);
         run.setDeletedYn("N");
-        when(productionRunRepository.findByProductionRunIdAndDeletedYn("run-1", "N")).thenReturn(Optional.of(run));
+        lenient().when(productionRunRepository.findByProductionRunIdAndDeletedYn("run-1", "N")).thenReturn(Optional.of(run));
+        lenient().when(productionRunRepository.findForUpdate("run-1")).thenReturn(Optional.of(run));
+        return run;
     }
 
     private static ProductionRunItemRecordRequest recordRequest(String direction) {

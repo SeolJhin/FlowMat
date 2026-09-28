@@ -1,6 +1,7 @@
 package org.myweb.flowmat.domain.production.application;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Collection;
@@ -36,7 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Work orders follow {@link WorkOrderStatus}: editors create and edit drafts and complete running orders,
  * project owners approve or cancel them. The approved → in_progress step happens when the first production
- * run is started against the order (see ProductionRunServiceImpl).
+ * actual run is started against the order (see ProductionRunServiceImpl).
  */
 @Service
 @RequiredArgsConstructor
@@ -45,6 +46,9 @@ public class WorkOrderServiceImpl implements WorkOrderService {
 
     private static final String NOT_DELETED = "N";
     private static final String FINISHED_RUN = "finished";
+    private static final BigDecimal MIN_ROUNDABLE_TARGET = new BigDecimal("0.00005");
+    private static final BigDecimal TARGET_UPPER_BOUND = new BigDecimal("10000000000");
+    private static final BigDecimal MAX_TARGET_QUANTITY = new BigDecimal("9999999999.9999");
     private static final Set<String> PRIORITIES = Set.of("low", "normal", "high", "urgent");
     private static final DateTimeFormatter NUMBER_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
 
@@ -97,7 +101,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     @Override
     @Transactional
     public WorkOrderResponse updateWorkOrder(String workOrderId, WorkOrderUpdateRequest request) {
-        WorkOrder order = findActiveOrder(workOrderId);
+        WorkOrder order = findOrderForUpdate(workOrderId);
         projectAccessService.requireProjectWriteAccess(order.getProjectId());
         if (status(order) != WorkOrderStatus.DRAFT) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
@@ -117,7 +121,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     @Override
     @Transactional
     public WorkOrderResponse approveWorkOrder(String workOrderId) {
-        WorkOrder order = findActiveOrder(workOrderId);
+        WorkOrder order = findOrderForUpdate(workOrderId);
         projectAccessService.requireProjectOwnerAccess(order.getProjectId());
         // An approved order must be runnable: its BOM (if any) has to be approved too.
         if (order.getBomId() != null) {
@@ -141,7 +145,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     @Override
     @Transactional
     public WorkOrderResponse cancelWorkOrder(String workOrderId) {
-        WorkOrder order = findActiveOrder(workOrderId);
+        WorkOrder order = findOrderForUpdate(workOrderId);
         projectAccessService.requireProjectOwnerAccess(order.getProjectId());
         transition(order, WorkOrderStatus.CANCELLED);
         // Stock allocated to the order goes back (docs/domain/stock-allocation.md).
@@ -153,10 +157,11 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     @Override
     @Transactional
     public WorkOrderResponse completeWorkOrder(String workOrderId) {
-        WorkOrder order = findActiveOrder(workOrderId);
+        WorkOrder order = findOrderForUpdate(workOrderId);
         projectAccessService.requireProjectWriteAccess(order.getProjectId());
         List<ProductionRun> runs = productionRunRepository.findAllByWorkOrderIdInAndDeletedYn(List.of(workOrderId), NOT_DELETED);
-        if (runs.stream().anyMatch(run -> !FINISHED_RUN.equalsIgnoreCase(run.getRunStatus()))) {
+        if (runs.stream().anyMatch(run -> run.affectsPhysicalState()
+            && !FINISHED_RUN.equalsIgnoreCase(run.getRunStatus()))) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Finish every production run of this work order first.");
         }
         transition(order, WorkOrderStatus.COMPLETED);
@@ -182,7 +187,11 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         if (title == null || title.isBlank()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Work order title is required.");
         }
-        order.setWorkOrderTitle(title.trim());
+        String normalizedTitle = title.trim();
+        if (normalizedTitle.codePointCount(0, normalizedTitle.length()) > 100) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "workOrderTitle must be at most 100 characters.");
+        }
+        order.setWorkOrderTitle(normalizedTitle);
 
         String normalizedWorkflowId = trimToNull(workflowId);
         if (normalizedWorkflowId != null) {
@@ -220,10 +229,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         }
         order.setBomId(normalizedBomId);
 
-        if (targetQuantity != null && targetQuantity.signum() <= 0) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "Target quantity must be greater than 0.");
-        }
-        order.setTargetQuantity(targetQuantity);
+        order.setTargetQuantity(storedTargetQuantity(targetQuantity));
 
         String normalizedPriority = priority == null || priority.isBlank() ? "normal" : priority.trim().toLowerCase();
         if (!PRIORITIES.contains(normalizedPriority)) {
@@ -238,6 +244,29 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         order.setPlannedEndAt(plannedEndAt);
         order.setInstruction(trimToNull(instruction));
         order.setAssignedTo(trimToNull(assignedTo));
+    }
+
+    private static BigDecimal storedTargetQuantity(BigDecimal quantity) {
+        if (quantity == null) {
+            return null;
+        }
+        // Bound the value before scaling; very small or large exponents must not expand during rounding.
+        if (quantity.compareTo(MIN_ROUNDABLE_TARGET) < 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "targetQuantity must round to at least 0.0001.");
+        }
+        if (quantity.compareTo(TARGET_UPPER_BOUND) >= 0) {
+            throw targetQuantityTooLarge();
+        }
+        BigDecimal stored = quantity.setScale(4, RoundingMode.HALF_UP);
+        if (stored.compareTo(MAX_TARGET_QUANTITY) > 0) {
+            throw targetQuantityTooLarge();
+        }
+        return stored;
+    }
+
+    private static BusinessException targetQuantityTooLarge() {
+        return new BusinessException(ErrorCode.BAD_REQUEST, "targetQuantity must not exceed 9999999999.9999.");
     }
 
     static void transition(WorkOrder order, WorkOrderStatus next) {
@@ -271,6 +300,11 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
+    private WorkOrder findOrderForUpdate(String workOrderId) {
+        return workOrderRepository.findForUpdate(workOrderId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+    }
+
     private Map<String, List<ProductionRun>> runsByWorkOrder(Collection<String> workOrderIds) {
         if (workOrderIds.isEmpty()) {
             return Map.of();
@@ -296,7 +330,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
 
     static WorkOrderResponse toResponse(WorkOrder order, List<ProductionRun> runs) {
         BigDecimal produced = runs.stream()
-            .filter(run -> FINISHED_RUN.equalsIgnoreCase(run.getRunStatus()))
+            .filter(run -> run.affectsPhysicalState() && FINISHED_RUN.equalsIgnoreCase(run.getRunStatus()))
             .map(ProductionRun::getActualOutputQty)
             .filter(qty -> qty != null)
             .reduce(BigDecimal.ZERO, BigDecimal::add);
