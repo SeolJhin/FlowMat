@@ -94,15 +94,15 @@ public class WorkInstructionService {
     @Transactional
     public WorkInstructionResponse addStep(String instructionId, WorkInstructionStepRequest request) {
         WorkInstruction instruction = findDraft(instructionId);
-        if (request == null || request.text() == null || request.text().isBlank()) {
+        String text = ProductionText.trimToNull(request == null ? null : request.text(), "text");
+        if (text == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "The step needs a text.");
         }
-        String text = request.text().trim();
         if (text.length() > 500) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "A step can be at most 500 characters.");
         }
         boolean recordsValue = Boolean.TRUE.equals(request.recordsValue());
-        String label = recordsValue && request.valueLabel() != null && !request.valueLabel().isBlank() ? request.valueLabel().trim() : null;
+        String label = recordsValue ? ProductionText.trimToNull(request.valueLabel(), "valueLabel") : null;
         if (label != null && label.length() > 100) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "valueLabel can be at most 100 characters.");
         }
@@ -256,13 +256,14 @@ public class WorkInstructionService {
     }
 
     private void applyText(WorkInstruction instruction, WorkInstructionRequest request) {
-        if (request.title() == null || request.title().isBlank()) {
+        String title = ProductionText.trimToNull(request.title(), "title");
+        if (title == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "title is required.");
         }
-        String title = request.title().trim();
         if (title.length() > 200) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "title can be at most 200 characters.");
         }
+        ProductionText.requireStorable(request.body(), "body");
         String body = request.body() == null || request.body().isBlank() ? null : request.body().strip();
         if (body != null && body.length() > 20000) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "body can be at most 20000 characters.");
@@ -277,10 +278,10 @@ public class WorkInstructionService {
 
     /** Blank clears it; only an absolute http or https address with a host is kept, since the link is opened from the run. */
     private static String documentUrl(String value) {
-        if (value == null || value.isBlank()) {
+        String url = ProductionText.trimToNull(value, "documentUrl");
+        if (url == null) {
             return null;
         }
-        String url = value.trim();
         if (url.length() <= 500) {
             try {
                 java.net.URI uri = new java.net.URI(url);

@@ -1,6 +1,7 @@
 package org.myweb.flowmat;
 
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -86,6 +87,48 @@ class BuildableQuantityIntegrationTest extends IntegrationTestSupport {
         mockMvc.perform(get("/boms/buildable").param("projectId", DEMO_PROJECT)
                 .header("Authorization", "Bearer " + jwtProvider.generateAccessToken("bq-outsider")))
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void repeatedMaterialLinesShareTheSameStockAfterUnitConversion() throws Exception {
+        String tag = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        String product = item("BQ-REPEAT-P-" + tag, "unit_ea");
+        String flour = item("BQ-REPEAT-M-" + tag, "unit_kg");
+        stock(flour, 10, tag);
+        String bomId = bom(product, "Repeated flour " + tag, 10, "ea");
+        line(bomId, flour, 5, "kg");
+        line(bomId, flour, 2000, "g");
+        // The by-product is an output, even when it is the same item as an input.
+        call(post("/boms/" + bomId + "/lines"), json(Map.of("childItemId", flour, "quantity", 10,
+            "unit", "kg", "lineType", "by_product"))).andExpect(status().isOk());
+        call(get("/boms/" + bomId + "/buildable"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.buildable").value(14))
+            .andExpect(jsonPath("$.data.limitingItemId").value(flour))
+            .andExpect(jsonPath("$.data.lines.length()").value(1))
+            .andExpect(jsonPath("$.data.lines[0].perBatch").value(7.0))
+            .andExpect(jsonPath("$.data.lines[0].usable").value(10.0));
+        // Draft calculations must be accurate; the existing approval contract still rejects repeated items.
+        call(post("/boms/" + bomId + "/submit"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message", containsString("appears more than once")));
+    }
+
+    @Test
+    void repeatedMaterialNeedsAreRoundedPerBomLineBeforeTheyAreAdded() throws Exception {
+        String tag = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        String product = item("BQ-ROUND-P-" + tag, "unit_ea");
+        String flour = item("BQ-ROUND-M-" + tag, "unit_kg");
+        stock(flour, 0.0003, tag);
+        String bomId = bom(product, "Rounded repeated flour " + tag, 1, "ea");
+        // Each 0.06 g line needs 0.0001 kg at the BOM's stock precision.
+        line(bomId, flour, 0.06, "g");
+        line(bomId, flour, 0.06, "g");
+        call(get("/boms/" + bomId + "/buildable"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.buildable").value(1))
+            .andExpect(jsonPath("$.data.lines.length()").value(1))
+            .andExpect(jsonPath("$.data.lines[0].perBatch").value(0.0002));
     }
 
     // ---- helpers ----

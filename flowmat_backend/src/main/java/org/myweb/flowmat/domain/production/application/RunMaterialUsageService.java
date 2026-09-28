@@ -89,7 +89,10 @@ public class RunMaterialUsageService {
         }
 
         BigDecimal plannedOutput = run.getPlannedOutputQty();
-        boolean basisIsActual = run.getActualOutputQty() != null && run.getActualOutputQty().signum() > 0;
+        // Running records default to zero; a finished run's explicit zero is a measured output.
+        boolean basisIsActual = run.getActualOutputQty() != null
+            && (run.getActualOutputQty().signum() > 0
+                || (run.getActualOutputQty().signum() == 0 && "finished".equalsIgnoreCase(run.getRunStatus())));
         BigDecimal basis = basisIsActual ? run.getActualOutputQty() : plannedOutput;
         boolean scalable = plannedOutput != null && plannedOutput.signum() > 0 && basis != null;
 

@@ -21,6 +21,7 @@ import org.myweb.flowmat.domain.workflow.domain.entity.ProcessConnection;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
 import org.myweb.flowmat.domain.workflow.domain.contract.PortSchema;
+import org.myweb.flowmat.domain.workflow.domain.contract.WorkflowText;
 import org.myweb.flowmat.domain.workflow.domain.expression.ConditionExpression;
 import org.myweb.flowmat.domain.workflow.collab.GraphSyncService;
 import org.myweb.flowmat.domain.workflow.collab.dto.GraphChangeMessage.Type;
@@ -71,6 +72,12 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     @Transactional
     public ProcessConnectionResponse createConnection(ProcessConnectionCreateRequest request) {
         Workflow workflow = projectAccessService.requireWorkflowWriteAccess(request.workflowId());
+        WorkflowText.requireStorable(request.sourceHandle(), "sourceHandle");
+        WorkflowText.requireStorable(request.targetHandle(), "targetHandle");
+        WorkflowText.requireStorable(request.connectionType(), "connectionType");
+        WorkflowText.requireStorable(request.connectionLabel(), "connectionLabel");
+        WorkflowText.requireStorable(request.unit(), "unit");
+        WorkflowText.requireStorable(request.conditionExpr(), "conditionExpr");
         entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
         Process fromProcess = projectAccessService.requireProcessWriteAccess(request.fromProcessId());
         Process toProcess = projectAccessService.requireProcessWriteAccess(request.toProcessId());
@@ -115,6 +122,10 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     @Transactional
     public ProcessConnectionResponse updateConnection(String connectionId, ProcessConnectionUpdateRequest request) {
         ProcessConnection connection = projectAccessService.requireConnectionWriteAccess(connectionId);
+        WorkflowText.requireStorable(request.sourceHandle(), "sourceHandle");
+        WorkflowText.requireStorable(request.targetHandle(), "targetHandle");
+        WorkflowText.requireStorable(request.connectionType(), "connectionType");
+        WorkflowText.requireStorable(request.conditionExpr(), "conditionExpr");
         lockWorkflowForConnection(connection);
         Process fromProcess = projectAccessService.requireProcessWriteAccess(connection.getFromProcessId());
         Process toProcess = projectAccessService.requireProcessWriteAccess(connection.getToProcessId());
@@ -232,6 +243,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         if (!value.isTextual()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, field + " must be a string or null.");
         }
+        WorkflowText.requireStorable(value.textValue(), field);
         if (value.textValue().length() > maxLength) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 field + " must be at most " + maxLength + " characters.");
@@ -412,6 +424,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     }
 
     private static String normalizeFailurePolicy(String value) {
+        WorkflowText.requireStorable(value, "failurePolicy");
         String normalized = defaultIfBlank(value, "stop");
         if (!FAILURE_POLICIES.contains(normalized)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Unknown connection failure policy.");

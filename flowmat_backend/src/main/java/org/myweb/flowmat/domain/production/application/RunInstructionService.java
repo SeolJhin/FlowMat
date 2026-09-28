@@ -64,8 +64,8 @@ public class RunInstructionService {
         if (checkRepository.findByProductionRunIdAndStepId(run.getProductionRunId(), stepId).isPresent()) {
             throw new BusinessException(ErrorCode.CONFLICT, "Step " + step.stepNo() + " is already confirmed; undo it to confirm it again.");
         }
-        String value = request == null || request.value() == null || request.value().isBlank() ? null : request.value().trim();
-        String note = request == null || request.note() == null || request.note().isBlank() ? null : request.note().trim();
+        String value = ProductionText.trimToNull(request == null ? null : request.value(), "value");
+        String note = ProductionText.trimToNull(request == null ? null : request.note(), "note");
         if (step.recordsValue() && value == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 "Step " + step.stepNo() + " records " + (step.valueLabel() != null ? step.valueLabel() : "a value") + "; enter it.");

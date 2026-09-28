@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -103,9 +104,8 @@ public class BuildableQuantityService {
         }
         int buildableScale = unit != null && "count".equals(unit.getUnitType()) ? 0 : SCALE;
 
-        List<BuildableQuantityResponse.Line> lines = new ArrayList<>();
-        BigDecimal least = null;
-        String limiting = null;
+        Map<String, BigDecimal> needs = new LinkedHashMap<>();
+        Map<String, String> itemUnits = new LinkedHashMap<>();
         for (BomLineResponse line : bom.lines()) {
             if (!BomTree.isMaterial(line.lineType())) {
                 continue;
@@ -115,16 +115,25 @@ public class BuildableQuantityService {
                 throw new BusinessException(ErrorCode.BAD_REQUEST, "Material " + line.childItemId() + " no longer exists.");
             }
             UnitConverter.Conversion need = unitConverter.toItemUnit(line.quantity(), line.unit(), child.getUnitId());
-            BigDecimal perBatch = need.quantity().setScale(SCALE, RoundingMode.HALF_UP);
-            BigDecimal have = stock.usable().getOrDefault(child.getItemId(), BigDecimal.ZERO).max(BigDecimal.ZERO);
+            // The BOM rounds each converted line before adding it. Repeated materials share one stock balance.
+            needs.merge(child.getItemId(), need.quantity().setScale(SCALE, RoundingMode.HALF_UP), BigDecimal::add);
+            itemUnits.putIfAbsent(child.getItemId(), need.toUnitCode());
+        }
+        List<BuildableQuantityResponse.Line> lines = new ArrayList<>();
+        BigDecimal least = null;
+        String limiting = null;
+        for (Map.Entry<String, BigDecimal> need : needs.entrySet()) {
+            String itemId = need.getKey();
+            BigDecimal perBatch = need.getValue();
+            BigDecimal have = stock.usable().getOrDefault(itemId, BigDecimal.ZERO).max(BigDecimal.ZERO);
             // A need that rounds to nothing does not limit the product.
             BigDecimal allows = perBatch.signum() <= 0 ? null
                 : have.multiply(batch).divide(perBatch, buildableScale, RoundingMode.DOWN);
             if (allows != null && (least == null || allows.compareTo(least) < 0)) {
                 least = allows;
-                limiting = child.getItemId();
+                limiting = itemId;
             }
-            lines.add(new BuildableQuantityResponse.Line(child.getItemId(), need.toUnitCode(), perBatch,
+            lines.add(new BuildableQuantityResponse.Line(itemId, itemUnits.get(itemId), perBatch,
                 have.setScale(SCALE, RoundingMode.HALF_UP), allows));
         }
         return new BuildableQuantityResponse(bom.bomId(), bom.targetItemId(), unit == null ? bom.baseUnit() : unit.getUnitCode(),

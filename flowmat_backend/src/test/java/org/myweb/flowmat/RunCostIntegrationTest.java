@@ -128,6 +128,43 @@ class RunCostIntegrationTest extends IntegrationTestSupport {
             .andExpect(jsonPath("$.data.varianceCostComplete").value(false));
     }
 
+    @Test
+    void finishingWithZeroOutputUsesZeroAsTheMaterialUsageBasis() throws Exception {
+        String product = item(null, "unit_ea");
+        String material = item("2");
+        String bomId = id(call(post("/boms"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"targetItemId\":\"" + product
+            + "\",\"bomName\":\"Zero output\",\"baseQuantity\":10,\"baseUnit\":\"ea\"}")
+            .andExpect(status().isOk()), "bomId");
+        call(post("/boms/" + bomId + "/lines"), "{\"childItemId\":\"" + material + "\",\"quantity\":5,\"unit\":\"kg\"}")
+            .andExpect(status().isOk());
+        call(post("/boms/" + bomId + "/submit")).andExpect(status().isOk());
+        call(post("/boms/" + bomId + "/approve")).andExpect(status().isOk());
+        String runId = id(call(post("/production-runs/start"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"workflowId\":\""
+            + DEMO_WORKFLOW + "\",\"bomId\":\"" + bomId + "\",\"plannedOutputQty\":20}")
+            .andExpect(status().isOk()), "productionRunId");
+        record(runId, stock(material, "20"), material, "3", "kg");
+        call(get("/production-runs/" + runId + "/material-usage"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.basisIsActual").value(false))
+            .andExpect(jsonPath("$.data.lines[0].standard").value(10.0));
+        call(post("/production-runs/" + runId + "/finish"), "{\"actualOutputQty\":0}").andExpect(status().isOk());
+        call(get("/production-runs/" + runId + "/material-usage"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.basisIsActual").value(true))
+            .andExpect(jsonPath("$.data.basisQuantity").value(0.0))
+            .andExpect(jsonPath("$.data.lines[0].planned").value(10.0))
+            .andExpect(jsonPath("$.data.lines[0].standard").value(0.0))
+            .andExpect(jsonPath("$.data.lines[0].actual").value(3.0))
+            .andExpect(jsonPath("$.data.lines[0].variance").value(3.0))
+            .andExpect(jsonPath("$.data.lines[0].variancePercent").value(nullValue()))
+            .andExpect(jsonPath("$.data.varianceCost").value(6.0))
+            .andExpect(jsonPath("$.data.varianceCostComplete").value(true));
+        call(get("/production-runs/" + runId + "/cost"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.materialCost").value(6.0))
+            .andExpect(jsonPath("$.data.costPerUnit").value(nullValue()));
+    }
+
     // ---- helpers ----
 
     private String record(String runId, String inventoryId, String itemId, String qty, String unit) throws Exception {

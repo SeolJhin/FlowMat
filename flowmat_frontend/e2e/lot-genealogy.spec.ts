@@ -45,7 +45,7 @@ async function addLotStock(page: Page, itemCode: string, lotNo: string, quantity
   await page.getByLabel('Item *').selectOption({ label: label(itemCode) })
   await page.getByLabel('LOT *').selectOption({ label: lotNo })
   await page.getByRole('spinbutton', { name: 'On hand *' }).fill(quantity)
-  await page.getByRole('textbox', { name: 'Location' }).fill(`WH-${lotNo}`)
+  await page.getByLabel('Location', { exact: true }).fill(`WH-${lotNo}`)
   await page.getByRole('button', { name: 'Add' }).click()
   await expect(page.getByRole('row', { name: new RegExp(lotNo) })).toBeVisible()
 }

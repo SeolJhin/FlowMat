@@ -19,6 +19,7 @@ import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessConnection;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
 import org.myweb.flowmat.domain.workflow.domain.contract.PortSchema;
+import org.myweb.flowmat.domain.workflow.domain.contract.WorkflowText;
 import org.myweb.flowmat.domain.workflow.domain.expression.ConditionExpression;
 import org.myweb.flowmat.domain.workflow.collab.GraphSyncService;
 import org.myweb.flowmat.domain.workflow.collab.dto.GraphChangeMessage.Type;
@@ -65,6 +66,14 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     @Transactional
     public ProcessIoResponse createProcessIo(ProcessIoCreateRequest request) {
         Process process = projectAccessService.requireProcessWriteAccess(request.processId());
+        WorkflowText.requireStorable(request.ioName(), "ioName");
+        WorkflowText.requireStorable(request.ioType(), "ioType");
+        WorkflowText.requireStorable(request.role(), "role");
+        WorkflowText.requireStorable(request.resourceType(), "resourceType");
+        WorkflowText.requireStorable(request.unit(), "unit");
+        WorkflowText.requireStorable(request.formula(), "formula");
+        WorkflowText.requireStorable(request.colorScheme(), "colorScheme");
+        WorkflowText.requireStorable(request.validationRule(), "validationRule");
         Item item = findActiveItem(request.itemId());
         validateSameProject(process.getProjectId(), item.getProjectId());
 
@@ -101,6 +110,14 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     @Transactional
     public ProcessIoResponse updateProcessIo(String processIoId, ProcessIoUpdateRequest request) {
         ProcessIo processIo = projectAccessService.requireProcessIoWriteAccess(processIoId);
+        WorkflowText.requireStorable(request.ioName(), "ioName");
+        WorkflowText.requireStorable(request.ioType(), "ioType");
+        WorkflowText.requireStorable(request.role(), "role");
+        WorkflowText.requireStorable(request.resourceType(), "resourceType");
+        WorkflowText.requireStorable(request.unit(), "unit");
+        WorkflowText.requireStorable(request.formula(), "formula");
+        WorkflowText.requireStorable(request.colorScheme(), "colorScheme");
+        WorkflowText.requireStorable(request.validationRule(), "validationRule");
         lockWorkflowForPort(processIo);
         List<String> contractBefore = contractFields(processIo);
 
@@ -278,6 +295,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     }
 
     private static String normalizeDirection(String value) {
+        WorkflowText.requireStorable(value, "direction");
         String normalized = value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT);
         if (!Set.of("input", "output").contains(normalized)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "direction must be input or output.");
@@ -286,6 +304,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     }
 
     private static String normalizeYn(String value, String defaultValue, String field) {
+        WorkflowText.requireStorable(value, field);
         String normalized = value == null ? defaultValue : value.trim().toUpperCase(java.util.Locale.ROOT);
         if (!Set.of("Y", "N").contains(normalized)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, field + " must be Y or N.");

@@ -59,7 +59,7 @@ test('LOT-tracked stock, quarantine, BOM approval and a run planned from the BOM
   await page.getByLabel('Item *').selectOption({ label: `${FLOUR} · ${FLOUR.toLowerCase()}` })
   await page.getByLabel('LOT *').selectOption({ label: LOT })
   await page.getByRole('spinbutton', { name: 'On hand *' }).fill('100')
-  await page.getByRole('textbox', { name: 'Location' }).fill(`WH-${suffix}`)
+  await page.getByLabel('Location', { exact: true }).fill(`WH-${suffix}`)
   await page.getByRole('button', { name: 'Add' }).click()
   const stockRow = page.getByRole('row', { name: new RegExp(LOT) })
   await expect(stockRow).toContainText('100')

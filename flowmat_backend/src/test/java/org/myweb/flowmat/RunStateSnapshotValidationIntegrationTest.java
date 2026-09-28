@@ -10,11 +10,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.json.JsonWriteFeature;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.myweb.flowmat.global.security.JwtProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,7 +48,8 @@ class RunStateSnapshotValidationIntegrationTest extends IntegrationTestSupport {
 
     @ParameterizedTest
     @ValueSource(strings = {"\"\\u0000\"", "{\"\\u0000\":1}", "\"\\ud800\"", "\"\\udc00\"",
-        "{\"n\":1e131072}", "1e-16384", "1e2147483648"})
+        "{\"n\":1e131072}", "1e-16384", "1e2147483648",
+        "{\"a\":\"\\u0000\",\"a\":1}", "{\"a\":1e131072,\"a\":1}"})
     void dataThatJsonbCannotStoreIsRejectedBeforeSaving(String snapshotData) throws Exception {
         String runId = run();
         call(post("/run-state-snapshots"), Map.of("productionRunId", runId, "snapshotData", snapshotData))
@@ -57,6 +62,21 @@ class RunStateSnapshotValidationIntegrationTest extends IntegrationTestSupport {
     void unsupportedMetadataCharactersAreRejected(String field) throws Exception {
         String runId = run();
         call(post("/run-state-snapshots"), Map.of("productionRunId", runId, "snapshotData", "{}", field, "bad\u0000text"))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.message", containsString(field)));
+        assertEmpty(runId);
+    }
+
+    static Stream<Arguments> unstorableMetadataBeforeNormalization() {
+        return Stream.of("snapshotName", "snapshotType", "note").flatMap(field ->
+            Stream.of("\u0000original", "original\u0000", "\u0000", "bad\ud800text", "bad\udc00text")
+                .map(value -> Arguments.of(field, value)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("unstorableMetadataBeforeNormalization")
+    void originalMetadataIsValidatedBeforeWhitespaceNormalization(String field, String value) throws Exception {
+        String runId = run();
+        call(post("/run-state-snapshots"), Map.of("productionRunId", runId, "snapshotData", "{}", field, value))
             .andExpect(status().isBadRequest()).andExpect(jsonPath("$.message", containsString(field)));
         assertEmpty(runId);
     }
@@ -128,6 +148,7 @@ class RunStateSnapshotValidationIntegrationTest extends IntegrationTestSupport {
     }
 
     private ResultActions call(MockHttpServletRequestBuilder request, Map<String, ?> body) throws Exception {
-        return call(request.contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(body)));
+        return call(request.contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writer().with(JsonWriteFeature.ESCAPE_NON_ASCII).writeValueAsString(body)));
     }
 }

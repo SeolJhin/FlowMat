@@ -1,6 +1,12 @@
 package org.myweb.flowmat.domain.production.application;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+import java.io.IOException;
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Locale;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.production.api.dto.request.RunStateSnapshotCreateRequest;
 import org.myweb.flowmat.domain.production.api.dto.response.RunStateSnapshotResponse;
@@ -21,6 +27,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class RunStateSnapshotServiceImpl implements RunStateSnapshotService {
 
     private static final String NOT_DELETED = "N";
+    private static final JsonFactory SNAPSHOT_JSON = new JsonFactory();
+    private static final int JSONB_INTEGER_DIGITS = 131072;
+    private static final int JSONB_FRACTIONAL_DIGITS = 16383;
 
     private final RunStateSnapshotRepository runStateSnapshotRepository;
     private final ProductionRunRepository productionRunRepository;
@@ -42,13 +51,20 @@ public class RunStateSnapshotServiceImpl implements RunStateSnapshotService {
         ProductionRun run = findActiveRun(request.productionRunId());
         projectAccessService.requireProjectWriteAccess(run.getProjectId());
 
+        requireStorableText(request.snapshotName(), "snapshotName");
+        requireStorableText(request.snapshotType(), "snapshotType");
+        requireStorableText(request.note(), "note");
+        String name = checkedText(trimToNull(request.snapshotName()), "snapshotName", 100);
+        String type = checkedText(defaultIfBlank(request.snapshotType(), "manual"), "snapshotType", 30);
+        String note = checkedText(trimToNull(request.note()), "note", 0);
+        String data = checkedSnapshotData(request.snapshotData());
         RunStateSnapshot snapshot = new RunStateSnapshot();
         snapshot.setRunStateSnapshotId(idGenerator.generate());
         snapshot.setProductionRunId(run.getProductionRunId());
-        snapshot.setSnapshotName(trimToNull(request.snapshotName()));
-        snapshot.setSnapshotType(defaultIfBlank(request.snapshotType(), "manual"));
-        snapshot.setSnapshotData(request.snapshotData().trim());
-        snapshot.setNote(trimToNull(request.note()));
+        snapshot.setSnapshotName(name);
+        snapshot.setSnapshotType(type);
+        snapshot.setSnapshotData(data);
+        snapshot.setNote(note);
         snapshot.setCreatedBy(projectAccessService.requireCurrentUserId());
         return toResponse(runStateSnapshotRepository.save(snapshot));
     }
@@ -83,7 +99,75 @@ public class RunStateSnapshotServiceImpl implements RunStateSnapshotService {
         return value != null && !value.isBlank() ? value.trim() : null;
     }
 
+    private static String checkedText(String value, String field, int limit) {
+        if (value == null) {
+            return null;
+        }
+        requireStorableText(value, field);
+        if (limit > 0 && value.codePointCount(0, value.length()) > limit) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, field + " must be at most " + limit + " characters.");
+        }
+        return value;
+    }
+
+    private static String checkedSnapshotData(String value) {
+        if (value == null || value.isBlank()) {
+            throw invalidSnapshotData();
+        }
+        // Check every token, including overwritten duplicate keys, without rewriting the caller's numbers.
+        try (JsonParser parser = SNAPSHOT_JSON.createParser(value)) {
+            int depth = 0;
+            boolean complete = false;
+            JsonToken token;
+            while ((token = parser.nextToken()) != null) {
+                if (complete) {
+                    throw invalidSnapshotData();
+                }
+                if (token == JsonToken.FIELD_NAME || token == JsonToken.VALUE_STRING) {
+                    requireStorableText(parser.getText(), "snapshotData");
+                } else if (token.isNumeric()) {
+                    BigDecimal number = parser.getDecimalValue();
+                    if ((number.signum() != 0 && (long) number.precision() - number.scale() > JSONB_INTEGER_DIGITS)
+                        || number.scale() > JSONB_FRACTIONAL_DIGITS) {
+                        throw new BusinessException(ErrorCode.BAD_REQUEST,
+                            "snapshotData contains a number outside PostgreSQL jsonb's range.");
+                    }
+                }
+                if (token.isStructStart()) {
+                    depth++;
+                } else if (token.isStructEnd()) {
+                    complete = --depth == 0;
+                } else if (depth == 0 && token.isScalarValue()) {
+                    complete = true;
+                }
+            }
+            if (!complete) {
+                throw invalidSnapshotData();
+            }
+        } catch (IOException | NumberFormatException exception) {
+            throw invalidSnapshotData();
+        }
+        return value.trim();
+    }
+
+    private static void requireStorableText(String value, String field) {
+        if (value == null) return;
+        for (int index = 0; index < value.length(); index++) {
+            char character = value.charAt(index);
+            if (character == 0 || Character.isLowSurrogate(character)
+                || (Character.isHighSurrogate(character)
+                    && (++index == value.length() || !Character.isLowSurrogate(value.charAt(index))))) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST,
+                    field + " contains a character PostgreSQL cannot store.");
+            }
+        }
+    }
+
+    private static BusinessException invalidSnapshotData() {
+        return new BusinessException(ErrorCode.BAD_REQUEST, "snapshotData must contain one valid JSON value.");
+    }
+
     private static String defaultIfBlank(String value, String defaultValue) {
-        return value != null && !value.isBlank() ? value.trim().toLowerCase() : defaultValue;
+        return value != null && !value.isBlank() ? value.trim().toLowerCase(Locale.ROOT) : defaultValue;
     }
 }

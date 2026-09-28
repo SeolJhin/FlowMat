@@ -3,6 +3,7 @@ package org.myweb.flowmat.domain.workflow.domain.contract;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -26,6 +27,7 @@ public record PortSchema(Map<String, String> properties, Set<String> required) {
             || !"object".equals(json.path("type").asText())) {
             throw bad("schemaJson.type must be object.");
         }
+        requireStorableJsonText(json);
         JsonNode propertyNodes = json.get("properties");
         if (propertyNodes != null && !propertyNodes.isObject()) {
             throw bad("schemaJson.properties must be an object.");
@@ -60,6 +62,29 @@ public record PortSchema(Map<String, String> properties, Set<String> required) {
             }
         }
         return new PortSchema(properties, required);
+    }
+
+    /** Unknown schema metadata is also stored in jsonb, so its text and keys must be storable. */
+    private static void requireStorableJsonText(JsonNode json) {
+        ArrayDeque<JsonNode> pending = new ArrayDeque<>();
+        pending.add(json);
+        while (!pending.isEmpty()) {
+            JsonNode node = pending.removeLast();
+            if (node.isTextual()) {
+                requireStorableText(node.textValue());
+            } else if (node.isObject()) {
+                node.fields().forEachRemaining(entry -> {
+                    requireStorableText(entry.getKey());
+                    pending.add(entry.getValue());
+                });
+            } else if (node.isArray()) {
+                node.forEach(pending::add);
+            }
+        }
+    }
+
+    private static void requireStorableText(String text) {
+        WorkflowText.requireStorable(text, "schemaJson");
     }
 
     public static PortSchema parseStored(String json) {

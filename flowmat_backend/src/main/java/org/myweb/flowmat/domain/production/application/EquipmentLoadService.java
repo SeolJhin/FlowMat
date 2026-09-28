@@ -123,7 +123,8 @@ public class EquipmentLoadService {
             }
             BigDecimal remaining = order.getTargetQuantity() == null
                 ? null
-                : order.getTargetQuantity().subtract(produced.getOrDefault(order.getWorkOrderId(), BigDecimal.ZERO));
+                : order.getTargetQuantity().subtract(produced.getOrDefault(order.getWorkOrderId(), BigDecimal.ZERO))
+                    .max(BigDecimal.ZERO);
             Integer changeover = changeoverMinutes(equipment, order, mine);
             BigDecimal needed = neededHours(remaining, rate, changeover);
             BigDecimal inWindow = needed == null ? null : inWindow(equipment, needed, start, end, from, to);
@@ -175,9 +176,13 @@ public class EquipmentLoadService {
                 return needed.multiply(part).divide(whole, 2, RoundingMode.HALF_UP);
             }
         }
-        BigDecimal wholeSeconds = BigDecimal.valueOf(Duration.between(start, end).getSeconds());
-        BigDecimal partSeconds = BigDecimal.valueOf(Duration.between(partStart, partEnd).getSeconds());
+        BigDecimal wholeSeconds = seconds(Duration.between(start, end));
+        BigDecimal partSeconds = seconds(Duration.between(partStart, partEnd));
         return needed.multiply(partSeconds).divide(wholeSeconds, 2, RoundingMode.HALF_UP);
+    }
+
+    private static BigDecimal seconds(Duration duration) {
+        return BigDecimal.valueOf(duration.getSeconds()).add(BigDecimal.valueOf(duration.getNano(), 9));
     }
 
     private Integer changeoverMinutes(Equipment equipment, WorkOrder order, List<WorkOrder> mine) {
