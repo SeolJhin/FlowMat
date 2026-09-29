@@ -85,7 +85,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         WorkflowText.requireStorable(request.connectionLabel(), "connectionLabel");
         WorkflowText.requireStorable(request.unit(), "unit");
         WorkflowText.requireStorable(request.conditionExpr(), "conditionExpr");
-        entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
+        lockWorkflow(workflow);
         Process fromProcess = projectAccessService.requireProcessWriteAccess(request.fromProcessId());
         Process toProcess = projectAccessService.requireProcessWriteAccess(request.toProcessId());
         validateProcessMembership(workflow, fromProcess, toProcess);
@@ -122,7 +122,9 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
 
     @Override
     public ProcessConnectionResponse getConnection(String connectionId) {
-        return toResponse(projectAccessService.requireConnectionReadAccess(connectionId));
+        ProcessConnection connection = projectAccessService.requireConnectionReadAccess(connectionId);
+        projectAccessService.requireWorkflowReadAccess(connection.getWorkflowId());
+        return toResponse(connection);
     }
 
     @Override
@@ -223,9 +225,17 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
 
     private void lockWorkflowForConnection(ProcessConnection connection) {
         Workflow workflow = projectAccessService.requireWorkflowWriteAccess(connection.getWorkflowId());
-        entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
+        lockWorkflow(workflow);
         entityManager.refresh(connection);
         if (!NOT_DELETED.equals(connection.getDeletedYn())) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+    }
+
+    private void lockWorkflow(Workflow workflow) {
+        entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
+        entityManager.refresh(workflow);
+        if (!NOT_DELETED.equals(workflow.getDeletedYn())) {
             throw new BusinessException(ErrorCode.NOT_FOUND);
         }
     }

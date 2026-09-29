@@ -57,7 +57,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
 
     @Override
     public List<ProcessIoResponse> listProcessIos(String processId) {
-        projectAccessService.requireProcessReadAccess(processId);
+        requireActiveWorkflowForRead(processId);
         return processIoRepository.findAllByProcessIdAndDeletedYnOrderByCreatedAtAsc(processId, NOT_DELETED).stream()
             .map(ProcessIoResponse::from)
             .toList();
@@ -77,6 +77,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         WorkflowText.requireStorable(request.formula(), "formula");
         WorkflowText.requireStorable(request.colorScheme(), "colorScheme");
         WorkflowText.requireStorable(request.validationRule(), "validationRule");
+        lockWorkflowForProcess(process);
         Item item = findActiveItem(request.itemId());
         validateSameProject(process.getProjectId(), item.getProjectId());
 
@@ -106,7 +107,9 @@ public class ProcessIoServiceImpl implements ProcessIoService {
 
     @Override
     public ProcessIoResponse getProcessIo(String processIoId) {
-        return ProcessIoResponse.from(projectAccessService.requireProcessIoReadAccess(processIoId));
+        ProcessIo processIo = projectAccessService.requireProcessIoReadAccess(processIoId);
+        requireActiveWorkflowForRead(processIo.getProcessId());
+        return ProcessIoResponse.from(processIo);
     }
 
     @Override
@@ -230,12 +233,29 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         return schema.toString();
     }
 
+    private void requireActiveWorkflowForRead(String processId) {
+        Process process = projectAccessService.requireProcessReadAccess(processId);
+        projectAccessService.requireWorkflowReadAccess(process.getWorkflowId());
+    }
+
     private void lockWorkflowForPort(ProcessIo port) {
         Process process = projectAccessService.requireProcessWriteAccess(port.getProcessId());
-        Workflow workflow = projectAccessService.requireWorkflowWriteAccess(process.getWorkflowId());
-        entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
+        lockWorkflowForProcess(process);
         entityManager.refresh(port);
         if (!NOT_DELETED.equals(port.getDeletedYn())) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+    }
+
+    private void lockWorkflowForProcess(Process process) {
+        Workflow workflow = projectAccessService.requireWorkflowWriteAccess(process.getWorkflowId());
+        entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
+        entityManager.refresh(workflow);
+        if (!NOT_DELETED.equals(workflow.getDeletedYn())) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+        entityManager.refresh(process);
+        if (!NOT_DELETED.equals(process.getDeletedYn())) {
             throw new BusinessException(ErrorCode.NOT_FOUND);
         }
     }

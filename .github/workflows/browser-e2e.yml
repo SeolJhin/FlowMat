@@ -60,6 +60,8 @@ jobs:
           DB_PASSWORD: flowmat-ci-password
           REDIS_HOST: localhost
           REDIS_PORT: '6379'
+          AUTH_LOGIN_ACCOUNT_LIMIT: '100'
+          AUTH_LOGIN_IP_LIMIT: '200'
           MAIL_HOST: localhost
           MAIL_PORT: '2525'
           MAIL_USERNAME: ci

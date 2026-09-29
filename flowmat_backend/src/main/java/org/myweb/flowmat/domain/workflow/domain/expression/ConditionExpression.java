@@ -134,7 +134,9 @@ public final class ConditionExpression {
                 index++;
                 if (index < source.length() && source.charAt(index) == '=') index++;
                 String operator = source.substring(start, index);
-                if (operator.equals("!")) throw invalid(start + 1, "expected !=");
+                if (!Set.of("=", "!=", "<", "<=", ">", ">=").contains(operator)) {
+                    throw invalid(start + 1, "unsupported comparison operator '" + operator + "'");
+                }
                 tokens.add(new Token("COMPARE", operator, start + 1));
                 continue;
             }

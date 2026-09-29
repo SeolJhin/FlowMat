@@ -63,6 +63,10 @@ slack:
   webhook-url: ${SLACK_WEBHOOK_URL:}
 
 app:
+  auth:
+    login-rate-limit:
+      account-limit: ${AUTH_LOGIN_ACCOUNT_LIMIT:8}
+      ip-limit: ${AUTH_LOGIN_IP_LIMIT:12}
   frontend-url: ${FRONTEND_URL}
   oauth2:
     redirect-uri: ${APP_OAUTH2_REDIRECT_URI}

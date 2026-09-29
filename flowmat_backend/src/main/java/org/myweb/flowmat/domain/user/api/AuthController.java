@@ -28,6 +28,7 @@ import org.myweb.flowmat.domain.user.api.dto.response.SocialLinkStartResponse;
 import org.myweb.flowmat.domain.user.api.dto.response.UserTokenResponse;
 import org.myweb.flowmat.domain.user.application.AuthService;
 import org.myweb.flowmat.domain.user.application.AuthRedisStore;
+import org.myweb.flowmat.domain.user.application.LoginRateLimitProperties;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.response.ApiResponse;
@@ -54,8 +55,6 @@ public class AuthController {
     private static final String GUEST_SID_COOKIE_NAME = "guest_sid";
     private static final int GUEST_SID_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
     private static final Pattern GUEST_SID_PATTERN = Pattern.compile("^[A-Za-z0-9_-]{16,128}$");
-    private static final int LOGIN_IP_LIMIT = 12;
-    private static final int LOGIN_ACCOUNT_LIMIT = 8;
     private static final int EMAIL_CODE_IP_LIMIT = 10;
     private static final int EMAIL_CODE_EMAIL_LIMIT = 5;
     private static final int DORMANT_REQUEST_IP_LIMIT = 8;
@@ -66,6 +65,7 @@ public class AuthController {
 
     private final AuthService authService;
     private final AuthRedisStore authRedisStore;
+    private final LoginRateLimitProperties loginRateLimitProperties;
     private final RefreshTokenCookieService refreshTokenCookieService;
     private final OAuthExchangeStore oauthExchangeStore;
 
@@ -122,8 +122,8 @@ public class AuthController {
         HttpServletResponse httpResponse,
         @Valid @RequestBody UserLoginRequest request
     ) {
-        enforceRateLimit("login-ip", clientIpKey(httpRequest), LOGIN_IP_LIMIT, LOGIN_RATE_WINDOW);
-        enforceRateLimit("login-account", normalizeRateKey(request.userIdOrEmail()), LOGIN_ACCOUNT_LIMIT, LOGIN_RATE_WINDOW);
+        enforceRateLimit("login-ip", clientIpKey(httpRequest), loginRateLimitProperties.getIpLimit(), LOGIN_RATE_WINDOW);
+        enforceRateLimit("login-account", normalizeRateKey(request.userIdOrEmail()), loginRateLimitProperties.getAccountLimit(), LOGIN_RATE_WINDOW);
         UserTokenResponse response = authService.login(request, httpRequest.getHeader("User-Agent"), extractIp(httpRequest));
         writeRefreshCookie(httpRequest, httpResponse, response);
         return ApiResponse.ok(cookieBackedResponse(response));
