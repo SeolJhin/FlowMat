@@ -5,6 +5,7 @@ import jakarta.persistence.LockModeType;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
@@ -65,7 +66,9 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     @Override
     @Transactional
     public ProcessIoResponse createProcessIo(ProcessIoCreateRequest request) {
+        WorkflowText.requireStorable(request.processId(), "processId");
         Process process = projectAccessService.requireProcessWriteAccess(request.processId());
+        WorkflowText.requireStorable(request.itemId(), "itemId");
         WorkflowText.requireStorable(request.ioName(), "ioName");
         WorkflowText.requireStorable(request.ioType(), "ioType");
         WorkflowText.requireStorable(request.role(), "role");
@@ -86,7 +89,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         processIo.setIoType(defaultIfBlank(request.ioType(), "material"));
         processIo.setRole(trimToNull(request.role()));
         processIo.setResourceType(defaultIfBlank(request.resourceType(), processIo.getIoType()));
-        processIo.setQuantity(defaultIfNull(request.quantity(), BigDecimal.ZERO));
+        processIo.setQuantity(normalizeQuantity(defaultIfNull(request.quantity(), BigDecimal.ZERO)));
         processIo.setUnit(request.unit().trim());
         processIo.setFormula(trimToNull(request.formula()));
         processIo.setSchemaJson(writeSchema(request.schemaJson()));
@@ -110,6 +113,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     @Transactional
     public ProcessIoResponse updateProcessIo(String processIoId, ProcessIoUpdateRequest request) {
         ProcessIo processIo = projectAccessService.requireProcessIoWriteAccess(processIoId);
+        WorkflowText.requireStorable(request.itemId(), "itemId");
         WorkflowText.requireStorable(request.ioName(), "ioName");
         WorkflowText.requireStorable(request.ioType(), "ioType");
         WorkflowText.requireStorable(request.role(), "role");
@@ -134,16 +138,16 @@ public class ProcessIoServiceImpl implements ProcessIoService {
             processIo.setDirection(normalizeDirection(request.direction()));
         }
         if (hasText(request.ioType())) {
-            processIo.setIoType(request.ioType().trim().toLowerCase());
+            processIo.setIoType(request.ioType().trim().toLowerCase(Locale.ROOT));
         }
         if (request.role() != null) {
             processIo.setRole(trimToNull(request.role()));
         }
         if (hasText(request.resourceType())) {
-            processIo.setResourceType(request.resourceType().trim().toLowerCase());
+            processIo.setResourceType(request.resourceType().trim().toLowerCase(Locale.ROOT));
         }
         if (request.quantity() != null) {
-            processIo.setQuantity(request.quantity());
+            processIo.setQuantity(normalizeQuantity(request.quantity()));
         }
         if (hasText(request.unit())) {
             processIo.setUnit(request.unit().trim());
@@ -279,7 +283,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     }
 
     private static boolean hasText(String value) {
-        return value != null && !value.isBlank();
+        return value != null && !value.trim().isBlank();
     }
 
     private static String trimToNull(String value) {
@@ -287,11 +291,15 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     }
 
     private static String defaultIfBlank(String value, String defaultValue) {
-        return hasText(value) ? value.trim().toLowerCase() : defaultValue;
+        return hasText(value) ? value.trim().toLowerCase(Locale.ROOT) : defaultValue;
     }
 
     private static BigDecimal defaultIfNull(BigDecimal value, BigDecimal defaultValue) {
         return value != null ? value : defaultValue;
+    }
+
+    private static BigDecimal normalizeQuantity(BigDecimal quantity) {
+        return quantity.signum() == 0 ? BigDecimal.ZERO : quantity;
     }
 
     private static String normalizeDirection(String value) {
@@ -326,6 +334,6 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     }
 
     private static String normalizeColorScheme(String value) {
-        return value.trim().toLowerCase();
+        return value.trim().toLowerCase(Locale.ROOT);
     }
 }

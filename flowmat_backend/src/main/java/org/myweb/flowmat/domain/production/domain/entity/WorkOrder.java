@@ -44,6 +44,7 @@ public class WorkOrder extends CreatedUpdatedAuditEntity {
     @Column(name = "pdf_url", length = 255)
     private String instructionUrl;
 
+    @Column(length = 50)
     private String assignedTo;
     /** The equipment the order runs on (V32); readiness checks its time in the planned window. */
     private String equipmentId;

@@ -79,6 +79,20 @@ class StockAllocationPrecisionIntegrationTest extends IntegrationTestSupport {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"1e-2147483647", "1e-1000000"})
+    void extremeUnderflowIsRejectedWithoutExpandingItsDecimalPlaces(String quantity) throws Exception {
+        Fixture fixture = fixture();
+        allocate(fixture, List.of(line(fixture.itemId(), quantity))).andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message", containsString("lines.quantity")));
+        stock(fixture, BigDecimal.TEN, BigDecimal.ZERO);
+        call(get("/work-orders/" + fixture.orderId() + "/allocations")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.allocations.length()").value(0));
+        allocate(fixture, List.of(line(fixture.itemId(), "0.00005"))).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.allocations[0].quantity").value(0.0001));
+        stock(fixture, BigDecimal.TEN, new BigDecimal("0.0001"));
+    }
+
+    @ParameterizedTest
     @CsvSource({"0.1234, 0.0001, 0.0009", "0.96, 0.001, 0"})
     void bomDemandAfterAConvertedInputDoesNotLeaveAnUnrepresentableReservation(
         BigDecimal grams, BigDecimal spent, BigDecimal remaining

@@ -1,5 +1,6 @@
 package org.myweb.flowmat.domain.production.domain.entity;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
@@ -28,6 +29,7 @@ public class ProductionRunItem {
     private String direction;
     private BigDecimal plannedQty;
     private BigDecimal actualQty;
+    @Column(length = 20)
     private String unit;
 
     /** "manual" when recorded by hand, "bom" when planned from a BOM snapshot, "correction" when added by a correction. */

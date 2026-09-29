@@ -57,6 +57,7 @@ public class StockAllocationService {
     private static final String NOT_DELETED = "N";
     private static final String AVAILABLE = "available";
     private static final String REFERENCE = "stock_allocation";
+    private static final BigDecimal MIN_ROUNDABLE_QUANTITY = new BigDecimal("0.00005");
 
     private final StockAllocationRepository allocationRepository;
     private final WorkOrderRepository workOrderRepository;
@@ -258,10 +259,14 @@ public class StockAllocationService {
         List<StockAllocationRequest.Line> lines = request == null || request.lines() == null ? List.of() : request.lines();
         if (!lines.isEmpty()) {
             for (StockAllocationRequest.Line line : lines) {
-                if (line.itemId() == null || line.itemId().isBlank() || line.quantity() == null || line.quantity().signum() <= 0) {
+                if (line == null) {
+                    throw new BusinessException(ErrorCode.BAD_REQUEST, "lines must not contain null entries.");
+                }
+                String itemId = ProductionText.trimToNull(line.itemId(), "lines.itemId");
+                if (itemId == null || line.quantity() == null || line.quantity().signum() <= 0) {
                     throw new BusinessException(ErrorCode.BAD_REQUEST, "Each line needs an item and a quantity greater than 0.");
                 }
-                needs.merge(line.itemId().trim(), line.quantity(), BigDecimal::add);
+                needs.merge(itemId, line.quantity(), BigDecimal::add);
             }
             // Sum repeated item lines first, then use the same precision as allocations and stock movements.
             // Reject amounts that cannot reserve any stock instead of relying on a database constraint failure.
@@ -359,6 +364,9 @@ public class StockAllocationService {
     }
 
     private static BigDecimal scale(BigDecimal value) {
+        if (value.abs().compareTo(MIN_ROUNDABLE_QUANTITY) < 0) {
+            return BigDecimal.ZERO;
+        }
         return value.setScale(4, RoundingMode.HALF_UP);
     }
 }

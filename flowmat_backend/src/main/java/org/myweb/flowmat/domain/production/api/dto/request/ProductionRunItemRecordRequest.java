@@ -12,6 +12,6 @@ public record ProductionRunItemRecordRequest(
     @NotBlank String direction,
     @NotNull BigDecimal plannedQty,
     BigDecimal actualQty,
-    @NotBlank String unit
+    @NotBlank(message = "unit is required.") String unit
 ) {
 }

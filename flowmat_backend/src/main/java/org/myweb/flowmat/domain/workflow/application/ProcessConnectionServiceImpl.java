@@ -5,6 +5,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
@@ -71,7 +72,13 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     @Override
     @Transactional
     public ProcessConnectionResponse createConnection(ProcessConnectionCreateRequest request) {
+        WorkflowText.requireStorable(request.workflowId(), "workflowId");
         Workflow workflow = projectAccessService.requireWorkflowWriteAccess(request.workflowId());
+        WorkflowText.requireStorable(request.fromProcessId(), "fromProcessId");
+        WorkflowText.requireStorable(request.toProcessId(), "toProcessId");
+        WorkflowText.requireStorable(request.fromIoId(), "fromIoId");
+        WorkflowText.requireStorable(request.toIoId(), "toIoId");
+        WorkflowText.requireStorable(request.itemId(), "itemId");
         WorkflowText.requireStorable(request.sourceHandle(), "sourceHandle");
         WorkflowText.requireStorable(request.targetHandle(), "targetHandle");
         WorkflowText.requireStorable(request.connectionType(), "connectionType");
@@ -122,6 +129,9 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     @Transactional
     public ProcessConnectionResponse updateConnection(String connectionId, ProcessConnectionUpdateRequest request) {
         ProcessConnection connection = projectAccessService.requireConnectionWriteAccess(connectionId);
+        WorkflowText.requireStorable(request.fromIoId(), "fromIoId");
+        WorkflowText.requireStorable(request.toIoId(), "toIoId");
+        WorkflowText.requireStorable(request.itemId(), "itemId");
         WorkflowText.requireStorable(request.sourceHandle(), "sourceHandle");
         WorkflowText.requireStorable(request.targetHandle(), "targetHandle");
         WorkflowText.requireStorable(request.connectionType(), "connectionType");
@@ -156,7 +166,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
             connection.setTargetHandle(resolveHandle(null, connection.getToIoId(), "in"));
         }
         if (hasText(request.connectionType())) {
-            connection.setConnectionType(request.connectionType().trim().toLowerCase());
+            connection.setConnectionType(request.connectionType().trim().toLowerCase(Locale.ROOT));
         }
         if (request.connectionLabel() != null) {
             connection.setConnectionLabel(optionalText(request.connectionLabel(), "connectionLabel", 100));
@@ -397,7 +407,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     }
 
     private static boolean hasText(String value) {
-        return value != null && !value.isBlank();
+        return value != null && !value.trim().isBlank();
     }
 
     private static String trimToNull(String value) {
@@ -405,7 +415,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
     }
 
     private static String defaultIfBlank(String value, String defaultValue) {
-        return hasText(value) ? value.trim().toLowerCase() : defaultValue;
+        return hasText(value) ? value.trim().toLowerCase(Locale.ROOT) : defaultValue;
     }
 
     private static BigDecimal defaultIfNull(BigDecimal value, BigDecimal defaultValue) {
@@ -420,7 +430,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
             || capacity.stripTrailingZeros().scale() > 4)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Connection capacity must fit numeric(19,4).");
         }
-        return capacity;
+        return capacity != null && capacity.signum() == 0 ? BigDecimal.ZERO : capacity;
     }
 
     private static String normalizeFailurePolicy(String value) {

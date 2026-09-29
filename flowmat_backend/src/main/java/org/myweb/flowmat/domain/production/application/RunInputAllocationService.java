@@ -62,6 +62,8 @@ public class RunInputAllocationService {
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         projectAccessService.requireProjectWriteAccess(run.getProjectId());
         ProductionRunServiceImpl.requireOpenRun(run);
+        ProductionText.requireStorable(request.itemId(), "itemId");
+        ProductionText.requireStorable(request.processId(), "processId");
         Item item = itemRepository.findByItemIdAndDeletedYn(request.itemId(), NOT_DELETED)
             .filter(found -> run.getProjectId().equals(found.getProjectId()))
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
@@ -69,15 +71,16 @@ public class RunInputAllocationService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, item.getItemCode() + " is not LOT-tracked; record it directly.");
         }
         // Allocate in the item's own unit; each piece is then recorded in that unit.
-        UnitConverter.Conversion conversion = unitConverter.toItemUnit(request.quantity(), request.unit(), item.getUnitId());
+        String unit = ProductionRunServiceImpl.storedUnit(request.unit());
+        UnitConverter.Conversion conversion = unitConverter.toItemUnit(request.quantity(), unit, item.getUnitId());
         if (conversion.quantity().compareTo(new BigDecimal("0.00005")) < 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 "quantity must round to at least 0.0001 in the item's stock unit.");
         }
         BigDecimal needed = conversion.quantity().setScale(4, RoundingMode.HALF_UP);
         String recordUnit = item.getUnitId() == null
-            ? request.unit().trim()
-            : unitMasterRepository.findById(item.getUnitId()).map(unit -> unit.getUnitCode()).orElse(request.unit().trim());
+            ? unit
+            : unitMasterRepository.findById(item.getUnitId()).map(unitMaster -> unitMaster.getUnitCode()).orElse(unit);
 
         // An actual run can consume its order's reservation through the ordinary recording path.
         // Simulations do not release physical reservations, so they can only plan against free stock.

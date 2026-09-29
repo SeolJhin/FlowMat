@@ -8,7 +8,7 @@ import java.util.List;
 
 /** A correction of a finished run (docs/domain/production-run-correction.md). */
 public record RunCorrectionCreateRequest(
-    @NotBlank @Size(max = 500) String reason,
+    @NotBlank(message = "reason is required.") @Size(max = 500) String reason,
     @NotEmpty @Size(max = 50) List<@Valid RunCorrectionLineRequest> lines
 ) {
 }

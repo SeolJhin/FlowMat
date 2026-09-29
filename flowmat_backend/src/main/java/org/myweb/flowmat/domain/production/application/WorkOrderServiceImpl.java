@@ -6,6 +6,7 @@ import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
@@ -81,6 +82,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     @Override
     @Transactional
     public WorkOrderResponse createWorkOrder(WorkOrderCreateRequest request) {
+        ProductionText.requireStorable(request.projectId(), "projectId");
         String projectId = request.projectId().trim();
         projectAccessService.requireProjectWriteAccess(projectId);
 
@@ -184,16 +186,16 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         String assignedTo,
         String bomId
     ) {
-        if (title == null || title.isBlank()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "Work order title is required.");
+        String normalizedTitle = ProductionText.trimToNull(title, "workOrderTitle");
+        if (normalizedTitle == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "workOrderTitle is required.");
         }
-        String normalizedTitle = title.trim();
         if (normalizedTitle.codePointCount(0, normalizedTitle.length()) > 100) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "workOrderTitle must be at most 100 characters.");
         }
         order.setWorkOrderTitle(normalizedTitle);
 
-        String normalizedWorkflowId = trimToNull(workflowId);
+        String normalizedWorkflowId = ProductionText.trimToNull(workflowId, "workflowId");
         if (normalizedWorkflowId != null) {
             Workflow workflow = workflowRepository.findByWorkflowIdAndDeletedYn(normalizedWorkflowId, NOT_DELETED)
                 .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "Workflow does not exist."));
@@ -201,7 +203,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         }
         order.setWorkflowId(normalizedWorkflowId);
 
-        String normalizedItemId = trimToNull(targetItemId);
+        String normalizedItemId = ProductionText.trimToNull(targetItemId, "targetItemId");
         if (normalizedItemId != null) {
             Item item = itemRepository.findByItemIdAndDeletedYn(normalizedItemId, NOT_DELETED)
                 .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "Target item does not exist."));
@@ -214,7 +216,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         order.setTargetItemId(normalizedItemId);
 
         // The BOM must make the order's product; an order without a product takes the BOM's.
-        String normalizedBomId = trimToNull(bomId);
+        String normalizedBomId = ProductionText.trimToNull(bomId, "bomId");
         if (normalizedBomId != null) {
             BomHeader bom = findBom(order, normalizedBomId);
             if (BomStatus.RETIRED.code().equals(bom.getBomStatus())) {
@@ -231,7 +233,8 @@ public class WorkOrderServiceImpl implements WorkOrderService {
 
         order.setTargetQuantity(storedTargetQuantity(targetQuantity));
 
-        String normalizedPriority = priority == null || priority.isBlank() ? "normal" : priority.trim().toLowerCase();
+        ProductionText.requireStorable(priority, "priority");
+        String normalizedPriority = priority == null || priority.isBlank() ? "normal" : priority.trim().toLowerCase(Locale.ROOT);
         if (!PRIORITIES.contains(normalizedPriority)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Priority must be one of low, normal, high, urgent.");
         }
@@ -242,8 +245,12 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         }
         order.setPlannedStartAt(plannedStartAt);
         order.setPlannedEndAt(plannedEndAt);
-        order.setInstruction(trimToNull(instruction));
-        order.setAssignedTo(trimToNull(assignedTo));
+        order.setInstruction(ProductionText.trimToNull(instruction, "instruction"));
+        String normalizedAssignee = ProductionText.trimToNull(assignedTo, "assignedTo");
+        if (normalizedAssignee != null && normalizedAssignee.codePointCount(0, normalizedAssignee.length()) > 50) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "assignedTo must be 50 characters or fewer.");
+        }
+        order.setAssignedTo(normalizedAssignee);
     }
 
     private static BigDecimal storedTargetQuantity(BigDecimal quantity) {
@@ -365,7 +372,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
      * the work order list; anything else (javascript:, data:, a relative path) is refused.
      */
     private static String instructionUrl(String value) {
-        String url = trimToNull(value);
+        String url = ProductionText.trimToNull(value, "instructionUrl");
         if (url == null) {
             return null;
         }
@@ -384,7 +391,4 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         throw new BusinessException(ErrorCode.BAD_REQUEST, "Instruction link must be an http or https address, like https://docs.example.com/wi-12.pdf.");
     }
 
-    private static String trimToNull(String value) {
-        return value != null && !value.isBlank() ? value.trim() : null;
-    }
 }

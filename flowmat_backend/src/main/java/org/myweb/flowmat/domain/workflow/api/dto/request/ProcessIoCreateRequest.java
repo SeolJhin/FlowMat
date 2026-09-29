@@ -13,7 +13,7 @@ public record ProcessIoCreateRequest(
     @NotBlank String direction,
     @Size(max = 30, message = "ioType must be at most 30 characters.") String ioType,
     @NotNull BigDecimal quantity,
-    @NotBlank @Size(max = 20, message = "unit must be at most 20 characters.") String unit,
+    @NotBlank(message = "unit is required.") @Size(max = 20, message = "unit must be at most 20 characters.") String unit,
     String formula,
     @Size(max = 30, message = "colorScheme must be at most 30 characters.") String colorScheme,
     String requiredYn,

@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -87,7 +88,8 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
             throw new BusinessException(ErrorCode.CONFLICT,
                 "A correction of run " + run.getRunNumber() + " is already waiting for approval. Approve or reject it first.");
         }
-        if (request.reason() == null || request.reason().isBlank()) {
+        String normalizedReason = ProductionText.trimToNull(request.reason(), "reason");
+        if (normalizedReason == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Give a reason for the correction.");
         }
         List<ProductionRunCorrectionLine> lines = validateLines(run, request.lines());
@@ -100,7 +102,7 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
             .map(latest -> latest.getCorrectionNo() + 1)
             .orElse(1));
         correction.setStatus(ProductionRunCorrection.PENDING_APPROVAL);
-        correction.setReason(request.reason().trim());
+        correction.setReason(normalizedReason);
         correction.setRequestedBy(projectAccessService.requireCurrentUserId());
         correction.setRequestedAt(OffsetDateTime.now());
         ProductionRunCorrection saved = correctionRepository.save(correction);
@@ -172,13 +174,14 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
         ProductionRun run = lockRun(productionRunId);
         projectAccessService.requireProjectOwnerAccess(run.getProjectId());
         ProductionRunCorrection correction = findPending(run, correctionId);
-        if (note == null || note.isBlank()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "Give a reason for rejecting the correction.");
+        String normalizedNote = ProductionText.trimToNull(note, "note");
+        if (normalizedNote == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "note is required for rejecting the correction.");
         }
         correction.setStatus(ProductionRunCorrection.REJECTED);
         correction.setDecidedBy(projectAccessService.requireCurrentUserId());
         correction.setDecidedAt(OffsetDateTime.now());
-        correction.setDecisionNote(note.trim());
+        correction.setDecisionNote(normalizedNote);
         return toResponse(correctionRepository.save(correction),
             correctionLineRepository.findAllByProductionRunCorrectionIdOrderByLineNoAsc(correctionId));
     }
@@ -192,7 +195,11 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
         boolean outputSet = false;
         int lineNo = 1;
         for (RunCorrectionLineRequest request : requested) {
-            String kind = request.kind() == null ? "" : request.kind().trim().toLowerCase();
+            if (request == null) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "lines must not contain null entries.");
+            }
+            ProductionText.requireStorable(request.kind(), "kind");
+            String kind = request.kind() == null ? "" : request.kind().trim().toLowerCase(Locale.ROOT);
             ProductionRunCorrectionLine line = new ProductionRunCorrectionLine();
             line.setProductionRunCorrectionLineId(idGenerator.generate());
             line.setLineNo(lineNo++);
@@ -208,12 +215,12 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
                 case ProductionRunCorrectionLine.ADD_ITEM -> {
                     productionRunService.validateCorrectionRecording(run, request.direction(), request.itemId(),
                         request.inventoryId(), request.qty(), request.unit());
-                    line.setDirection(request.direction().trim().toLowerCase());
+                    line.setDirection(request.direction().trim().toLowerCase(Locale.ROOT));
                     line.setItemId(request.itemId().trim());
                     line.setInventoryId(request.inventoryId() == null || request.inventoryId().isBlank()
                         ? null : request.inventoryId().trim());
                     line.setQty(ProductionRunServiceImpl.storedQuantity(request.qty(), "qty"));
-                    line.setUnit(request.unit().trim());
+                    line.setUnit(ProductionRunServiceImpl.storedUnit(request.unit()));
                 }
                 case ProductionRunCorrectionLine.SET_OUTPUT_QTY -> {
                     if (outputSet) {
@@ -241,6 +248,7 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
 
     /** A recording of this run that stands: not a BOM plan line and not cancelled already. */
     private ProductionRunItem findVoidable(ProductionRun run, String runItemId) {
+        ProductionText.requireStorable(runItemId, "targetRunItemId");
         if (runItemId == null || runItemId.isBlank()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Choose the recording to void.");
         }

@@ -14,6 +14,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
@@ -105,7 +106,14 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     @Override
     @Transactional
     public ProductionRunResponse startRun(ProductionRunStartRequest request) {
+        ProductionText.requireStorable(request.projectId(), "projectId");
         projectAccessService.requireProjectWriteAccess(request.projectId());
+        ProductionText.requireStorable(request.workflowId(), "workflowId");
+        ProductionText.requireStorable(request.targetItemId(), "targetItemId");
+        ProductionText.requireStorable(request.workOrderId(), "workOrderId");
+        ProductionText.requireStorable(request.bomId(), "bomId");
+        ProductionText.requireStorable(request.workflowRevisionId(), "workflowRevisionId");
+        ProductionText.requireStorable(request.runType(), "runType");
         String runType = defaultIfBlank(request.runType(), "actual");
         if (!RUN_TYPES.contains(runType)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "runType must be actual, simulation, test or dry_run.");
@@ -212,10 +220,14 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         ProductionRun run = findRunForUpdate(productionRunId);
         projectAccessService.requireProjectWriteAccess(run.getProjectId());
         requireOpenRun(run);
+        ProductionText.requireStorable(request.itemId(), "itemId");
+        ProductionText.requireStorable(request.inventoryId(), "inventoryId");
+        ProductionText.requireStorable(request.processId(), "processId");
+        ProductionText.requireStorable(request.processIoId(), "processIoId");
         requireKnownDirection(request.direction());
         request = new ProductionRunItemRecordRequest(request.processId(), request.processIoId(), request.inventoryId(),
             request.itemId(), request.direction(), storedQuantity(request.plannedQty(), "plannedQty"),
-            request.actualQty() == null ? null : storedQuantity(request.actualQty(), "actualQty"), request.unit());
+            request.actualQty() == null ? null : storedQuantity(request.actualQty(), "actualQty"), storedUnit(request.unit()));
         Item item = findActiveItem(request.itemId());
         validateSameProject(run.getProjectId(), item.getProjectId());
         Inventory inventory = null;
@@ -232,7 +244,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         // LOT-tracked items are only consumed or produced through an explicit LOT (its stock record).
         if ("Y".equals(item.getLotManageYn()) && inventory == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
-                item.getItemCode() + " is LOT-tracked; choose the stock record (LOT) this " + request.direction().trim().toLowerCase()
+                item.getItemCode() + " is LOT-tracked; choose the stock record (LOT) this " + request.direction().trim().toLowerCase(Locale.ROOT)
                     + " uses.");
         }
 
@@ -252,7 +264,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         runItem.setProcessIoId(processIo != null ? processIo.getProcessIoId() : null);
         runItem.setInventoryId(trimToNull(request.inventoryId()));
         runItem.setItemId(item.getItemId());
-        runItem.setDirection(request.direction().trim().toLowerCase());
+        runItem.setDirection(request.direction().trim().toLowerCase(Locale.ROOT));
         runItem.setPlannedQty(request.plannedQty());
         runItem.setActualQty(request.actualQty());
         runItem.setUnit(request.unit().trim());
@@ -291,19 +303,20 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         if (item.isCancelled()) {
             throw new BusinessException(ErrorCode.CONFLICT, "This item was already cancelled by " + item.getCancelledBy() + ".");
         }
-        if (reason == null || reason.isBlank()) {
+        String normalizedReason = ProductionText.trimToNull(reason, "reason");
+        if (normalizedReason == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Give a reason for cancelling the item.");
         }
         String actor = projectAccessService.requireCurrentUserId();
 
         // Stock first: if the produced stock was already used, the reversal fails and nothing else changes.
         inventoryCommandService.reverseMovementsOf("production_run_item", item.getProductionRunItemId(),
-            "Run " + run.getRunNumber() + " item cancelled: " + reason.trim(), actor);
+            "Run " + run.getRunNumber() + " item cancelled: " + normalizedReason, actor);
 
         item.setCancelledYn("Y");
         item.setCancelledBy(actor);
         item.setCancelledAt(OffsetDateTime.now());
-        item.setCancelReason(reason.trim());
+        item.setCancelReason(normalizedReason);
         ProductionRunItem saved = productionRunItemRepository.save(item);
 
         if (saved.getLotId() != null) {
@@ -375,10 +388,10 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         runItem.setProductionRunId(run.getProductionRunId());
         runItem.setInventoryId(resolved.inventory() != null ? resolved.inventory().getInventoryId() : null);
         runItem.setItemId(resolved.item().getItemId());
-        runItem.setDirection(direction.trim().toLowerCase());
+        runItem.setDirection(direction.trim().toLowerCase(Locale.ROOT));
         runItem.setPlannedQty(resolved.quantity());
         runItem.setActualQty(resolved.quantity());
-        runItem.setUnit(unit.trim());
+        runItem.setUnit(storedUnit(unit));
         runItem.setQuantitySource("correction");
         runItem.setProductionRunCorrectionId(correctionId);
         runItem.setLotId(resolved.inventory() != null ? resolved.inventory().getLotId() : null);
@@ -419,12 +432,12 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         if (qty.signum() == 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "qty must round to at least 0.0001.");
         }
-        if (unit == null || unit.isBlank()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "Give the unit of the corrected quantity.");
-        }
+        unit = storedUnit(unit);
         if (itemId == null || itemId.isBlank()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Choose the item to record.");
         }
+        ProductionText.requireStorable(itemId, "itemId");
+        ProductionText.requireStorable(inventoryId, "inventoryId");
         Item item = findActiveItem(itemId.trim());
         validateSameProject(run.getProjectId(), item.getProjectId());
         Inventory inventory = null;
@@ -437,7 +450,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         }
         if ("Y".equals(item.getLotManageYn()) && inventory == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
-                item.getItemCode() + " is LOT-tracked; choose the stock record (LOT) this " + direction.trim().toLowerCase()
+                item.getItemCode() + " is LOT-tracked; choose the stock record (LOT) this " + direction.trim().toLowerCase(Locale.ROOT)
                     + " uses.");
         }
         UnitConverter.Conversion conversion = unitConverter.toItemUnit(qty, unit.trim(), item.getUnitId());
@@ -712,14 +725,15 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     }
 
     static void requireOpenRun(ProductionRun run) {
-        String status = run.getRunStatus() == null ? "" : run.getRunStatus().trim().toLowerCase();
+        String status = run.getRunStatus() == null ? "" : run.getRunStatus().trim().toLowerCase(Locale.ROOT);
         if (!OPEN_RUN_STATUSES.contains(status)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Run " + run.getRunNumber() + " is already " + status + ".");
         }
     }
 
     private static void requireKnownDirection(String direction) {
-        if (!RUN_ITEM_DIRECTIONS.contains(direction.trim().toLowerCase())) {
+        ProductionText.requireStorable(direction, "direction");
+        if (!RUN_ITEM_DIRECTIONS.contains(direction.trim().toLowerCase(Locale.ROOT))) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "direction must be 'input' or 'output'.");
         }
     }
@@ -734,6 +748,17 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 field + " must round to at most 9999999999.9999.");
         }
+    }
+
+    static String storedUnit(String unit) {
+        String normalized = ProductionText.trimToNull(unit, "unit");
+        if (normalized == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "unit is required.");
+        }
+        if (normalized.codePointCount(0, normalized.length()) > 20) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "unit must be 20 characters or fewer.");
+        }
+        return normalized;
     }
 
     static BigDecimal storedQuantity(BigDecimal quantity, String field) {
@@ -764,7 +789,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     }
 
     private static String defaultIfBlank(String value, String defaultValue) {
-        return value != null && !value.isBlank() ? value.trim().toLowerCase() : defaultValue;
+        return value != null && !value.isBlank() ? value.trim().toLowerCase(Locale.ROOT) : defaultValue;
     }
 
     private void applyInventoryEffect(
@@ -875,7 +900,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         facts.put("processIo", processIo);
         facts.put("inventory", inventory);
         facts.put("requestQuantity", requestQuantity);
-        facts.put("direction", request.direction().trim().toLowerCase());
+        facts.put("direction", request.direction().trim().toLowerCase(Locale.ROOT));
 
         flowRuleEngineService.validateRules(new RuleEvaluationContext(run.getProjectId(), targets, facts));
     }

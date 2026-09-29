@@ -14,7 +14,7 @@ import java.math.BigDecimal;
 public record RunInputAllocationRequest(
     @NotBlank String itemId,
     @NotNull @DecimalMin(value = "0.0", inclusive = false, message = "quantity must be more than 0.") BigDecimal quantity,
-    @NotBlank String unit,
+    @NotBlank(message = "unit is required.") String unit,
     String processId
 ) {
 }

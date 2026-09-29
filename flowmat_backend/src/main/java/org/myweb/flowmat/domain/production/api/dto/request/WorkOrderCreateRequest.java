@@ -7,7 +7,7 @@ import java.time.OffsetDateTime;
 /** Creates a work order in {@code draft}; approval is a separate owner action. */
 public record WorkOrderCreateRequest(
     @NotBlank String projectId,
-    @NotBlank String workOrderTitle,
+    @NotBlank(message = "workOrderTitle is required.") String workOrderTitle,
     String workflowId,
     String bomId,
     String targetItemId,
