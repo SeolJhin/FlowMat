@@ -47,20 +47,21 @@ export function createDefaultPortFormState(direction: PortFormState['direction']
 }
 
 export function toPortFormState(port: CanvasPortViewModel): PortFormState {
+  const ioType = port.ioType ?? DEFAULT_IO_TYPE
   return {
     processIoId: port.processIoId,
     itemId: port.itemId ?? '',
-    ioName: port.name,
+    ioName: port.name ?? '',
     direction: port.direction,
-    ioType: port.ioType,
+    ioType,
     role: port.role ?? '',
-    resourceType: port.resourceType,
+    resourceType: port.resourceType ?? ioType,
     schemaJson: port.schemaJson ? JSON.stringify(port.schemaJson, null, 2) : '',
     validationRule: port.validationRule ?? '',
     quantity: port.quantity || '0',
     unit: port.unit ?? '',
     formula: port.formula ?? '',
-    colorScheme: port.colorScheme,
+    colorScheme: port.colorScheme ?? DEFAULT_COLOR_BY_DIRECTION[port.direction],
     requiredYn: port.required ? 'Y' : 'N',
     allowShortageYn: port.allowShortage ? 'Y' : 'N',
   }

@@ -1,7 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { createDefaultPortFormState, hasValidPortSelection, toCreateProcessIoInput, toUpdateProcessIoInput } from './portPolicy'
+import { createDefaultPortFormState, hasValidPortSelection, toCreateProcessIoInput, toPortFormState, toUpdateProcessIoInput } from './portPolicy'
+import type { CanvasPortViewModel } from './types'
 
 describe('port contract form', () => {
+  it('can edit a stored port with nullable display fields', () => {
+    const port = {
+      id: 'port-1', processIoId: 'port-1', processId: 'process-1', itemId: 'item-1',
+      name: null, direction: 'input', ioType: null, role: null, resourceType: 'material',
+      schemaJson: null, validationRule: null, quantity: '1', unit: 'kg', formula: null,
+      colorScheme: null, required: true, allowShortage: false, handleId: 'port-1',
+    } as unknown as CanvasPortViewModel
+
+    const state = toPortFormState(port)
+    expect(state).toMatchObject({ ioName: '', ioType: 'material', colorScheme: 'sky' })
+    expect(hasValidPortSelection(state)).toBe(true)
+    expect(toUpdateProcessIoInput(state)).toMatchObject({
+      processIoId: 'port-1', ioName: '', ioType: 'material', colorScheme: 'sky',
+    })
+  })
+
   it('sends a structured schema and resource metadata', () => {
     const state = {
       ...createDefaultPortFormState(),
