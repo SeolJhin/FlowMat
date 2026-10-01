@@ -1003,13 +1003,13 @@ export interface ProcessIoDto {
   processIoId: string
   processId: string
   itemId: string | null
-  ioName: string
+  ioName: string | null
   direction: 'input' | 'output'
-  ioType: string
+  ioType: string | null
   quantity: number | null
   unit: string | null
   formula: string | null
-  colorScheme: string
+  colorScheme: string | null
   requiredYn: 'Y' | 'N'
   allowShortageYn: 'Y' | 'N'
   role: string | null

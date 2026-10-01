@@ -23,6 +23,7 @@ public class FlowRun {
     private String workflowRevisionId;
     private String productionRunId;
     private String runType;
+    private String executionMode = "manual";
     private String status;
 
     @JdbcTypeCode(SqlTypes.JSON)

@@ -30,6 +30,11 @@ public class FlowRunController {
         return ApiResponse.ok(service.start(request));
     }
 
+    @PostMapping("/graph")
+    public ApiResponse<FlowRunResponse> startGraph(@Valid @RequestBody FlowRunStartRequest request) {
+        return ApiResponse.ok(service.startGraph(request));
+    }
+
     @GetMapping
     public ApiResponse<List<FlowRunResponse>> list(@RequestParam String workflowId) {
         return ApiResponse.ok(service.list(workflowId));

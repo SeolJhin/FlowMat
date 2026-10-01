@@ -18,6 +18,8 @@ public class FlowRunStep {
     @Id private String stepId;
     private String flowRunId;
     private String nodeId;
+    private String sourceConnectionId;
+    private String sourceStepId;
     private String status;
     @Column(name = "sequence_no") private Integer sequenceNo;
     private OffsetDateTime scheduledAt;

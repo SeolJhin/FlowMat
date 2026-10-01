@@ -15,22 +15,23 @@ import type {
 } from './types'
 
 export function toPortViewModel(dto: ProcessIoDto): CanvasPortViewModel {
+  const ioType = dto.ioType ?? 'material'
   return {
     id: dto.processIoId,
     processIoId: dto.processIoId,
     processId: dto.processId,
     itemId: dto.itemId,
-    name: dto.ioName,
+    name: dto.ioName ?? '',
     direction: dto.direction,
-    ioType: dto.ioType,
+    ioType,
     role: dto.role ?? null,
-    resourceType: dto.resourceType ?? dto.ioType,
+    resourceType: dto.resourceType ?? ioType,
     schemaJson: dto.schemaJson ?? null,
     validationRule: dto.validationRule ?? null,
     quantity: String(dto.quantity ?? ''),
     unit: dto.unit,
     formula: dto.formula,
-    colorScheme: dto.colorScheme,
+    colorScheme: dto.colorScheme ?? (dto.direction === 'input' ? 'sky' : 'emerald'),
     required: dto.requiredYn === 'Y',
     allowShortage: dto.allowShortageYn === 'Y',
     handleId: dto.processIoId,

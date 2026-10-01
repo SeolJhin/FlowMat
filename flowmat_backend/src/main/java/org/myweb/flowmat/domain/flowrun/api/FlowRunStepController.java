@@ -6,14 +6,18 @@ import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.flowrun.api.dto.request.FlowRunStepCompleteRequest;
 import org.myweb.flowmat.domain.flowrun.api.dto.request.FlowRunStepCreateRequest;
 import org.myweb.flowmat.domain.flowrun.api.dto.request.FlowRunStepFailRequest;
+import org.myweb.flowmat.domain.flowrun.api.dto.request.FlowRunStepScheduleRequest;
 import org.myweb.flowmat.domain.flowrun.api.dto.response.FlowRunEventResponse;
+import org.myweb.flowmat.domain.flowrun.api.dto.response.FlowRunRoutePreviewResponse;
 import org.myweb.flowmat.domain.flowrun.api.dto.response.FlowRunStepAttemptResponse;
+import org.myweb.flowmat.domain.flowrun.api.dto.response.FlowRunStepLineageResponse;
 import org.myweb.flowmat.domain.flowrun.api.dto.response.FlowRunStepResponse;
 import org.myweb.flowmat.domain.flowrun.application.FlowRunStepService;
 import org.myweb.flowmat.global.response.ApiResponse;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -35,9 +39,21 @@ public class FlowRunStepController {
         return ApiResponse.ok(service.list(flowRunId));
     }
 
+    @GetMapping("/steps/{stepId}/lineage")
+    public ApiResponse<FlowRunStepLineageResponse> lineage(@PathVariable String flowRunId,
+        @PathVariable String stepId) {
+        return ApiResponse.ok(service.lineage(flowRunId, stepId));
+    }
+
     @PostMapping("/steps/{stepId}/start")
     public ApiResponse<FlowRunStepResponse> start(@PathVariable String flowRunId, @PathVariable String stepId) {
         return ApiResponse.ok(service.start(flowRunId, stepId));
+    }
+
+    @PutMapping("/steps/{stepId}/schedule")
+    public ApiResponse<FlowRunStepResponse> schedule(@PathVariable String flowRunId, @PathVariable String stepId,
+        @Valid @RequestBody FlowRunStepScheduleRequest request) {
+        return ApiResponse.ok(service.schedule(flowRunId, stepId, request));
     }
 
     @PostMapping("/steps/{stepId}/retry")
@@ -49,6 +65,12 @@ public class FlowRunStepController {
     public ApiResponse<FlowRunStepResponse> complete(@PathVariable String flowRunId, @PathVariable String stepId,
         @Valid @RequestBody FlowRunStepCompleteRequest request) {
         return ApiResponse.ok(service.complete(flowRunId, stepId, request));
+    }
+
+    @PostMapping("/steps/{stepId}/preview")
+    public ApiResponse<List<FlowRunRoutePreviewResponse>> preview(@PathVariable String flowRunId,
+        @PathVariable String stepId, @Valid @RequestBody FlowRunStepCompleteRequest request) {
+        return ApiResponse.ok(service.preview(flowRunId, stepId, request));
     }
 
     @PostMapping("/steps/{stepId}/fail")

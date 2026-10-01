@@ -50,6 +50,15 @@ public class FlowRunService {
 
     @Transactional
     public FlowRunResponse start(FlowRunStartRequest request) {
+        return start(request, "manual");
+    }
+
+    @Transactional
+    public FlowRunResponse startGraph(FlowRunStartRequest request) {
+        return start(request, "graph");
+    }
+
+    private FlowRunResponse start(FlowRunStartRequest request, String executionMode) {
         Workflow workflow = projectAccessService.requireWorkflowWriteAccess(request.workflowId().trim());
         // Retire holds this same lock, so a start observes the committed revision status.
         entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
@@ -64,6 +73,14 @@ public class FlowRunService {
         if (!RUN_TYPES.contains(runType)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Unknown flow run type.");
         }
+        JsonNode input = request.inputPayload() != null ? request.inputPayload() : objectMapper.createObjectNode();
+        FlowRunGraph graph = null;
+        if ("graph".equals(executionMode)) {
+            if (!input.isObject()) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Graph inputPayload must be an object.");
+            }
+            graph = FlowRunGraph.from(readJson(revision.getSnapshotJson()));
+        }
 
         FlowRun run = new FlowRun();
         run.setFlowRunId(idGenerator.generate());
@@ -71,13 +88,29 @@ public class FlowRunService {
         run.setWorkflowId(workflow.getWorkflowId());
         run.setWorkflowRevisionId(revision.getWorkflowRevisionId());
         run.setRunType(runType);
+        run.setExecutionMode(executionMode);
         run.setStatus("running");
-        run.setInputPayload(writeJson(request.inputPayload() != null ? request.inputPayload() : objectMapper.createObjectNode()));
+        run.setInputPayload(writeJson(input));
         run.setStartedAt(OffsetDateTime.now(ZoneOffset.UTC));
         run.setRequestedBy(projectAccessService.requireCurrentUserId());
         flowRunRepository.saveAndFlush(run);
         eventRecorder.record(run.getFlowRunId(), null, "run_started",
             readJson(run.getInputPayload()), run.getRequestedBy());
+        if (graph != null) {
+            int sequence = 0;
+            for (String nodeId : graph.roots()) {
+                FlowRunStep step = new FlowRunStep();
+                step.setStepId(idGenerator.generate());
+                step.setFlowRunId(run.getFlowRunId());
+                step.setNodeId(nodeId);
+                step.setStatus("planned");
+                step.setSequenceNo(++sequence);
+                step.setInputSnapshot(run.getInputPayload());
+                stepRepository.saveAndFlush(step);
+                eventRecorder.record(run.getFlowRunId(), step.getStepId(), "step_created",
+                    input, run.getRequestedBy());
+            }
+        }
         return toResponse(run);
     }
 
@@ -97,9 +130,9 @@ public class FlowRunService {
     @Transactional
     public FlowRunResponse finish(String flowRunId, FlowRunFinishRequest request) {
         FlowRun run = lockedWritableGenericRun(flowRunId);
-        if (stepRepository.existsByFlowRunIdAndStatusNot(flowRunId, "completed")) {
+        if (stepRepository.existsByFlowRunIdAndStatusNotIn(flowRunId, Set.of("completed", "skipped"))) {
             throw new BusinessException(ErrorCode.CONFLICT,
-                "Every recorded step must complete before the flow run can finish.");
+                "Every recorded step must complete or be skipped before the flow run can finish.");
         }
         run.setStatus("finished");
         run.setOutputPayload(request != null && request.outputPayload() != null
@@ -187,7 +220,7 @@ public class FlowRunService {
     private FlowRunResponse toResponse(FlowRun run) {
         return new FlowRunResponse(
             run.getFlowRunId(), run.getProjectId(), run.getWorkflowId(), run.getWorkflowRevisionId(),
-            run.getProductionRunId(), run.getRunType(), run.getStatus(),
+            run.getProductionRunId(), run.getRunType(), run.getExecutionMode(), run.getStatus(),
             readJson(run.getInputPayload()), readJson(run.getOutputPayload()),
             run.getStartedAt(), run.getEndedAt(), run.getRequestedBy()
         );

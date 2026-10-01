@@ -10,6 +10,7 @@ public record FlowRunResponse(
     String workflowRevisionId,
     String productionRunId,
     String runType,
+    String executionMode,
     String status,
     JsonNode inputPayload,
     JsonNode outputPayload,

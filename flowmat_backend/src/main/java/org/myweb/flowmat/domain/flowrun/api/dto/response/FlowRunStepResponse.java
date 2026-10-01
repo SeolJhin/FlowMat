@@ -7,6 +7,8 @@ public record FlowRunStepResponse(
     String stepId,
     String flowRunId,
     String nodeId,
+    String sourceConnectionId,
+    String sourceStepId,
     String status,
     Integer sequenceNo,
     OffsetDateTime scheduledAt,
