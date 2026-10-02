@@ -48,6 +48,17 @@ export interface EquipmentAvailabilityDto {
   capacityPerHour: number | null
   /** Available hours times the capacity per hour; null without a capacity. */
   capacity: number | null
+  /** Project holidays whose shift would have fallen in the window (YYYY-MM-DD). */
+  holidays?: string[]
+}
+
+/** A date on which no calendar shift starts, for all of the project's equipment (docs/domain/equipment-schedule.md). */
+export interface HolidayDto {
+  holidayId: string
+  /** YYYY-MM-DD */
+  date: string
+  name: string | null
+  createdBy: string | null
 }
 
 export interface EquipmentCalendarInput {
@@ -98,6 +109,38 @@ export function useEquipmentAvailabilityQuery(equipmentId: string, from: string,
       ),
     enabled: Boolean(equipmentId && from && to),
   })
+}
+
+export function useHolidaysQuery(projectId: string) {
+  return useQuery<HolidayDto[]>({
+    queryKey: ['holidays', projectId],
+    queryFn: async () =>
+      unwrapApiResponse(await httpClient.get<ApiEnvelope<HolidayDto[]>>(`/holidays?projectId=${encodeURIComponent(projectId)}`)),
+    enabled: Boolean(projectId),
+  })
+}
+
+/** Every change returns the whole list; every equipment's available time, readiness and the load board are fetched again. */
+export function useHolidayMutations(projectId: string) {
+  const queryClient = useQueryClient()
+  const onSuccess = (holidays: HolidayDto[]) => {
+    queryClient.setQueryData(['holidays', projectId], holidays)
+    void queryClient.invalidateQueries({ queryKey: ['equipment-schedule'] })
+    void queryClient.invalidateQueries({ queryKey: ['work-order-readiness'] })
+    void queryClient.invalidateQueries({ queryKey: ['equipment-load', projectId] })
+  }
+  return {
+    add: useMutation({
+      mutationFn: async (input: { date: string; name?: string }) =>
+        unwrapApiResponse(await httpClient.post<ApiEnvelope<HolidayDto[]>>('/holidays', { projectId, ...input })),
+      onSuccess,
+    }),
+    remove: useMutation({
+      mutationFn: async (holidayId: string) =>
+        unwrapApiResponse(await httpClient.delete<ApiEnvelope<HolidayDto[]>>(`/holidays/${encodeURIComponent(holidayId)}`)),
+      onSuccess,
+    }),
+  }
 }
 
 /** Every change returns the new schedule; available time and work order readiness are fetched again. */

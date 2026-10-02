@@ -153,6 +153,22 @@ class InventoryTransferIntegrationTest extends IntegrationTestSupport {
         }
     }
 
+    @Test
+    void aLotEmptiedFromTwoPlacesAtOnceEndsConsumed() throws Exception {
+        String lotItem = item(true);
+        for (int round = 0; round < 4; round++) {
+            String lotId = data(call(post("/lots"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"itemId\":\"" + lotItem
+                + "\",\"lotNo\":\"TC-" + suffix().substring(0, 8) + "\"}")).path("lotId").asText();
+            String a = data(call(post("/inventories"), stock(lotItem, lotId, "LA-" + suffix(), "5"))).path("inventoryId").asText();
+            String b = data(call(post("/inventories"), stock(lotItem, lotId, "LB-" + suffix(), "5"))).path("inventoryId").asText();
+            // Each issue sees only its own record change; without a re-check after commit the LOT stays available.
+            assertEquals(List.of(200, 200), together(() -> move(a, "issue", "5"), () -> move(b, "issue", "5")));
+            call(get("/lots/" + lotId))
+                .andExpect(jsonPath("$.data.quantityOnHand").value(0))
+                .andExpect(jsonPath("$.data.lotStatus").value("consumed"));
+        }
+    }
+
     /** Runs the calls at the same moment and returns their HTTP statuses in order. */
     private List<Integer> together(Callable<ResultActions> first, Callable<ResultActions> second) throws Exception {
         return togetherResponses(first, second).stream().map(MockHttpServletResponse::getStatus).toList();

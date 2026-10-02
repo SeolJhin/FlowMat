@@ -25,6 +25,8 @@ Get-Content .env | Where-Object { $_ -match '^[A-Z][A-Z0-9_]*=' } | ForEach-Obje
 .\gradlew.bat bootRun --args='--spring.profiles.active=dev'
 ```
 
+`--spring.profiles.active=dev`는 빼면 안 된다. 기본 프로필이 없으므로(2026-10-02, 프로필을 잊은 운영 설치가 dev로 떠서 데모 계정이 남는 것을 막기 위함) 프로필 없이 띄우면 dev 기본값(localhost DB·Redis 등)을 쓰지 않고, 새 DB라면 V18이 데모 시드를 지운다. 그렇게 지워진 데모 시드는 아래처럼 되살아나지 않는다.
+
 준비 상태는 `http://localhost:8080/api/actuator/health/readiness`로 확인한다. 새 dev DB에는 데모 계정 `demo-owner` / `demo1234`와 프로젝트 `prj_demo_main`이 생성된다.
 
 기존 dev DB에서 프로젝트가 보이지 않으면 `flowmat_backend` 디렉터리에서 다음 읽기 전용 조회로 V18 적용 이력과 프로젝트 존재 여부를 확인한다. 아래 사용자명과 DB명은 `.env.example` 기본값이며, `.env`에서 바꿨다면 함께 바꾼다.

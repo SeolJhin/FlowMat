@@ -9,6 +9,7 @@ import type {
   BomLineType,
   BomRequirementDto,
   BomWhereUsedDto,
+  BomWhereUsedTreeDto,
   BuildableQuantityDto,
 } from '../../../shared/types/api'
 
@@ -43,6 +44,20 @@ export function useBomWhereUsedQuery(projectId: string, itemId: string | null) {
       unwrapApiResponse(
         await httpClient.get<ApiEnvelope<BomWhereUsedDto[]>>(
           `/boms/where-used?projectId=${encodeURIComponent(projectId)}&itemId=${encodeURIComponent(itemId ?? '')}`,
+        ),
+      ),
+    enabled: Boolean(projectId && itemId),
+  })
+}
+
+/** Where the item is used at every level, through approved BOMs up to the top products. */
+export function useBomWhereUsedTreeQuery(projectId: string, itemId: string | null) {
+  return useQuery<BomWhereUsedTreeDto>({
+    queryKey: ['boms', projectId, 'where-used-all-levels', itemId],
+    queryFn: async () =>
+      unwrapApiResponse(
+        await httpClient.get<ApiEnvelope<BomWhereUsedTreeDto>>(
+          `/boms/where-used/all-levels?projectId=${encodeURIComponent(projectId)}&itemId=${encodeURIComponent(itemId ?? '')}`,
         ),
       ),
     enabled: Boolean(projectId && itemId),

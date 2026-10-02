@@ -595,6 +595,47 @@ export interface BomWhereUsedDto {
   lineType?: BomLineType
 }
 
+/**
+ * Where an item is used at every level through approved BOMs (GET /boms/where-used/all-levels,
+ * docs/domain/multi-level-bom.md). Quantities of the searched item are in `unit`.
+ */
+export interface BomWhereUsedTreeDto {
+  itemId: string
+  itemCode: string
+  unit: string | null
+  /** Depth first: a direct use, then the uses of that product. */
+  uses: {
+    level: number
+    materialItemId: string
+    materialItemCode: string
+    productItemId: string
+    productItemCode: string
+    productItemName: string | null
+    productUnit: string | null
+    bomId: string
+    bomVersion: number
+    lineQuantity: number
+    lineUnit: string
+    baseQuantity: number
+    baseUnit: string
+    /** The searched item per one unit of the product along this route; null when a quantity could not be converted. */
+    perProductUnit: number | null
+    topLevel: boolean
+    path: string[]
+  }[]
+  /** Products no approved BOM uses, with the searched item per unit over all routes. */
+  topProducts: {
+    itemId: string
+    itemCode: string
+    itemName: string | null
+    unit: string | null
+    perUnit: number | null
+    levels: number
+    routes: number
+  }[]
+  problems: string[]
+}
+
 /** A stock row outside its thresholds (docs/domain/stock-alert.md); it closes by itself when the row is back inside. */
 export interface StockAlertDto {
   stockAlertId: string

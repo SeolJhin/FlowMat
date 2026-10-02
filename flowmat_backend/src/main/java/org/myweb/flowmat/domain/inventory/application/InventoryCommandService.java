@@ -3,8 +3,11 @@ package org.myweb.flowmat.domain.inventory.application;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.domain.entity.InventoryTransaction;
 import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
@@ -17,6 +20,8 @@ import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * The only place stock quantities change (docs/domain/inventory-bom-lot-contract.md §1–3).
@@ -24,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>Each call runs in the caller's transaction: the conditional UPDATE, the history row and any LOT status change
  * commit or roll back together. Access checks are the caller's job.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class InventoryCommandService {
@@ -36,6 +42,7 @@ public class InventoryCommandService {
     private final InventoryTransactionRepository inventoryTransactionRepository;
     private final LotMasterRepository lotMasterRepository;
     private final IdGenerator idGenerator;
+    private final LotStatusResync lotStatusResync;
     private final StockAlertService stockAlertService;
 
     /** Applies the movement if it keeps every stock invariant, and records it. */
@@ -169,21 +176,65 @@ public class InventoryCommandService {
         return value == null ? BigDecimal.ZERO : value.negate();
     }
 
-    /** Recomputes a LOT's status from all its stock rows; quarantined and closed LOTs keep their status. */
+    /**
+     * Recomputes a LOT's status from all its stock rows; quarantined and closed LOTs keep their status. This transaction
+     * cannot see a concurrent movement on another record of the same LOT, so the LOT is checked again after commit
+     * ({@link LotStatusResync}), once per LOT however many of its records moved.
+     */
     @Transactional
     public void syncLotStatus(String lotId) {
+        recheckAfterCommit(lotId);
         LotMaster lot = lotMasterRepository.findById(lotId).orElse(null);
         if (lot == null || QUARANTINED.equals(lot.getLotStatus()) || "closed".equals(lot.getLotStatus())) {
             return;
         }
-        List<Inventory> rows = inventoryRepository.findAllByLotIdAndDeletedYn(lotId, NOT_DELETED);
-        BigDecimal onHand = rows.stream().map(row -> zeroIfNull(row.getQuantity())).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal reserved = rows.stream().map(row -> zeroIfNull(row.getReservedQuantity())).reduce(BigDecimal.ZERO, BigDecimal::add);
-        String status = onHand.signum() == 0 ? "consumed" : reserved.signum() > 0 ? "reserved" : AVAILABLE;
+        String status = lotStatusFor(inventoryRepository.findAllByLotIdAndDeletedYn(lotId, NOT_DELETED));
         if (!status.equals(lot.getLotStatus())) {
             lot.setLotStatus(status);
             lotMasterRepository.save(lot);
         }
+    }
+
+    /** consumed when nothing is on hand, reserved when some of it is held, else available. */
+    static String lotStatusFor(List<Inventory> rows) {
+        BigDecimal onHand = rows.stream().map(row -> zeroIfNull(row.getQuantity())).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal reserved = rows.stream().map(row -> zeroIfNull(row.getReservedQuantity())).reduce(BigDecimal.ZERO, BigDecimal::add);
+        return onHand.signum() == 0 ? "consumed" : reserved.signum() > 0 ? "reserved" : AVAILABLE;
+    }
+
+    /** The LOTs this transaction touched, re-checked after it commits. Bound to the transaction's thread. */
+    private static final Object LOTS_TO_RECHECK = new Object();
+
+    @SuppressWarnings("unchecked")
+    private void recheckAfterCommit(String lotId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
+        }
+        Set<String> lots = (Set<String>) TransactionSynchronizationManager.getResource(LOTS_TO_RECHECK);
+        if (lots == null) {
+            Set<String> pending = new LinkedHashSet<>();
+            TransactionSynchronizationManager.bindResource(LOTS_TO_RECHECK, pending);
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    for (String lot : pending) {
+                        try {
+                            lotStatusResync.resync(lot);
+                        } catch (RuntimeException e) {
+                            // The movement is committed and its own check stands; a missed re-check is logged, not thrown.
+                            log.warn("LOT {} status re-check after commit failed: {}", lot, e.getMessage());
+                        }
+                    }
+                }
+
+                @Override
+                public void afterCompletion(int status) {
+                    TransactionSynchronizationManager.unbindResourceIfPossible(LOTS_TO_RECHECK);
+                }
+            });
+            lots = pending;
+        }
+        lots.add(lotId);
     }
 
     /** Quarantine applies to the whole LOT when the row has one: every row of that LOT and the LOT itself. */

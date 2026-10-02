@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BomExplosionDto } from '../../../entities/bom/api/useBomExplosion'
 import type { BomDto } from '../../../shared/types/api'
-import { explosionSummary, hasSubAssemblies, subAssemblyIds } from './bomExplosionModel'
+import { costGapPercent, explosionSummary, hasSubAssemblies, subAssemblyIds } from './bomExplosionModel'
 
 function bom(bomId: string, targetItemId: string, bomStatus: string, children: string[] = []): BomDto {
   return {
@@ -25,5 +25,18 @@ describe('explosionSummary', () => {
     expect(explosionSummary(explosion)).toBe('2 levels · 4 bought materials · cost 38')
     expect(explosionSummary({ ...explosion, levels: 1, materials: [{}] as BomExplosionDto['materials'], costComplete: false }))
       .toBe('1 level · 1 bought material · cost 38 (some have no unit cost)')
+  })
+})
+
+describe('costGapPercent', () => {
+  it('is the unit cost above or below the roll-up, in percent', () => {
+    expect(costGapPercent(3.8, 5)).toBe(31.6)
+    expect(costGapPercent(4, 3)).toBe(-25)
+    expect(costGapPercent(1.4, 1.4)).toBe(0)
+  })
+
+  it('is null without a unit cost or a roll-up', () => {
+    expect(costGapPercent(3.8, null)).toBeNull()
+    expect(costGapPercent(0, 2)).toBeNull()
   })
 })

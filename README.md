@@ -26,6 +26,12 @@ frontend JavaScript. Cookie-backed refresh and logout requests require the
 `X-XSRF-TOKEN` header obtained from `/api/auth/csrf`; other state-changing API
 requests use the bearer access token and are not cookie-authenticated.
 
+The frontend forgets a cookie-backed session only when `/api/auth/refresh`
+answers 401 (the refresh cookie is missing, expired or rejected). A network
+failure, a CSRF bootstrap failure, a rate limit (429) or a server error keeps
+the session hint, so a later attempt can restore the session instead of
+forcing a new login.
+
 # Backend Ops
 
 Run backend commands from `flowmat_backend`:

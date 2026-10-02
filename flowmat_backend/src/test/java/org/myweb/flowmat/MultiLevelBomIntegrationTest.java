@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -99,6 +100,96 @@ class MultiLevelBomIntegrationTest extends IntegrationTestSupport {
             .andExpect(jsonPath(line.formatted(c.flour()) + ".required").value(hasItem(3.0)))
             .andExpect(jsonPath(line.formatted(c.flour()) + ".orders[0].workOrderTitle").value(hasItem("Sponges " + c.tag())))
             .andExpect(jsonPath(line.formatted(c.egg()) + ".required").value(hasItem(30.0)));
+    }
+
+    @Test
+    void whereUsedClimbsThroughSubAssembliesToTheTopProducts() throws Exception {
+        Cake c = cake();
+        // A draft that uses sugar is not part of the approved tree.
+        bom(item("ML-DRAFT-" + c.tag(), "unit_ea", null), 1, "ea", c.sugar(), 1, "kg", false);
+
+        // Sugar: straight into the cake (0.1 kg) and into the cream (0.2 kg per kg), which the cake takes 0.5 kg of.
+        String uses = "$.data.uses";
+        call(get("/boms/where-used/all-levels").param("projectId", DEMO_PROJECT).param("itemId", c.sugar()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.unit").value("kg"))
+            .andExpect(jsonPath(uses + ".length()").value(3))
+            .andExpect(jsonPath(uses + "[0].level").value(1))
+            .andExpect(jsonPath(uses + "[0].productItemId").value(c.cake()))
+            .andExpect(jsonPath(uses + "[0].perProductUnit").value(0.1))
+            .andExpect(jsonPath(uses + "[0].topLevel").value(true))
+            .andExpect(jsonPath(uses + "[1].productItemId").value(c.cream()))
+            .andExpect(jsonPath(uses + "[1].perProductUnit").value(0.2))
+            .andExpect(jsonPath(uses + "[1].topLevel").value(false))
+            .andExpect(jsonPath(uses + "[2].level").value(2))
+            .andExpect(jsonPath(uses + "[2].materialItemId").value(c.cream()))
+            .andExpect(jsonPath(uses + "[2].productItemId").value(c.cake()))
+            .andExpect(jsonPath(uses + "[2].perProductUnit").value(0.1))
+            .andExpect(jsonPath(uses + "[2].path.length()").value(3))
+            .andExpect(jsonPath("$.data.topProducts.length()").value(1))
+            .andExpect(jsonPath("$.data.topProducts[0].itemId").value(c.cake()))
+            .andExpect(jsonPath("$.data.topProducts[0].perUnit").value(0.2))
+            .andExpect(jsonPath("$.data.topProducts[0].routes").value(2))
+            .andExpect(jsonPath("$.data.topProducts[0].levels").value(2))
+            .andExpect(jsonPath("$.data.problems.length()").value(0));
+
+        // Flour: 0.2 kg per sponge, two sponges per cake.
+        call(get("/boms/where-used/all-levels").param("projectId", DEMO_PROJECT).param("itemId", c.flour()))
+            .andExpect(jsonPath("$.data.uses[0].productItemId").value(c.sponge()))
+            .andExpect(jsonPath("$.data.uses[1].perProductUnit").value(0.4))
+            .andExpect(jsonPath("$.data.topProducts[0].perUnit").value(0.4))
+            .andExpect(jsonPath("$.data.topProducts[0].routes").value(1));
+
+        // The cake itself is used by nothing.
+        call(get("/boms/where-used/all-levels").param("projectId", DEMO_PROJECT).param("itemId", c.cake()))
+            .andExpect(jsonPath("$.data.uses.length()").value(0))
+            .andExpect(jsonPath("$.data.topProducts.length()").value(0));
+        call(get("/boms/where-used/all-levels").param("projectId", DEMO_PROJECT).param("itemId", "no-such-item"))
+            .andExpect(status().isBadRequest());
+        callAs("ml-outsider", get("/boms/where-used/all-levels").param("projectId", DEMO_PROJECT).param("itemId", c.sugar()))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void costRollsUpFromBoughtMaterialsThroughSubAssemblies() throws Exception {
+        Cake c = cake();
+        // A custard made of milk and vanilla, which has no unit cost yet.
+        String vanilla = item("ML-VAN-" + c.tag(), "unit_kg", null);
+        String custard = item("ML-CUSTARD-" + c.tag(), "unit_kg", null);
+        String custardBom = bom(custard, 2, "kg", c.milk(), 2, "kg", true);
+        // Drafts do not count: a new custard revision and a vanilla BOM still in draft leave the roll-up alone.
+        call(post("/boms/" + custardBom + "/revisions")).andExpect(status().isOk());
+        call(post("/boms"), json(Map.of("projectId", DEMO_PROJECT, "targetItemId", vanilla, "bomName", "draft", "baseQuantity", 1,
+            "baseUnit", "kg"))).andExpect(status().isOk());
+        call(put("/items/" + c.cake()), json(Map.of("unitCost", 5))).andExpect(status().isOk());
+
+        String row = "$.data.items[?(@.itemId == '%s')]";
+        call(get("/boms/cost-rollup").param("projectId", DEMO_PROJECT))
+            .andExpect(status().isOk())
+            // sponge: 0.2 kg flour × 2 + 2 eggs × 0.5; cream per kg: 0.8 kg milk × 1 + 0.2 kg sugar × 3
+            .andExpect(jsonPath(row.formatted(c.sponge()) + ".rolledUpCost").value(hasItem(1.4)))
+            .andExpect(jsonPath(row.formatted(c.sponge()) + ".levels").value(hasItem(1)))
+            .andExpect(jsonPath(row.formatted(c.cream()) + ".rolledUpCost").value(hasItem(1.4)))
+            // cake: 2 sponges × 1.4 + 0.5 kg cream × 1.4 + 0.1 kg sugar × 3, the explosion's 38 for ten
+            .andExpect(jsonPath(row.formatted(c.cake()) + ".rolledUpCost").value(hasItem(3.8)))
+            .andExpect(jsonPath(row.formatted(c.cake()) + ".levels").value(hasItem(2)))
+            .andExpect(jsonPath(row.formatted(c.cake()) + ".complete").value(hasItem(true)))
+            .andExpect(jsonPath(row.formatted(c.cake()) + ".currentUnitCost").value(hasItem(5.0)))
+            .andExpect(jsonPath(row.formatted(c.cake()) + ".bomId").value(hasItem(c.cakeBom())))
+            // custard per kg: 1 kg milk × 1, all known
+            .andExpect(jsonPath(row.formatted(custard) + ".rolledUpCost").value(hasItem(1.0)))
+            .andExpect(jsonPath(row.formatted(custard) + ".complete").value(hasItem(true)));
+
+        // A material with no cost: what is known is still added up, and the gap is named.
+        String flan = item("ML-FLAN-" + c.tag(), "unit_ea", null);
+        String flanBom = bom(flan, 1, "ea", custard, 0.25, "kg", false);
+        line(flanBom, vanilla, 10, "g");
+        approve(flanBom);
+        call(get("/boms/cost-rollup").param("projectId", DEMO_PROJECT))
+            .andExpect(jsonPath(row.formatted(flan) + ".rolledUpCost").value(hasItem(0.25)))
+            .andExpect(jsonPath(row.formatted(flan) + ".complete").value(hasItem(false)))
+            .andExpect(jsonPath(row.formatted(flan) + ".missingCosts[0]").value(hasItem("ML-VAN-" + c.tag())));
+        callAs("ml-outsider", get("/boms/cost-rollup").param("projectId", DEMO_PROJECT)).andExpect(status().isForbidden());
     }
 
     private Cake cake() throws Exception {

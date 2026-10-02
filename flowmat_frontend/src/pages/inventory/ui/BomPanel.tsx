@@ -18,6 +18,7 @@ import { BomRevisionCompare } from './BomRevisionCompare'
 import { BomLineImport } from './BomLineImport'
 import { BomCopyForm } from './BomCopyForm'
 import { BomWhereUsed } from './BomWhereUsed'
+import { BomCostRollup } from './BomCostRollup'
 import { BomExplosion } from './BomExplosion'
 import { hasSubAssemblies, subAssemblyIds } from '../model/bomExplosionModel'
 import { LINE_TYPE_OPTIONS, lineSummary, lineTypeTag } from '../model/bomLineTypeModel'
@@ -110,6 +111,7 @@ export function BomPanel({ projectId, items, units }: { projectId: string; items
           </div>
         ))}
         <BomWhereUsed projectId={projectId} items={items} onOpen={setSelectedId} />
+        <BomCostRollup projectId={projectId} onOpen={setSelectedId} />
       </section>
 
       <section style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 18 }}>

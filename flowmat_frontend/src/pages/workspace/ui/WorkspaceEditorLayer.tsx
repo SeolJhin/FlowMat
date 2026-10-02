@@ -65,6 +65,7 @@ import {
   useSaveEditorDocumentMutation,
 } from '../../../entities/editor-document/api/editorDocumentApi'
 import type { CanvasAnnotationViewModel } from '../../../entities/workflow/model/types'
+import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import type { WorkflowPaletteTool } from '../../../entities/workflow/model/nodeCatalog'
 import type { PatchCanvasAnnotationInput } from '../../../entities/canvas-annotation/api/canvasAnnotationApi'
 import type {
@@ -268,14 +269,25 @@ export function WorkspaceEditorLayer({
 
   const persistDocument = useCallback(
     async (nextDocument: EditorDocument) => {
+      const key = editorDocumentQueryKey(workflowId)
+      // Show the edit at once: a drag clears its draft before this save returns, and the cache is what is drawn then.
+      queryClient.setQueryData(key, { ...nextDocument, selectedIds: [] })
       try {
         const savedDocument = await saveMutation.mutateAsync({
           ...nextDocument,
           selectedIds: [],
         })
-        queryClient.setQueryData(editorDocumentQueryKey(workflowId), savedDocument)
+        queryClient.setQueryData(key, savedDocument)
       } catch (error) {
-        onError?.(error instanceof Error ? error.message : 'Failed to save editor document.')
+        const message = errorMessage(error, 'Failed to save editor document.')
+        if (keepsUnsavedEdit(errorStatus(error))) {
+          // A passing failure: keep the edit on screen; the next save sends the whole document, this edit included.
+          onError?.(`${message} Your change is kept and will be saved with your next edit.`)
+        } else {
+          // A conflict or a refused document: the server's version is the one to show.
+          void queryClient.invalidateQueries({ queryKey: key })
+          onError?.(message)
+        }
       }
     },
     [onError, queryClient, saveMutation, workflowId],
@@ -1237,6 +1249,15 @@ function findElementInBase(base: InteractionDocuments, id: ElementId): EditorEle
     base.backendDocument.elements.find((element) => element.id === id) ??
     base.annotationDocument.elements.find((element) => element.id === id)
   )
+}
+
+/**
+ * Whether a failed save of the editor document leaves the edit on screen: yes when the failure says nothing about the
+ * document (no response, a rate limit, a server error), so the next save sends it again; no for a conflict (409, someone
+ * saved first) or a refused document (other 4xx), where the server's version is what to show.
+ */
+export function keepsUnsavedEdit(httpStatus: number | null): boolean {
+  return httpStatus === null || httpStatus === 429 || httpStatus >= 500
 }
 
 /**

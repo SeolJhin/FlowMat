@@ -18,3 +18,12 @@ export function explosionSummary(explosion: BomExplosionDto): string {
   const cost = `cost ${Number(explosion.materialCost.toFixed(4))}${explosion.costComplete ? '' : ' (some have no unit cost)'}`
   return [levels, bought, cost].join(' · ')
 }
+
+/**
+ * How far an item's unit cost is from its rolled-up material cost, in percent of the roll-up (1 decimal): positive when
+ * the unit cost is higher. Null when either is missing or the roll-up is zero.
+ */
+export function costGapPercent(rolledUpCost: number, currentUnitCost: number | null): number | null {
+  if (currentUnitCost == null || !rolledUpCost) return null
+  return Math.round(((currentUnitCost - rolledUpCost) / rolledUpCost) * 1000) / 10
+}

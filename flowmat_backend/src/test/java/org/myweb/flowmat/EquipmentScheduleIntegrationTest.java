@@ -154,6 +154,53 @@ class EquipmentScheduleIntegrationTest extends IntegrationTestSupport {
             .content(json(Map.of("equipmentId", oven)))).andExpect(status().isForbidden());
     }
 
+    @Test
+    void noShiftStartsOnAProjectHoliday() throws Exception {
+        // 2032-03-01 is a Monday; no other test plans in that week, and the holidays are removed again at the end.
+        String monday = "2032-03-01T00:00:00+09:00";
+        String nextMonday = "2032-03-08T00:00:00+09:00";
+        String press = equipment("HOL-" + tag(), 10);
+        call(put("/equipments/" + press + "/calendar"), json(calendar("09:00", "17:00", 1, 2, 3, 4, 5))).andExpect(status().isOk());
+        availability(press, monday, nextMonday).andExpect(jsonPath("$.data.workingHours").value(40));
+
+        call(post("/holidays"), json(Map.of("projectId", DEMO_PROJECT, "date", "2032-03-03", "name", "Founding day")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data[?(@.date == '2032-03-03')].name").value(hasItem("Founding day")));
+        // A Saturday holiday takes nothing away: no shift starts that day.
+        JsonNode holidays = data(call(post("/holidays"), json(Map.of("projectId", DEMO_PROJECT, "date", "2032-03-06"))));
+        availability(press, monday, nextMonday)
+            .andExpect(jsonPath("$.data.workingHours").value(32))
+            .andExpect(jsonPath("$.data.availableHours").value(32))
+            .andExpect(jsonPath("$.data.capacity").value(320))
+            .andExpect(jsonPath("$.data.holidays.length()").value(1))
+            .andExpect(jsonPath("$.data.holidays[0]").value("2032-03-03"));
+
+        // A night shift that starts the evening before still runs into the holiday; the holiday's own shift does not start.
+        call(put("/equipments/" + press + "/calendar"), json(calendar("22:00", "06:00", 1, 2, 3, 4, 5))).andExpect(status().isOk());
+        availability(press, "2032-03-03T00:00:00+09:00", "2032-03-04T00:00:00+09:00").andExpect(jsonPath("$.data.workingHours").value(6));
+
+        call(post("/holidays"), json(Map.of("projectId", DEMO_PROJECT, "date", "2032-03-03"))).andExpect(status().isConflict());
+        call(post("/holidays"), json(Map.of("projectId", DEMO_PROJECT, "date", "03/03/2032"))).andExpect(status().isBadRequest());
+        call(post("/holidays"), json(Map.of("projectId", DEMO_PROJECT))).andExpect(status().isBadRequest());
+        callAs("hol-outsider", get("/holidays").param("projectId", DEMO_PROJECT)).andExpect(status().isForbidden());
+
+        List<String> ours = new java.util.ArrayList<>();
+        for (JsonNode holiday : holidays) {
+            if (holiday.path("date").asText().startsWith("2032-03-0")) {
+                ours.add(holiday.path("holidayId").asText());
+            }
+        }
+        org.junit.jupiter.api.Assertions.assertEquals(2, ours.size());
+        for (String holidayId : ours) {
+            call(delete("/holidays/" + holidayId)).andExpect(status().isOk());
+        }
+        call(delete("/holidays/" + ours.get(0))).andExpect(status().isNotFound());
+        call(put("/equipments/" + press + "/calendar"), json(calendar("09:00", "17:00", 1, 2, 3, 4, 5))).andExpect(status().isOk());
+        availability(press, monday, nextMonday)
+            .andExpect(jsonPath("$.data.workingHours").value(40))
+            .andExpect(jsonPath("$.data.holidays.length()").value(0));
+    }
+
     private String equipment(String code, int capacityPerHour) throws Exception {
         return id(call(post("/equipments"), json(Map.of("projectId", DEMO_PROJECT, "equipmentCode", code,
             "equipmentName", code.toLowerCase(), "equipmentType", "machine",

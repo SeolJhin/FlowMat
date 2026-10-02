@@ -107,7 +107,9 @@ export function nextWeek(now: Date): { from: string; to: string } {
 export function availabilitySummary(availability: EquipmentAvailabilityDto): string {
   const down = availability.downtimeHours > 0 ? ` (${formatHours(availability.downtimeHours)} down)` : ''
   const capacity = availability.capacity !== null ? ` · can make ${Number(availability.capacity.toFixed(2))}` : ''
-  return `Next 7 days: ${formatHours(availability.availableHours)} available${down}${capacity}.`
+  const holidays = availability.holidays?.length ?? 0
+  const off = holidays > 0 ? ` · ${holidays} holiday${holidays === 1 ? '' : 's'} off` : ''
+  return `Next 7 days: ${formatHours(availability.availableHours)} available${down}${capacity}${off}.`
 }
 
 /** Downtime not over yet (soonest first), and what is over (latest first). */

@@ -82,7 +82,9 @@ async function performRefresh(): Promise<boolean> {
       },
     })
     if (!res.ok) {
-      tokenStorage.clear()
+      // Only a 401 says the refresh cookie is gone or was rejected. A rate limit, a server error or a CSRF hiccup says
+      // nothing about the session, so keep the hint and let the next attempt restore it instead of forcing a new login.
+      if (res.status === 401) tokenStorage.clear()
       return false
     }
 
@@ -95,7 +97,7 @@ async function performRefresh(): Promise<boolean> {
     tokenStorage.setAccessToken(json.data.accessToken, { cookieBacked: true })
     return true
   } catch {
-    tokenStorage.clear()
+    // The network or the CSRF bootstrap failed: the session itself may still be valid.
     return false
   }
 

@@ -56,6 +56,8 @@
 
 현재 API는 triangle, line, polygon element를 1급 모델로 저장하지 않는다.
 
+새 엔진 문서(`PUT /workflows/{workflowId}/editor-document`) 저장은 보내기 전에 편집 결과를 화면 캐시에 먼저 넣는다(2026-10-02). 그래서 드래그를 끝낸 순간 옛 위치로 튀지 않는다. 저장이 응답 없음·429·5xx로 실패하면 편집을 화면에 남기고 "Your change is kept and will be saved with your next edit."를 알린다. 다음 저장이 문서 전체를 보내므로 그 편집도 함께 저장된다. 409(다른 사람이 먼저 저장)·그 밖의 4xx는 서버 문서를 다시 받아 보여 준다(`keepsUnsavedEdit`). 남은 한계: 남겨 둔 편집은 다음 편집 전까지 저장되지 않으며, 그 사이 문서를 다시 받으면(창 포커스·실시간 동기화) 사라진다. 기존 annotation 경로(`PATCH …/annotations/{id}`)는 바꾸지 않았다.
+
 ### 히스토리
 
 `flowmat_frontend/src/pages/workspace/model/commandHistory.ts`는 Zustand store 기반 undo/redo다. 현재 workflow mutation에 가까운 명령을 저장하며, 새 editor core의 transaction history로 그대로 쓰기 어렵다.

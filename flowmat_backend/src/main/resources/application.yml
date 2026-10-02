@@ -1,8 +1,9 @@
 spring:
   application:
     name: flowmat
-  profiles:
-    default: dev
+  # No default profile on purpose: an install that forgets to name one must not run as dev, which keeps the demo account
+  # and its known password (V18 removes the demo rows only when flowmat.demo_seed_enabled is not 'true'). Run locally
+  # with --spring.profiles.active=dev (docs/local-development.md); deploy with prod.
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}

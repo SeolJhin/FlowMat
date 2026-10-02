@@ -1,0 +1,157 @@
+package org.myweb.flowmat.domain.bom.application;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.bom.api.dto.response.BomCostRollupResponse;
+import org.myweb.flowmat.domain.bom.domain.entity.BomHeader;
+import org.myweb.flowmat.domain.bom.domain.entity.BomLine;
+import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
+import org.myweb.flowmat.domain.bom.repository.BomLineRepository;
+import org.myweb.flowmat.domain.catalog.application.UnitConverter;
+import org.myweb.flowmat.domain.catalog.domain.entity.Item;
+import org.myweb.flowmat.domain.catalog.domain.entity.UnitMaster;
+import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.global.exception.BusinessException;
+import org.myweb.flowmat.global.exception.ErrorCode;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * Material cost per unit of every item with an approved BOM, rolled up from the bottom of the approved tree
+ * (docs/domain/multi-level-bom.md "반제품 원가 누적"). A bought material costs its unit cost; a made one costs its own
+ * roll-up, not its stored unit cost, so a change deep down shows at every level above it. Each line adds what one unit of
+ * the product takes of the material (line quantity in the material's unit ÷ batch in the product's unit) times that
+ * cost. By-product and waste lines carry no credit. Read only.
+ */
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+public class BomCostRollupService {
+
+    private static final int SCALE = 4;
+
+    private final BomHeaderRepository bomHeaderRepository;
+    private final BomLineRepository bomLineRepository;
+    private final ItemRepository itemRepository;
+    private final UnitMasterRepository unitMasterRepository;
+    private final UnitConverter unitConverter;
+    private final ProjectAccessService projectAccessService;
+
+    /** One item's roll-up: the cost of what is known, and what is not. */
+    private record Cost(BigDecimal value, Set<String> missing, List<String> problems) {
+
+        boolean complete() {
+            return missing.isEmpty() && problems.isEmpty();
+        }
+    }
+
+    public BomCostRollupResponse rollup(String projectId) {
+        if (projectId == null || projectId.isBlank()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "projectId is required.");
+        }
+        String project = projectId.trim();
+        projectAccessService.requireProjectReadAccess(project);
+        Map<String, BomHeader> approved = BomTree.approvedByItem(bomHeaderRepository, project);
+        if (approved.isEmpty()) {
+            return new BomCostRollupResponse(List.of());
+        }
+        Map<String, String> itemByBom = approved.values().stream()
+            .collect(Collectors.toMap(BomHeader::getBomId, BomHeader::getTargetItemId));
+        Map<String, List<BomLine>> linesByItem = bomLineRepository.findAllByBomIdIn(itemByBom.keySet()).stream()
+            .filter(line -> BomTree.isMaterial(line.getLineType()))
+            .collect(Collectors.groupingBy(line -> itemByBom.get(line.getBomId())));
+        Set<String> itemIds = new HashSet<>(approved.keySet());
+        linesByItem.values().forEach(lines -> lines.forEach(line -> itemIds.add(line.getChildItemId())));
+        Map<String, Item> items = itemRepository.findAllById(itemIds).stream()
+            .collect(Collectors.toMap(Item::getItemId, Function.identity()));
+        Map<String, String> units = unitMasterRepository.findAllById(items.values().stream()
+                .map(Item::getUnitId).filter(Objects::nonNull).distinct().toList()).stream()
+            .collect(Collectors.toMap(UnitMaster::getUnitId, UnitMaster::getUnitCode));
+        Map<String, List<String>> tree = new HashMap<>();
+        linesByItem.forEach((item, lines) -> tree.put(item, lines.stream().map(BomLine::getChildItemId).toList()));
+
+        Map<String, Cost> known = new HashMap<>();
+        List<BomCostRollupResponse.Line> result = new ArrayList<>();
+        for (Map.Entry<String, BomHeader> entry : approved.entrySet()) {
+            Item item = items.get(entry.getKey());
+            Cost cost = cost(entry.getKey(), approved, linesByItem, items, known, new HashSet<>());
+            BigDecimal current = item == null || item.getUnitCost() == null || item.getUnitCost().signum() <= 0 ? null : item.getUnitCost();
+            result.add(new BomCostRollupResponse.Line(entry.getKey(), code(items, entry.getKey()), item == null ? null : item.getItemName(),
+                item == null || item.getUnitId() == null ? null : units.get(item.getUnitId()), entry.getValue().getBomId(),
+                entry.getValue().getBomVersion(), BomTree.depth(entry.getKey(), tree), cost.value().setScale(SCALE, RoundingMode.HALF_UP),
+                cost.complete(), List.copyOf(cost.missing()), cost.problems(), current));
+        }
+        result.sort(Comparator.comparingInt(BomCostRollupResponse.Line::levels)
+            .thenComparing(BomCostRollupResponse.Line::itemCode, Comparator.nullsLast(Comparator.naturalOrder())));
+        return new BomCostRollupResponse(result);
+    }
+
+    /** Cost of one unit of a made item; memoised, since a sub-assembly can sit under many products. */
+    private Cost cost(
+        String itemId,
+        Map<String, BomHeader> approved,
+        Map<String, List<BomLine>> linesByItem,
+        Map<String, Item> items,
+        Map<String, Cost> known,
+        Set<String> path
+    ) {
+        Cost cached = known.get(itemId);
+        if (cached != null) {
+            return cached;
+        }
+        BomHeader header = approved.get(itemId);
+        BigDecimal total = BigDecimal.ZERO;
+        Set<String> missing = new TreeSet<>();
+        List<String> problems = new ArrayList<>();
+        path.add(itemId);
+        for (BomLine line : linesByItem.getOrDefault(itemId, List.of())) {
+            String child = line.getChildItemId();
+            BigDecimal rate;
+            try {
+                rate = BomTree.perProductUnit(unitConverter, header, line, items.get(child), items.get(itemId));
+            } catch (BusinessException e) {
+                problems.add(code(items, itemId) + " v" + header.getBomVersion() + ", material " + code(items, child) + ": " + e.getMessage());
+                continue;
+            }
+            // Approval keeps loops out and the tree at most 10 deep; the path check only guards against bad data.
+            if (approved.containsKey(child) && !path.contains(child) && path.size() <= BomTree.MAX_LEVELS) {
+                Cost below = cost(child, approved, linesByItem, items, known, path);
+                total = total.add(rate.multiply(below.value()));
+                missing.addAll(below.missing());
+                problems.addAll(below.problems());
+            } else {
+                Item material = items.get(child);
+                BigDecimal unitCost = material == null || material.getUnitCost() == null || material.getUnitCost().signum() <= 0
+                    ? null : material.getUnitCost();
+                if (unitCost == null) {
+                    missing.add(code(items, child));
+                } else {
+                    total = total.add(rate.multiply(unitCost));
+                }
+            }
+        }
+        path.remove(itemId);
+        Cost cost = new Cost(total, missing, problems);
+        known.put(itemId, cost);
+        return cost;
+    }
+
+    private static String code(Map<String, Item> items, String itemId) {
+        Item item = items.get(itemId);
+        return item == null ? itemId : item.getItemCode();
+    }
+}

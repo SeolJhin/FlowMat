@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterStable } from './WorkspaceEditorLayer'
+import { filterStable, keepsUnsavedEdit } from './WorkspaceEditorLayer'
 
 describe('filterStable', () => {
   it('returns the same array reference when nothing is filtered out', () => {
@@ -37,5 +37,19 @@ describe('filterStable', () => {
 
     expect(first).toBe(selectedIds)
     expect(second).toBe(selectedIds)
+  })
+})
+
+describe('keepsUnsavedEdit', () => {
+  it('keeps the edit when the save failed for a passing reason', () => {
+    expect(keepsUnsavedEdit(null)).toBe(true)
+    expect(keepsUnsavedEdit(429)).toBe(true)
+    expect(keepsUnsavedEdit(503)).toBe(true)
+  })
+
+  it('drops it for a conflict or a refused document, so the server version shows', () => {
+    expect(keepsUnsavedEdit(409)).toBe(false)
+    expect(keepsUnsavedEdit(400)).toBe(false)
+    expect(keepsUnsavedEdit(403)).toBe(false)
   })
 })

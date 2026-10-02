@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useBomWhereUsedQuery } from '../../../entities/bom/api/useBoms'
+import { useBomWhereUsedQuery, useBomWhereUsedTreeQuery } from '../../../entities/bom/api/useBoms'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import { lineTypeTag } from '../model/bomLineTypeModel'
@@ -21,7 +21,8 @@ export function BomWhereUsed({
   onOpen: (bomId: string) => void
 }) {
   const [itemId, setItemId] = useState('')
-  const whereUsedQuery = useBomWhereUsedQuery(projectId, itemId || null)
+  const [allLevels, setAllLevels] = useState(false)
+  const whereUsedQuery = useBomWhereUsedQuery(projectId, !allLevels && itemId ? itemId : null)
   const rows = whereUsedQuery.data ?? []
 
   return (
@@ -38,13 +39,18 @@ export function BomWhereUsed({
           ))}
         </select>
       </label>
-      {whereUsedQuery.isError && (
+      <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, marginTop: 6 }}>
+        <input type="checkbox" checked={allLevels} onChange={(e) => setAllLevels(e.target.checked)} />
+        <span>All levels, through approved sub-assemblies up to the top products</span>
+      </label>
+      {allLevels && itemId && <WhereUsedAllLevels projectId={projectId} itemId={itemId} onOpen={onOpen} />}
+      {!allLevels && whereUsedQuery.isError && (
         <p style={{ color: '#dc2626', fontSize: 12 }}>{errorMessage(whereUsedQuery.error, 'Failed to look it up.')}</p>
       )}
-      {itemId && !whereUsedQuery.isLoading && rows.length === 0 && (
+      {!allLevels && itemId && !whereUsedQuery.isLoading && rows.length === 0 && (
         <p className="inspector-hint">No BOM uses this item.</p>
       )}
-      {rows.length > 0 && (
+      {!allLevels && rows.length > 0 && (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginTop: 8 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left' }}>
@@ -80,5 +86,73 @@ export function BomWhereUsed({
         </table>
       )}
     </section>
+  )
+}
+
+/**
+ * The item's uses at every level through approved BOMs (docs/domain/multi-level-bom.md "다단계 역전개"): first the top
+ * products and how much of the item one of them takes, then every route, indented by level.
+ */
+function WhereUsedAllLevels({ projectId, itemId, onOpen }: { projectId: string; itemId: string; onOpen: (bomId: string) => void }) {
+  const treeQuery = useBomWhereUsedTreeQuery(projectId, itemId)
+  const tree = treeQuery.data
+  if (treeQuery.isError) {
+    return <p style={{ color: '#dc2626', fontSize: 12 }}>{errorMessage(treeQuery.error, 'Failed to look it up.')}</p>
+  }
+  if (!tree) return null
+  if (tree.uses.length === 0) {
+    return <p className="inspector-hint">No approved BOM uses this item.</p>
+  }
+  const unit = tree.unit ?? ''
+  return (
+    <div aria-label="Where used at all levels" style={{ marginTop: 8, fontSize: 13 }}>
+      <p style={{ margin: '0 0 6px' }}>
+        <strong>Top products:</strong>{' '}
+        {tree.topProducts
+          .map((top) =>
+            `${top.itemCode} needs ${top.perUnit == null ? '?' : formatQty(top.perUnit)} ${unit} per ${top.unit ?? 'unit'}`
+            + (top.routes > 1 ? ` (${top.routes} routes)` : '')
+            + (top.levels > 1 ? ` · ${top.levels} levels` : ''),
+          )
+          .join('; ')}
+      </p>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left' }}>
+            <th style={cell}>Used in</th>
+            <th style={{ ...cell, textAlign: 'right' }}>BOM line</th>
+            <th style={{ ...cell, textAlign: 'right' }}>{tree.itemCode} per product</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tree.uses.map((use) => (
+            <tr
+              key={use.path.join('>') + use.bomId}
+              onClick={() => onOpen(use.bomId)}
+              title={use.path.join(' → ')}
+              style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+            >
+              <td style={{ ...cell, paddingLeft: 6 + (use.level - 1) * 18 }}>
+                {use.level > 1 && <span style={{ opacity: 0.5 }}>↳ </span>}
+                {use.productItemCode}
+                {use.productItemName ? ` · ${use.productItemName}` : ''} <code>v{use.bomVersion}</code>
+                {use.topLevel && <span className="inspector-hint"> · top</span>}
+              </td>
+              <td style={{ ...cell, textAlign: 'right' }}>
+                {use.level > 1 ? `${use.materialItemCode} ` : ''}
+                {formatQty(use.lineQuantity)} {use.lineUnit} per {formatQty(use.baseQuantity)} {use.baseUnit}
+              </td>
+              <td style={{ ...cell, textAlign: 'right' }}>
+                {use.perProductUnit == null ? '?' : `${formatQty(use.perProductUnit)} ${unit}`}
+                {use.productUnit ? ` / ${use.productUnit}` : ''}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {tree.problems.length > 0 && (
+        <p role="note" style={{ color: '#b45309', fontSize: 12, margin: '4px 0 0' }}>Not converted: {tree.problems.join('; ')}</p>
+      )}
+    </div>
   )
 }

@@ -92,6 +92,10 @@ describe('availability', () => {
       capacityPerHour: 10, capacity: 350,
     })).toBe('Next 7 days: 35 h available (5 h down) · can make 350.')
     expect(availabilitySummary({
+      equipmentId: 'e', from: week.from, to: week.to, calendarSet: true, workingHours: 32, downtimeHours: 0, availableHours: 32,
+      capacityPerHour: null, capacity: null, holidays: ['2032-03-03'],
+    })).toBe('Next 7 days: 32 h available · 1 holiday off.')
+    expect(availabilitySummary({
       equipmentId: 'e', from: week.from, to: week.to, calendarSet: false, workingHours: 168, downtimeHours: 0, availableHours: 168,
       capacityPerHour: null, capacity: null,
     })).toBe('Next 7 days: 168 h available.')

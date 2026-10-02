@@ -10,6 +10,7 @@ import {
 } from '../model/equipmentModel'
 import { EquipmentSchedulePanel } from './EquipmentSchedulePanel'
 import { EquipmentLoadBoard } from './EquipmentLoadBoard'
+import { HolidaysPanel } from './HolidaysPanel'
 
 const emptyForm = { equipmentCode: '', equipmentName: '', equipmentType: '', equipmentStatus: 'active' }
 
@@ -143,6 +144,7 @@ export function EquipmentPanel({ projectId }: { projectId: string }) {
         <summary>Load by week</summary>
         {loadOpen && <EquipmentLoadBoard projectId={projectId} />}
       </details>
+      <HolidaysPanel projectId={projectId} />
     </section>
     <form onSubmit={submit} style={{ display: 'grid', gap: 10, alignContent: 'start' }}>
       <h2>{editingId ? 'Edit equipment' : 'Add equipment'}</h2>

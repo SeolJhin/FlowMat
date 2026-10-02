@@ -25,9 +25,11 @@ import org.myweb.flowmat.domain.catalog.api.dto.response.EquipmentScheduleRespon
 import org.myweb.flowmat.domain.catalog.domain.entity.Equipment;
 import org.myweb.flowmat.domain.catalog.domain.entity.EquipmentCalendar;
 import org.myweb.flowmat.domain.catalog.domain.entity.EquipmentDowntime;
+import org.myweb.flowmat.domain.catalog.domain.entity.ProjectHoliday;
 import org.myweb.flowmat.domain.catalog.repository.EquipmentCalendarRepository;
 import org.myweb.flowmat.domain.catalog.repository.EquipmentDowntimeRepository;
 import org.myweb.flowmat.domain.catalog.repository.EquipmentRepository;
+import org.myweb.flowmat.domain.catalog.repository.ProjectHolidayRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
@@ -54,14 +56,23 @@ public class EquipmentScheduleService {
     private final EquipmentRepository equipmentRepository;
     private final EquipmentCalendarRepository calendarRepository;
     private final EquipmentDowntimeRepository downtimeRepository;
+    private final ProjectHolidayRepository holidayRepository;
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
 
     @Value("${app.planning.time-zone:Asia/Seoul}")
     private String timeZone;
 
-    /** Working time in a window: hours with a calendar, hours down inside them, and what is left. */
-    public record Availability(boolean calendarSet, BigDecimal workingHours, BigDecimal downtimeHours, BigDecimal availableHours) {
+    /**
+     * Working time in a window: hours with a calendar, hours down inside them, and what is left. {@code holidays} are the
+     * project holidays whose shift would have fallen in the window (docs/domain/equipment-schedule.md "휴일").
+     */
+    public record Availability(boolean calendarSet, BigDecimal workingHours, BigDecimal downtimeHours, BigDecimal availableHours,
+                               List<LocalDate> holidays) {
+    }
+
+    /** The shifts in a window and the holidays that took a shift out of it. */
+    private record Shifts(List<Span> spans, List<LocalDate> holidays) {
     }
 
     private record Span(Instant start, Instant end) {
@@ -181,7 +192,8 @@ public class EquipmentScheduleService {
         BigDecimal rate = equipment.getCapacityPerHour();
         BigDecimal capacity = rate == null ? null : availability.availableHours().multiply(rate).stripTrailingZeros();
         return new EquipmentAvailabilityResponse(equipment.getEquipmentId(), start, end, availability.calendarSet(),
-            availability.workingHours(), availability.downtimeHours(), availability.availableHours(), rate, capacity);
+            availability.workingHours(), availability.downtimeHours(), availability.availableHours(), rate, capacity,
+            availability.holidays());
     }
 
     /**
@@ -193,7 +205,9 @@ public class EquipmentScheduleService {
         Instant start = from.toInstant();
         Instant end = to.toInstant();
         EquipmentCalendar calendar = calendarRepository.findById(equipment.getEquipmentId()).orElse(null);
-        List<Span> working = calendar == null ? List.of(new Span(start, end)) : merge(shifts(calendar, start, end));
+        Shifts shifts = calendar == null ? new Shifts(List.of(new Span(start, end)), List.of())
+            : shifts(calendar, equipment.getProjectId(), start, end);
+        List<Span> working = calendar == null ? shifts.spans() : merge(shifts.spans());
         List<Span> down = merge(downtimeRepository.findOverlapping(equipment.getEquipmentId(), from, to).stream()
             .map(downtime -> clip(downtime.getStartsAt().toInstant(), downtime.getEndsAt().toInstant(), start, end))
             .filter(span -> span != null)
@@ -208,27 +222,42 @@ public class EquipmentScheduleService {
                 }
             }
         }
-        return new Availability(calendar != null, hours(workingSeconds), hours(downSeconds), hours(workingSeconds - downSeconds));
+        return new Availability(calendar != null, hours(workingSeconds), hours(downSeconds), hours(workingSeconds - downSeconds),
+            shifts.holidays());
     }
 
-    /** Shifts that start on a work day, from the day before the window (a shift can run past midnight into it). */
-    private List<Span> shifts(EquipmentCalendar calendar, Instant start, Instant end) {
+    /**
+     * Shifts that start on a work day, from the day before the window (a shift can run past midnight into it). No shift
+     * starts on a project holiday; a night shift that starts the day before a holiday still runs into it.
+     */
+    private Shifts shifts(EquipmentCalendar calendar, String projectId, Instant start, Instant end) {
         ZoneId zone = zone();
         Set<Integer> days = workDays(calendar);
         Duration length = shiftLength(calendar.getShiftStart(), calendar.getShiftEnd());
-        List<Span> shifts = new ArrayList<>();
+        LocalDate first = start.atZone(zone).toLocalDate().minusDays(1);
         LocalDate last = end.atZone(zone).toLocalDate();
-        for (LocalDate day = start.atZone(zone).toLocalDate().minusDays(1); !day.isAfter(last); day = day.plusDays(1)) {
+        Set<LocalDate> holidays = holidayRepository.findAllByProjectIdAndHolidayDateBetweenAndDeletedYn(projectId, first, last, NOT_DELETED)
+            .stream()
+            .map(ProjectHoliday::getHolidayDate)
+            .collect(Collectors.toSet());
+        List<Span> shifts = new ArrayList<>();
+        List<LocalDate> skipped = new ArrayList<>();
+        for (LocalDate day = first; !day.isAfter(last); day = day.plusDays(1)) {
             if (!days.contains(day.getDayOfWeek().getValue())) {
                 continue;
             }
             LocalDateTime shiftStart = day.atTime(calendar.getShiftStart());
             Span shift = clip(shiftStart.atZone(zone).toInstant(), shiftStart.plus(length).atZone(zone).toInstant(), start, end);
-            if (shift != null) {
+            if (shift == null) {
+                continue;
+            }
+            if (holidays.contains(day)) {
+                skipped.add(day);
+            } else {
                 shifts.add(shift);
             }
         }
-        return shifts;
+        return new Shifts(shifts, skipped);
     }
 
     private EquipmentScheduleResponse toResponse(Equipment equipment) {
