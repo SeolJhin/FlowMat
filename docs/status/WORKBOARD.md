@@ -6,6 +6,10 @@
 
 | 일 | 상태 | 끝나면 |
 |---|---|---|
+| 2026-10-05 Codecov CI 실패 수정·결정 수령 | aa5c294 원격 backend tests·coverage gate·build 성공, Codecov v4 CLI 다운로드 TLS handshake 실패만 확인. v5·업로드 한정 continue-on-error·3분 제한·보고서 artifact·경고 추가. 로컬 YAML/필수 gate 유지 확인. 승인 결정 기록, 품목 삭제 집계 1건 별도 확인 | 원격 재실행은 사용자 커밋·푸시 후. 다음 D+ 구현 |
+| 2bj 원가 조회·표시 완료 | 전체 백엔드 1,070 실패·오류·건너뜀 0(라인 81.18%·분기 67.52%)·커버리지·빌드, 프런트 469·타입·기존 lint·빌드, 모의 API 원가 3 및 일정 4 재확인 | 2bk 실사 계획 완료. 2bl 예약 유지 이동 완료. 2bm 자동 예약 우선 피킹 완료. 다음 유효일 BOM 구현. actualEndAt 마감 기록과 workflow 공개 API 범위는 답변 대기 |
+| 2bi 완료: 승인 일정 변경 | 서버·화면·V52 구현 및 격리 SQL 롤백. 통합 23·브라우저 4·전체 백엔드 1,064 실패 0(라인 81.15%·분기 67.40%)·빌드, 프런트 464·타입·기존 lint·빌드 통과 | 2bj 원가 조회·표시도 구현, 다음 2bk: 서버 실사 계획·블라인드·행별 재실사. actualEndAt 마감 기록을 위한 workflow 공개 Query 수정 범위는 확인 중 |
+| 2bh 완료: D+ 과거 단가 Query | 최초 12건 compile RED → GREEN, 단위 15·격리 통합 3 포함 전체 백엔드 1,041건 실패·오류·건너뜀 0, 커버리지 기준 통과(라인 81.07%·분기 67.31%), 새 조회 100%·95%. 격리 build -x test도 통과. 기존 서버·DB·BOM은 건드리지 않음 | 실행 원가 API 연결은 별도 후속 단계, workflow 공개 Query 범위 확인 중. D+ 전체 완료 아님 |
 | docs 정리(현행·참고·보관 분리, 현행 문서 내용 갱신) | 끝. docs의 md 전부 스테이징(2026-10-02), 그 뒤 문서 변경도 계속 `git add -u docs`·새 md는 `git add -f`로 스테이징 | 사용자 커밋·푸시 |
 | 커밋 전 코드 변경: V42–V51과 아래 §2의 1·2·2a–2al | 로컬 검증 끝(2026-10-03 마지막 전체 실행: 백엔드 994건·커버리지 기준(2aj까지), 프런트 409건·린트·타입 검사·빌드와 브라우저 E2E 34건(2ag까지), 그 뒤 프런트 변경은 관련 테스트·E2E). 코드는 스테이징하지 않음. CI browser-e2e에 새 실 API 스펙 6개를 더함 | 사용자 커밋·푸시, 그다음 CI 확인 |
 | 세션 1 Agent 인계(2026-10-03부터 약 5일) | [AGENT_HANDOFF](AGENT_HANDOFF.md)에 맡는 구역·할 일 순서(CI 확인, 매일 전체 회귀, 결정 메모, 결정 없는 작은 개선)·지킬 것·검증·멈추는 조건을 적음. 이어받는 Agent는 하루 끝에 이 표에 한 줄 기록 | 사용자 커밋·푸시 뒤 CI 확인부터 |
@@ -31,6 +35,8 @@
 2026-10-05 스캐너 추가 검증: 같은 C: 격리 복사본에서 표준 전체 Gradle 테스트·커버리지 기준을 다시 통과했습니다(백엔드 소스 930개, 원본과 해시 불일치 0). 브라우저는 전용 프런트 4184와 전체 API 모킹으로 확인해 실제 DB 요청·실제 로그인을 쓰지 않았습니다. 앞선 전체 E2E 34건은 2aq 시점 기록이고, 이번 2ar–2as 뒤에는 관련 7건을 다시 실행했습니다. 앞선 프런트 종료 때 Volta 실행기만 끝나고 남았던 node 자식은 임시 스크립트·부모 체인·시작 시각을 확인해 종료했습니다. 이번 프런트도 실제 node PID로 확인해 종료했습니다. 기존 개발 서버·컨테이너는 건드리지 않았습니다.
 
 2026-10-05 CSV 보완 검증 정리: 2az–2bg는 가짜 API 브라우저만 사용했고 실제 DB에 BOM·재고를 쓰지 않았습니다. 프런트 전체 마지막 결과는 460건·타입·린트·빌드 통과이며, 백엔드는 이번 CSV 변경에서 수정·재실행하지 않았습니다(앞선 2as 전체 1,023건·81.02% 기록). 40개 변경 파일 UTF-8 BOM 0, 문서 9개 상대 링크 오류 0, diff 공백 오류 0. 4187은 저장한 자기 PID·UTC 시작 시각·스크립트 명령을 대조한 뒤 자기 esbuild 자식과 함께 종료했습니다. 커밋·푸시·브랜치·새 스테이징은 하지 않았습니다. 다음 큰 기능인 실행 원가 기준은 §3의 Proposed 결정에 따라 D(마감 단가 조회·보정 반영), B(저장·보정 때 재계산), A(마감 금액 고정) 중 사용자 선택을 요청해 둔 상태입니다. 결정 전 계산 정책·상태는 바꾸지 않습니다.
+
+2026-10-05 CI 원인 확인: [backend job](https://github.com/SeolJhin/FlowMat/actions/runs/37270508574/job/111636300123)의 Run tests·Verify coverage gate·Build는 success, Codecov만 failure. CLI 다운로드 직후 TLS alert 40으로 종료했다. [v4 구현](https://github.com/codecov/codecov-action/blob/v4/src/index.ts)은 https.get 요청 오류 handler가 없고 업로드 오류 옵션이 이 경로를 보호하지 못한다. TLS를 거절한 외부 측의 세부 원인은 이 로그만으로 확정할 수 없다. 로컬 수정은 v5·해당 업로드 단계만 continue-on-error·3분 제한·JUnit/JaCoCo artifact·실패 경고다. YAML과 필수 gate 유지 확인, 원격 재검증은 커밋·푸시 금지 때문에 실행하지 않았다.
 
 ## 2. 다음 작업 (순서대로)
 
@@ -97,38 +103,42 @@
 | 2be | ~~CSV 중복 필드 열 거절~~ | **완료(2026-10-05, 커밋 전).** 실사·품목·입고 CSV의 중복 의미 열(별칭·대소문자 포함)을 파일 오류로 거절. 수량·ID·단가·바코드·위치 잘못 선택 8건 및 화면 2건 수정 전 실패. 모델 21건·라인 100%·분기 80.80% 기준, 가짜 API 10건·전체 프런트 457·타입·린트·빌드 통과 | [실사](../domain/stock-count.md) C16, [입고](../domain/stock-import.md) S11, [품목 가져오기](../domain/item-import.md) I11 |
 | 2bf | ~~품목 CSV 파일·검사 경합 방어~~ | **완료(2026-10-05, 커밋 전).** 오래된 읽기·검사·오류 무시, 검사 중 취소, 읽기 오류 안내, 저장 중 파일/취소 잠금과 제출 방어. 테스트 변수명 오류 수정 뒤 실제 업무 5건 실패 재현. 가짜 API 6건·프런트 전체 457·타입·린트·빌드 통과 | [품목 가져오기](../domain/item-import.md) I12 |
 | 2bg | ~~BOM 자재 CSV 파일·교체 옵션 경합 방어~~ | **완료(2026-10-05, 커밋 전).** 최신 파일·옵션의 검사만 표시, 읽기 중 현재 옵션 반영·검사 취소·읽기 오류 안내·저장 중 파일/옵션/취소 잠금. 수량·단위·type 별칭 중복 거절. 모델 14건·라인 100%·분기 93.47%, 모의 API 8건·전체 프런트 460·타입·린트·빌드 통과. 실제 BOM 생성·삽입 없음 | [품목·BOM 가져오기](../domain/item-import.md) BOM 자재 CSV 파일·교체 옵션 방어 |
-| 3 | 조직 Phase 1~3(`organization`·`organization_member`·`project.organization_id`) | ADR-001이 수용 기준 4개를 닫고 Accepted가 된 뒤(지금 Proposed). 다음 빈 마이그레이션 번호는 V52 | [ADR-001](../architecture/adr/ADR-001-organization-project-boundary.md), 결정 인계 §6-6 |
+| 2bh | ~~D+ 과거 단가 공개 Query~~ | **완료(2026-10-05, 커밋 전).** 품목·이력 일괄 조회, 프로젝트 격리·삭제 품목 과거 참조, 시각 이하 단가와 추정 구분, 과거 모름 유지·동일 시각 충돌 처리. 단위 15·격리 통합 3, 전체 백엔드 1,041건·커버리지 기준 통과. 실행 API 연결은 다음 단계 | [재료비](../domain/material-cost.md) D+ 1단계 |
+| 2bi | ~~승인 작업지시 일정 변경~~ | **완료(2026-10-05, 커밋 전).** owner 명령·V52 이력, 시작일 보호·기존 날짜 대조·재송신·원자적 저장, Schedule 화면. 격리 통합 23·날짜 단위 4·모의 API 브라우저 4, 전체 백엔드 1,064·커버리지·빌드 및 프런트 464·타입·기존 lint·빌드 통과. 개발 DB 적용 없음 | [설비 일정](../domain/equipment-schedule.md) 승인 일정 변경 구현 |
+| 2bj | ~~D+ 원가 조회·기준 표시~~ | **조회·화면 단계 완료(2026-10-05, 커밋 전).** V1 종료 시각 열 mapping, 완료 시각 단가/추정 응답·줄별 기준·화면. 기존 저장소 2개 제거(자동 동결 84→82). 신규 통합 6, 전체 백엔드 1,070·커버리지·빌드, 프런트 469·모의 API 브라우저 3·타입·기존 lint·빌드 통과. **새 마감 시각 기록은 미완료** | [재료비](../domain/material-cost.md) D+ 2단계 |
+| 2bk | ~~서버 실사 계획·블라인드·행별 재실사~~ | **완료(2026-10-05, 커밋 전).** V53 격리 SQL 롤백, 원본 snapshot·checkpoint·권한 마스킹·행 version·재계수·일괄 저장·동시 키/제출. 통합 14 포함 전체 백엔드 1,084·실패 0·라인 81.29%·분기 67.65%·기준/빌드, 프런트 472·타입·기존 lint·빌드, 모킹 E2E 6 통과 | [실사](../domain/stock-count.md) 확정 A |
+| 2bl | ~~예약 유지 위치 이동~~ | **완료(2026-10-05, 커밋 전).** 공개 Command·동일 트랜잭션·전체/부분 이동·재송신·사칭 방어·화면. 통합 9 포함 전체 백엔드 1,093 실패 0·라인 81.34%·분기 67.60%·기준/빌드, 프런트 472·타입·기존 lint·빌드·모킹 E2E 3 통과 | [할당](../domain/stock-allocation.md) 확정 B |
+| 2bm | ~~자동 예약 우선 피킹~~ | **완료(2026-10-05, 커밋 전).** V54 격리 SQL 롤백 후 추가, 자기 할당 우선·일반 재고 보충·부분 이동·해제 거절·4자리 정밀도. 통합 6 포함 전체 백엔드 1,099 실패·오류·건너뜀 0·라인 81.39%·분기 67.74%·기준/빌드, 프런트 473·타입·기존 lint·빌드·관련 모킹 E2E 18(예약 피킹 2) 통과 | [할당](../domain/stock-allocation.md)·[창고 작업](../domain/warehouse-task.md) |
+| 3 | 조직 Phase 1~3(`organization`·`organization_member`·`project.organization_id`) | ADR-001 Accepted(2026-10-05). 구현 순서는 사용자 확정 목록에 따름. 새 번호는 직전 재확인 | [ADR-001](../architecture/adr/ADR-001-organization-project-boundary.md), 결정 인계 §6-6 |
 | 4 | 리본 마이그레이션 Step 3 리뷰 → Step 6(`workspace-topbar` 버튼 영역 제거) | Step 3 리뷰 | [editor/current-state](../editor/current-state.md) §8, [리본 계획](../editor/toolbar_ribbon_migration_plan.md) §7 |
 
 2026-10-02에 끝난 아키텍처 작업(결정 인계 §6-1~4): ADR 3개, 공개 API 기준 구현(`CatalogQuery`·`FlowRunCommand`), ArchUnit 기준선, `resourceType` registry 경고.
 
-## 3. 사용자 결정·확인 대기
+## 3. 확정된 결정과 남은 확인
 
-결정은 두 트랙으로 따로 관리한다. 한쪽이 남아 있어도 다른 쪽을 막지 않는다.
+2026-10-05 사용자 첨부의 최종 결정은 [DECISIONS-2026-10-05](DECISIONS-2026-10-05.md)에 기록했다. 이전 Proposed 권장안과 다른 부분은 최종 결정이 우선한다. **승인 ≠ 구현 완료.**
 
-- **아키텍처 결정(ADR)**: ADR-001 Proposed, ADR-002 Accepted, ADR-003 원칙 Accepted + registry Experimental(2026-10-02 의사결정자 검토), ADR-004 Proposed(2026-10-03 Agent 초안, 검토 전)
-- **도메인 결정**: D2(재고·BOM·LOT 구현 결정) 등
+| 항목 | 결정 | 구현·확인 상태 |
+|---|---|---|
+| 실행 원가 | D+ Accepted | actualEndAt 기록·historical price 조회·추정 표시 구현 순서 1 |
+| 시간대 | 프로젝트별 IANA Zone, 기존 Asia/Seoul | 구현 순서 2 |
+| 작업지시 일정 / 피킹 / 실사 | C / B / A + 계획별 blind, owner 기준 수량 열람 | 구현 순서 3~5 |
+| 유효일 BOM / 팬텀 | 기간 비중첩 다중 승인·자동 retire 금지 / BomLine.phantom | 구현 순서 6~7 |
+| Setup / 부산물 / 첨부 | 다차원 속성·별도 비용 / 별도 가치 / Local-S3 추상화 | 구현 순서 8~9 |
+| 조직 | ADR-001 Accepted, 업무 접근 상속 없음, metadata·탈퇴 정책 확정 | Phase 1~3와 권한 회귀 미구현 |
+| 모듈·포트 | ADR-002/003 기존 원칙 유지, ADR-005 Accepted | 비제조 quantity/unit 선택 전환 미구현 |
+| 실행 정책 | ADR-004 Accepted, workflowRevision + node | timeout·delay·concurrency 미구현 |
+| 협업 / 역할 | 요소별 optimistic patch / 초기 viewer-editor-owner 확정 | 적용 범위 확인, CRDT Deferred |
+| 범용 실행 | backend integration VALIDATED / 제품 PARTIALLY VALIDATED | 전체 실제 API 브라우저 흐름 구현 순서 10 |
+| D2 집계 | 기존 15건 중 확인 14(조건부 포함), 품목 삭제 방어 1건 확인 중 | 이전 보고가 품목 삭제를 완료 실행 보정으로 잘못 집계. 완료 실행 보정은 별도로 승인됨. 회신 전 15/15로 표시하지 않음 |
+| 운영 | 기존 DB validate·STOMP 보안·부하·접근성 실사용 검증 | 오래된 D4~D6 기록은 현재 상태 재확인 필요 |
+| 기존 테스트 BOM | 유지·정리 선택 | 참조 관계 확인·사용자 결정 전 삭제 금지 |
 
-| 트랙 | 항목 | 무엇을 정하나 | 근거 |
-|---|---|---|---|
-| 아키텍처 | ADR-001 수용 기준 4개 | 조직 멤버십 ≠ 프로젝트 멤버십, cross-project deny-by-default, 조직 OWNER·ADMIN의 프로젝트 override 여부(기본안: 아니오), 마이그레이션 전후 접근 호환성 불변식. 모두 닫히면 Accepted | [ADR-001](../architecture/adr/ADR-001-organization-project-boundary.md) |
-| 아키텍처 | ADR-001 별도 결정 2개 | 조직 MEMBER가 조직의 프로젝트 목록을 보는가, 조직 탈퇴 시 ProjectMember를 지우는가 | 같은 곳 결정 3 |
-| 아키텍처 | FlowRun 범용성 상태(ADR-003 결정 8) | 9-(a) 통합 테스트가 2026-10-03 통과했다. "목표"를 "검증됨"으로 바꿀지, 화면까지 포함한 vertical slice를 더 요구할지 | [ADR-003](../architecture/adr/ADR-003-resource-port-contract.md) 검증 |
-| 아키텍처 | 데이터·파일·API 포트의 `quantity`·`unit` | 지금 모든 포트에 필수라 데이터 포트는 `quantity 0`·`ea`를 넣는다. 선택으로 바꿀지 | 같은 곳 "결정하지 않은 것" |
-| 아키텍처 | Execution Requirement 모델 | 노동·설비·연산·기술·시간처럼 포트로 흐르지 않는 실행 요건을 어디에 둘지. 정해지면 포트 편집 화면 I/O Type의 `labor`도 정리 | [ADR-003](../architecture/adr/ADR-003-resource-port-contract.md) "Resource Type Registry" |
-| 아키텍처 | ADR-004 수용 기준 5개 | 실행 정책을 노드에 둘지, 시간 제한 처리(실패로 기록 후 연결 정책 적용, `alert` 포함 여부), 재시도 간격을 외부 보고 모델 위에서 지킬지, 동시 실행 제한의 단위와 초과 시 409, 노드 실행기와의 순서 | [ADR-004](../architecture/adr/ADR-004-flow-run-execution-policy.md) |
-| 아키텍처 | 보류 항목 | 조직 역할 상속, Tenant 정책, Site·거래처, 노드 실행기·실행 정책 등 | [결정 인계](../architecture/decision-handoff.md) §3 |
-| 도메인 | 승인된 작업지시의 계획 날짜 변경 | 지금은 초안만 계획 시작·끝을 고칠 수 있다(설비만 예외로 완료·취소 전까지 바꿀 수 있음). 승인·진행 중 작업지시도 날짜를 바꾸게 할지, 바꾸면 기록을 남길지. 정해지면 계획 기간 제안의 **Use these dates**와 부하 타임라인 끌어 옮기기를 승인된 작업지시에도 열 수 있다 | [설비 달력](../domain/equipment-schedule.md) "계획 기간 제안", [설비 부하표](../domain/equipment-load.md) "이후". 선택지·권장안: [결정 메모](../domain/equipment-schedule.md#결정-메모-승인된-작업지시의-계획-날짜-변경-proposed-2026-10-03)(Proposed) |
-| 도메인 | 실행 원가 저장 시점 | `production_run.total_material_cost`·`cost_per_unit`에 무엇을 남길지: 마감 때 그때 단가로 고정한 금액(마감 뒤 단가가 바뀌어도 그대로)인지, 마감 뒤 보정 전표(add_item·void_item·set_output_qty)가 기록을 바꾸면 다시 계산하는지, 보정 시점 단가인지 마감 시점 단가인지. 지금은 조회 때마다 현재 단가로 계산만 한다 | [재료비](../domain/material-cost.md) "하지 않은 것", [실행 보정](../domain/production-run-correction.md). 선택지·권장안: [결정 메모](../domain/material-cost.md#결정-메모-실행-원가-저장-시점-proposed-2026-10-03)(Proposed) |
-| 도메인 | D1 편집 협업 충돌 모델 | 문서 단위 409 / 요소 patch / CRDT | [C5 비교](../archive/2026-09-handoff/reports/C-collab-model-comparison.md) |
-| 도메인 | D2 재고·BOM·LOT 구현 결정 | **PARTIALLY ACCEPTED**: 승인 9 / 15(그중 조건부 1), 대기 6 / 15(검토 대기 3, 검토 필요 1, D3에 묶인 권한 1, D7 조사까지 잠정 유지 1). 대기 건은 그대로 두고 문서 정리를 위해 승인으로 올리지 않는다. 구현 상태 ≠ 결정 상태 | [재고·BOM·LOT 계약](../domain/inventory-bom-lot-contract.md) 머리말 |
-| 도메인 | D3 권한 매트릭스 | 역할별 API 허용 범위. ADR-001 수용 기준과 함께 보면 좋다 | [C4 초안](../archive/2026-09-handoff/reports/C-permission-matrix.md) |
-| 운영 | D4 기존 dev·운영 DB의 Flyway `validate` | 읽기 전용 확인. 로컬 dev DB의 V26 체크섬 기록 | [local-development](../local-development.md) |
-| 운영 | D5·D6 | STOMP 보안 검토, 다중 사용자·부하·접근성 실사용 검증 | [2026-09-24 요약](../archive/2026-09-handoff/reports/00-summary.md) |
-
-D1~D6은 2026-09-24 인계에서 넘어온 것이며 그 뒤 다시 확인하지 않았다.
+Tenant·Site·거래처·조직 이동/삭제·노드 실행기·세분화 역할·배출량 모델은 별도 후속 범위다. Outbox·Microservices는 Deferred. 승인된 범위를 결정 대기로 다시 막지 않는다.
 
 ## 4. 기능 쪽 남은 큰 덩어리
+
+> 아래는 2026-10-03 조사 이력이다. 원가·피킹·실사·첨부·시간대·setup·부산물·유효일·팬텀의 정책 선택은 §3에서 확정됐으며, 남은 일은 구현·도메인 공개 API·회귀 검증이다. 예전 "결정 대기" 표현으로 재승인을 요구하지 않는다.
 
 세부 남은 범위는 [CURRENT_CAPABILITIES](CURRENT_CAPABILITIES.md)의 각 행과 "원래 백로그 대비 현황"에 있다.
 

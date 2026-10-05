@@ -28,6 +28,8 @@ public record WarehouseTaskResponse(
     String transferId,
     String cancelReason,
     /** Who should do the task (W7); null while no one is named. */
-    String assignedTo
+    String assignedTo,
+    /** Nonnull when this task must keep its allocation reservation while moving. */
+    String allocationId
 ) {
 }

@@ -17,6 +17,7 @@ import { shortBy, usableByMaterial } from '../model/buildableModel'
 import { BomRevisionCompare } from './BomRevisionCompare'
 import { BomLineImport } from './BomLineImport'
 import { BomCopyForm } from './BomCopyForm'
+import { BomPeriodsPanel } from './BomPeriodsPanel'
 import { BomWhereUsed } from './BomWhereUsed'
 import { BomCostRollup } from './BomCostRollup'
 import { BomExplosion } from './BomExplosion'
@@ -141,6 +142,7 @@ export function BomPanel({ projectId, items, units }: { projectId: string; items
           />
         )}
       </section>
+      <BomPeriodsPanel projectId={projectId} boms={boms} />
     </div>
   )
 }

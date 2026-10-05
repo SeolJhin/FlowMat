@@ -45,6 +45,10 @@ BOM 줄마다 `lineType`:
 - 화면 `e2e/byproduct-finish.spec.ts`(2026-10-03, **가짜 API**, CI의 일반 browser-e2e 단계에 포함): 빵 20 계획·16 기록·밀기울 0.5 kg → 알림 `BRAN · bran 0.5 of 1.6 kg, DUST · dust 0 of 0.4 kg` → 실제 생산량 20 입력하면 `0.5 of 2 kg … 0 of 0.5 kg` → Finish 확인창에 같은 문장(취소해서 마감하지 않음) → 가짜 실행을 `finished`·16 생산으로 바꿔 다시 열면 밀기울 줄 `expected 1.6 kg for 16 made`·`recorded 0.5`·`1.1 kg short`, 먼지 `0.4 kg short`, Record 버튼과 마감 알림 없음
 - 화면 `e2e/bom-by-products.spec.ts`: **API를 가짜로 대신해**(개발 DB에 BOM을 넣지 않음) 목록 `1 material · 1 by-product`, 껍질 줄 `by-product`, 폐기물 줄 추가 시 요청 본문 `lineType: waste`와 줄 태그. CI browser E2E 단계에서 함께 돎
 
+## 2026-10-05 확정: 부산물 가치와 배출
+
+**Accepted (정책).** B 승인. 부산물 가치는 재료비와 별도 표시. 폐기 처리비는 별도 비용 component, Item.unitCost 재사용 금지. 배출량은 EmissionFactor 별도 모델로 보류, BOM emission line 추가 금지. 아래 메모는 검토 이력이며 구현 전이다. [최종 결정](../status/DECISIONS-2026-10-05.md)이 아래 예전 선택지보다 우선한다.
+
 ## 결정 메모: 부산물 가치와 배출 (Proposed, 2026-10-04)
 
 > **결정이 아니다.** [WORKBOARD](../status/WORKBOARD.md) §4의 제품 규칙 묶음 중 부산물 쪽을 고르기 위한 자료다. 고르기 전에는 구현하지 않는다.

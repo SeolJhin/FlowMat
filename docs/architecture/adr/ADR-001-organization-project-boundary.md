@@ -4,20 +4,21 @@
 
 ## 상태
 
-**Proposed.** 권한 의미(authorization semantics)가 아직 닫히지 않았다. 아래 "수용 기준" 네 가지가 모두 확정되면 Accepted로 올린다. 그 전에는 조직 테이블 마이그레이션(Phase 1~3)을 시작하지 않는다.
+**Accepted (2026-10-05).** 사용자가 수용 기준 네 가지와 목록·탈퇴 정책을 확정했다. [최종 결정](../../status/DECISIONS-2026-10-05.md) §7. 조직 구현·마이그레이션 적용은 아직 별개다.
 
 상태 이력:
+- 2026-10-05 사용자 최종 결정: Accepted. 프로젝트 override 없음, 관리 metadata만 예외, 탈퇴 시 ProjectMember 비활성화.
 - 2026-10-02 작성: Accepted로 적었다.
 - 같은 날 의사결정자 검토: Proposed로 조정했다. 이유는 조직 역할 → 프로젝트 권한 상속, cross-project access, 조직 OWNER·ADMIN 권한이 아직 결정되지 않았기 때문이다.
 
 근거: 사용자가 최신 결정 문서로 지정한 [원문](../../reference/architecture/FlowMat_Architecture_refactoring_Handoff.md) §8–17, 사용자가 직접 고친 경계 문장(결정 1), 2026-10-02 의사결정자 검토.
 
-## 수용 기준 (모두 닫히면 Accepted)
+## 수용 기준 (2026-10-05 사용자 확정)
 
-- [ ] Organization membership ≠ Project membership 확정
-- [ ] Cross-project access deny-by-default 확정
-- [ ] 조직 OWNER·ADMIN의 프로젝트 override 여부 확정
-- [ ] 마이그레이션 전후 프로젝트 접근 호환성 불변식 확정
+- [x] Organization membership ≠ Project membership 확정
+- [x] Cross-project access deny-by-default 확정
+- [x] 조직 OWNER·ADMIN의 프로젝트 override 여부 확정
+- [x] 마이그레이션 전후 프로젝트 접근 호환성 불변식 확정
 
 ## 배경
 
@@ -31,11 +32,11 @@
 - 회사·사업장·거래처 모델이 없다. ERP·CRM 통합에는 프로젝트보다 위의 소유 단위와 거래처가 필요하다.
 - FlowMat은 제조 전용이 아니다. 따라서 Company → Factory → Project 같은 고정 계층은 맞지 않는다. 게임 개발사의 CI 파이프라인이나 연구실의 분석 흐름에는 Factory가 없다.
 
-## 제안하는 결정
+## 결정
 
 1. **Organization은 상위 소유 및 계정 그룹 경계이고, Project는 현재의 데이터 격리 및 접근권한 집행 경계다. Organization membership은 별도 정책이 도입되기 전까지 Project 접근권한을 암묵적으로 부여하지 않는다.** (사용자 확정 문장)
 2. Project는 없애지 않는다. 기존 `project_id`는 `organization_id`로 바꾸지 않으며, 데이터가 속한 조직은 `데이터 → Project → Organization`으로 찾는다.
-3. **권한 기본안**(의사결정자 권고, 2026-10-02). 기존 권한과 호환되도록 조직 멤버십과 프로젝트 멤버십을 분리한다.
+3. **권한 확정안**(2026-10-05 사용자 승인). 조직 멤버십과 프로젝트 멤버십을 분리한다.
 
    ```text
    OrganizationMember ──X──> Project 접근 자동 부여 없음
@@ -43,15 +44,17 @@
    cross-project access = DENY BY DEFAULT
    ```
 
-   | 질문 | 기본안 | 상태 |
-   |---|---|---|
-   | 조직 OWNER가 조직의 모든 프로젝트 데이터를 볼 수 있는가 | 아니오 | 수용 기준 3에서 확정 |
-   | 조직 ADMIN은 | 아니오 | 수용 기준 3에서 확정 |
-   | 조직 MEMBER가 조직의 프로젝트 **목록**을 볼 수 있는가 | — | 별도 결정 |
-   | 조직을 탈퇴하면 그 조직 프로젝트의 ProjectMember도 지우는가 | — | 별도 결정 |
-   | 프로젝트 owner와 조직 owner가 다를 수 있는가 | 허용 | 기본안 |
+   | 질문 | 확정 정책 |
+   |---|---|
+   | 조직 OWNER·ADMIN의 프로젝트 데이터 override | 없음. ProjectMember가 아니면 업무 데이터 접근 불가 |
+   | 조직 OWNER·ADMIN의 프로젝트 목록 | 이름·ID·상태·owner 관리 metadata만 가능 |
+   | 조직 MEMBER의 조직 전체 프로젝트 목록 | 불가 |
+   | 조직 탈퇴/제거 | 해당 조직의 ProjectMember 비활성화 |
+   | 탈퇴자가 Project owner | 소유권 이전 전까지 탈퇴/제거 거절 |
+   | 프로젝트 owner와 조직 owner가 다른 경우 | 허용 |
 
-   기본안대로라면 `ProjectAccessService`의 판정 규칙은 조직 도입 전후로 같다. 조직 OWNER·ADMIN이라도 그 프로젝트의 소유자나 멤버가 아니면 읽을 수 없다.
+   조직 도입/backfill 전후 기존 프로젝트 내용 접근 판정은 동일해야 한다. 관리 metadata 목록은 업무 데이터 조회와 분리한다.
+
 4. Organization은 법인일 필요가 없다. 개인 workspace, 회사, 연구실 모두 Organization이 될 수 있다.
 5. Site(공장·창고·사무실·연구실 같은 물리적 장소)와 BusinessPartner(고객·공급사·물류·외주 거래처)는 Organization 아래의 별도 모델이다. Project와는 선택적으로만 연결한다(`project_site`, `project_partner`). Project 아래에 강제로 두지 않는다.
 6. 도입 순서(Accepted 뒤)
@@ -65,7 +68,6 @@
 
 아래는 별도 ADR이나 사용자 결정 없이 정하지 않는다.
 
-- 위 결정 3 표의 "별도 결정" 두 가지(조직 MEMBER의 프로젝트 목록 열람, 조직 탈퇴 시 ProjectMember 처리)
 - 조직 역할의 프로젝트 접근 상속을 나중에 도입할지와 그 방식
 - Tenant 격리 정책: 조직 간 격리 수준, 조직 단위 조회·보고, 시스템 관리자의 범위
 - `project.organization_id` NOT NULL 전환 시점
@@ -73,7 +75,7 @@
   - 첫 후보는 출고 거래처다. 출고 거래에 거래처가 없어 LOT 리콜이 출고처를 보여 주지 못한다.
 - 프로젝트의 조직 간 이동, 조직 삭제, 조직 소유권 이전
 - Phase 1 이후 새 프로젝트를 어느 조직에 만들지(기본값). Phase 1 구현 때 제안하고 사용자 확인을 받는다. 어떤 기본값이든 결정 3을 바꾸지 않는다.
-- 권한 매트릭스 확정(2026-09-24 D3, [C4 초안](../../archive/2026-09-handoff/reports/C-permission-matrix.md))
+- 세분화 권한(APPROVER·QUALITY_MANAGER 등)의 도입. 초기 viewer/editor/owner 역할은 [2026-10-05 결정](../../status/DECISIONS-2026-10-05.md) §7로 확정.
 
 ## 결과
 

@@ -19,6 +19,7 @@ import { plannedSupply } from '../model/readinessModel'
 import { WorkOrderEquipmentPicker } from './WorkOrderEquipmentPicker'
 import { WorkOrderPlanSuggestion } from './WorkOrderPlanSuggestion'
 import { WorkOrderAllocations } from './WorkOrderAllocations'
+import { WorkOrderReschedule } from './WorkOrderReschedule'
 import { useEquipmentQuery } from '../../../entities/catalog/api/useEquipment'
 
 const PRIORITIES = ['low', 'normal', 'high', 'urgent']
@@ -38,7 +39,7 @@ const ACTION_LABELS: Record<WorkOrderTransition, string> = {
 }
 
 const ACTION_CONFIRM: Record<WorkOrderTransition, string> = {
-  approve: 'Approve this work order? It can no longer be edited, and runs can be started against it.',
+  approve: 'Approve this work order? Draft fields are frozen; the owner can reschedule it with a reason. Runs can then start.',
   cancel: 'Cancel this work order? This cannot be undone.',
   complete: 'Mark this work order as completed?',
 }
@@ -96,6 +97,7 @@ export function WorkOrdersPanel({
   workflows: WorkflowDto[]
   items: ItemDto[]
 }) {
+  const [scheduleFor, setScheduleFor] = useState<string | null>(null)
   const ordersQuery = useWorkOrdersQuery(projectId)
   const saveMutation = useSaveWorkOrderMutation(projectId)
   const transitionMutation = useWorkOrderTransitionMutation(projectId)
@@ -323,6 +325,9 @@ export function WorkOrdersPanel({
                       {order.equipmentId && <div>on {equipmentCode.get(order.equipmentId) ?? order.equipmentId}</div>}
                     </td>
                     <td style={{ ...cell, whiteSpace: 'nowrap' }}>
+                      <button type="button" aria-expanded={scheduleFor === order.workOrderId}
+                        onClick={() => setScheduleFor((current) => current === order.workOrderId ? null : order.workOrderId)}
+                        style={{ marginRight: 4, fontSize: 12 }}>Schedule</button>
                       {isWorkOrderEditable(order.workOrderStatus) && (
                         <button type="button" onClick={() => startEdit(order)} style={{ marginRight: 4, fontSize: 12 }}>
                           Edit
@@ -357,6 +362,11 @@ export function WorkOrdersPanel({
                       )}
                     </td>
                   </tr>
+                  {scheduleFor === order.workOrderId && (
+                    <tr><td colSpan={6} style={{ ...cell, background: 'var(--accent-bg)' }}>
+                      <WorkOrderReschedule key={order.workOrderId} order={order} projectId={projectId} />
+                    </td></tr>
+                  )}
                   {readinessFor === order.workOrderId && (
                     <tr style={{ borderBottom: '1px solid var(--border)' }}>
                       <td colSpan={6} style={{ ...cell, background: 'var(--accent-bg)' }}>

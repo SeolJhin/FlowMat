@@ -24,7 +24,7 @@ export function partQuantity(
 
 export function freeToMove(record: InventoryDto, openTasks: WarehouseTaskDto[]): number {
   const planned = openTasks
-    .filter((task) => task.status === 'open' && task.inventoryId === record.inventoryId)
+    .filter((task) => task.status === 'open' && task.inventoryId === record.inventoryId && !task.allocationId)
     .reduce((sum, task) => sum + task.quantity, 0)
   return Math.max(0, Number(record.availableQuantity) - planned)
 }

@@ -121,7 +121,7 @@ export function WarehouseTasksPanel({ projectId, items }: { projectId: string; i
             {mine.map((task) => (
               <li key={task.taskId} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10, fontSize: 16 }}>
                 <strong>{task.taskNo}</strong> · {task.taskType}{task.assignedTo ? '' : ' · not assigned'}
-                <div>{formatQty(task.quantity)} {task.itemCode ?? task.itemId}{task.lotNo ? ` · LOT ${task.lotNo}` : ''}</div>
+                <div>{formatQty(task.quantity)} {task.itemCode ?? task.itemId}{task.lotNo ? ` · LOT ${task.lotNo}` : ''}{task.allocationId && <div className="inspector-hint">Reserved for work order</div>}</div>
                 <div>{task.fromLocation ?? '-'} → <strong>{task.toLocation}</strong></div>
               </li>
             ))}
@@ -162,7 +162,7 @@ export function WarehouseTasksPanel({ projectId, items }: { projectId: string; i
                 <td>{task.taskNo}</td>
                 <td>{task.taskType}</td>
                 <td>{task.itemCode ?? itemLabel(task.itemId)}{task.lotNo && <div className="inspector-hint">LOT {task.lotNo}</div>}</td>
-                <td>{formatQty(task.quantity)}</td>
+                <td>{formatQty(task.quantity)}{task.allocationId && <div className="inspector-hint">Reserved for work order</div>}</td>
                 <td>{task.fromLocation ?? '-'}</td>
                 <td>{task.toLocation}</td>
                 <td>{task.workOrderNumber ?? '-'}</td>

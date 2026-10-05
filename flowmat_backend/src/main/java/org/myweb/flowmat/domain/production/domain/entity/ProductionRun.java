@@ -4,6 +4,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import lombok.Getter;
 import lombok.Setter;
 import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
@@ -36,6 +37,9 @@ public class ProductionRun extends CreatedUpdatedAuditEntity {
     private BigDecimal actualOutputQty;
     private String startedBy;
     private String finishedBy;
+
+    /** Existing V1 column. The original end instant prices finished runs and must remain unchanged by corrections. */
+    private OffsetDateTime actualEndAt;
 
     /** Legacy run types were physical; only the explicitly non-physical types are isolated. */
     public boolean affectsPhysicalState() {

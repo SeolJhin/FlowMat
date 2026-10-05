@@ -1,0 +1,36 @@
+package org.myweb.flowmat.domain.bom.application;
+
+import java.time.LocalDate;
+import java.util.Optional;
+import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.bom.application.publicapi.BomRevisionQuery;
+import org.myweb.flowmat.domain.bom.application.publicapi.EffectiveBomView;
+import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
+import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.global.exception.BusinessException;
+import org.myweb.flowmat.global.exception.ErrorCode;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+public class BomRevisionQueryImpl implements BomRevisionQuery {
+    private final BomHeaderRepository headers;
+    private final ProjectAccessService access;
+    @Override
+    public Optional<EffectiveBomView> findEffective(String projectId,String targetItemId,LocalDate on) {
+        if (projectId==null || projectId.isBlank() || targetItemId==null || targetItemId.isBlank())
+            throw new BusinessException(ErrorCode.BAD_REQUEST,"projectId and targetItemId are required.");
+        access.requireProjectReadAccess(projectId);
+        if(on==null || on.getYear()<1 || on.getYear()>9999)
+            throw new BusinessException(ErrorCode.BAD_REQUEST,"on requires a project calendar date with a year from 1 to 9999.");
+        var effective=headers.findAllByProjectIdAndTargetItemIdAndDeletedYnOrderByBomVersionDesc(projectId,targetItemId,"N")
+            .stream().filter(header->"approved".equals(header.getBomStatus()))
+            .filter(header->header.getEffectiveFrom()==null || !on.isBefore(header.getEffectiveFrom()))
+            .filter(header->header.getEffectiveTo()==null || !on.isAfter(header.getEffectiveTo())).toList();
+        if(effective.size()>1)throw new BusinessException(ErrorCode.CONFLICT,"effectiveFrom/effectiveTo overlap for this item on "+on+"; explicitly adjust the approved periods.");
+        return effective.stream().findFirst().map(header->new EffectiveBomView(header.getBomId(),header.getTargetItemId(),
+            header.getBomVersion(),header.getEffectiveFrom(),header.getEffectiveTo()));
+    }
+}

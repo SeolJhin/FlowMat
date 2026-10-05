@@ -1,6 +1,7 @@
 package org.myweb.flowmat.domain.inventory.application;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -12,6 +13,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
+import java.nio.charset.StandardCharsets;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -22,6 +25,7 @@ import org.myweb.flowmat.domain.bom.application.BomService;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.inventory.api.dto.request.InventoryTransferRequest;
+import org.myweb.flowmat.domain.inventory.api.dto.request.AllocatedStockTransferRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.request.PickListRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.request.WarehouseTaskCreateRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.response.PickListResponse;
@@ -34,6 +38,7 @@ import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
 import org.myweb.flowmat.domain.inventory.repository.WarehouseTaskRepository;
 import org.myweb.flowmat.domain.production.application.publicapi.WorkOrderQuery;
+import org.myweb.flowmat.domain.production.application.publicapi.AllocationTransferCommand;
 import org.myweb.flowmat.domain.production.application.publicapi.WorkOrderView;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.project.application.publicapi.ProjectMemberQuery;
@@ -64,6 +69,8 @@ public class WarehouseTaskService {
     private final CatalogQuery catalogQuery;
     private final LotMasterRepository lotMasterRepository;
     private final WorkOrderQuery workOrderQuery;
+    private final AllocationTransferCommand allocationTransfers;
+    private final AllocatedStockTransferService allocatedStockTransferService;
     private final BomService bomService;
     private final StorageLocationService storageLocationService;
     private final InventoryTransferService inventoryTransferService;
@@ -147,8 +154,16 @@ public class WarehouseTaskService {
             }
         }
 
+        List<AllocationTransferCommand.OpenAllocation> ownAllocations = order == null ? List.of() : allocationTransfers.lockOpen(projectId, order.workOrderId());
+        Map<String, BigDecimal> reservedByRecord = ownAllocations.stream().collect(Collectors.toMap(
+            AllocationTransferCommand.OpenAllocation::inventoryId, AllocationTransferCommand.OpenAllocation::remaining, BigDecimal::add));
+        List<WarehouseTask> openTasks = taskRepository.findAllByProjectIdAndStatus(projectId, OPEN);
+        Map<String, BigDecimal> plannedByAllocation = openTasks.stream().filter(task -> task.getAllocationId() != null)
+            .collect(Collectors.toMap(WarehouseTask::getAllocationId, WarehouseTask::getQuantity, BigDecimal::add));
         Map<String, BigDecimal> plannedByRecord = plannedByRecord(projectId);
-        Map<String, BigDecimal> plannedToStaging = taskRepository.findAllByProjectIdAndStatus(projectId, OPEN).stream()
+        String requestedOrderId = order == null ? null : order.workOrderId();
+        Map<String, BigDecimal> plannedToStaging = openTasks.stream()
+            .filter(task -> task.getAllocationId() == null || Objects.equals(requestedOrderId, task.getWorkOrderId()))
             .filter(task -> "pick".equals(task.getTaskType()) && staging.equalsIgnoreCase(task.getToLocation()))
             .collect(Collectors.toMap(WarehouseTask::getInventoryId, WarehouseTask::getQuantity, BigDecimal::add));
         String note = trimToNull(request.note());
@@ -163,14 +178,31 @@ public class WarehouseTaskService {
             List<Inventory> usableRows = usableStock(rows, today);
             BigDecimal atStaging = usableRows.stream()
                 .filter(row -> staging.equalsIgnoreCase(Objects.toString(trimToNull(row.getLocation()), "")))
-                .map(Inventory::getAvailableQuantity).filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
+                .map(row -> row.getAvailableQuantity().add(reservedByRecord.getOrDefault(row.getInventoryId(), BigDecimal.ZERO))).reduce(BigDecimal.ZERO, BigDecimal::add);
             // A queued task covers only what its source can still move, without counting staged stock twice.
             BigDecimal alreadyPlanned = usableRows.stream()
                 .filter(row -> !staging.equalsIgnoreCase(Objects.toString(trimToNull(row.getLocation()), "")))
-                .map(row -> plannedToStaging.getOrDefault(row.getInventoryId(), BigDecimal.ZERO).min(row.getAvailableQuantity()))
+                .map(row -> plannedToStaging.getOrDefault(row.getInventoryId(), BigDecimal.ZERO).min(row.getAvailableQuantity().add(reservedByRecord.getOrDefault(row.getInventoryId(), BigDecimal.ZERO))))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
             BigDecimal remaining = need.getValue().subtract(atStaging).subtract(alreadyPlanned);
             BigDecimal plannedNow = BigDecimal.ZERO;
+            // The order's reservations are selected before any free stock, in the same LOT/record expiry order.
+            for (Inventory row : usableRows) {
+                if (remaining.signum() <= 0) break;
+                if (staging.equalsIgnoreCase(Objects.toString(trimToNull(row.getLocation()), ""))) continue;
+                for (var allocation : ownAllocations) {
+                    if (remaining.signum() <= 0) break;
+                    if (!row.getInventoryId().equals(allocation.inventoryId())) continue;
+                    BigDecimal free = allocation.remaining().subtract(plannedByAllocation.getOrDefault(allocation.allocationId(), BigDecimal.ZERO));
+                    if (free.signum() <= 0) continue;
+                    BigDecimal piece = free.min(remaining);
+                    WarehouseTask reservedTask = task(projectId, "pick", row, piece, staging, requestedOrderId, note);
+                    reservedTask.setAllocationId(allocation.allocationId());
+                    created.add(taskRepository.saveAndFlush(reservedTask));
+                    plannedByAllocation.merge(allocation.allocationId(), piece, BigDecimal::add);
+                    plannedNow = plannedNow.add(piece); remaining = remaining.subtract(piece);
+                }
+            }
             for (Inventory row : usableRows) {
                 if (remaining.signum() <= 0) {
                     break;
@@ -209,12 +241,17 @@ public class WarehouseTaskService {
             throw new BusinessException(ErrorCode.CONFLICT, "expectedToLocation does not match task " + task.getTaskNo()
                 + " destination " + task.getToLocation() + ". Scan its destination again.");
         }
+        if (quantity != null) {
+            if (quantity.signum() <= 0 || quantity.compareTo(task.getQuantity()) > 0) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Move more than 0 and at most " + plain(task.getQuantity())
+                    + " for task " + task.getTaskNo() + ".");
+            }
+            // Round once before splitting: stock, reservation, allocation and remaining task must use the same piece.
+            quantity = quantity.setScale(4, RoundingMode.HALF_UP);
+            if (quantity.signum() == 0) throw new BusinessException(ErrorCode.BAD_REQUEST, "quantity must round to at least 0.0001.");
+        }
         if (quantity == null || quantity.compareTo(task.getQuantity()) == 0) {
             return responses(List.of(finish(task))).get(0);
-        }
-        if (quantity.signum() <= 0 || quantity.compareTo(task.getQuantity()) > 0) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "Move more than 0 and at most " + plain(task.getQuantity())
-                + " for task " + task.getTaskNo() + ".");
         }
         // lockOpen already took the project's planning turn before the task row (W5).
         WarehouseTask part = new WarehouseTask();
@@ -230,6 +267,7 @@ public class WarehouseTaskService {
         part.setFromLocation(task.getFromLocation());
         part.setToLocation(task.getToLocation());
         part.setWorkOrderId(task.getWorkOrderId());
+        part.setAllocationId(task.getAllocationId());
         part.setAssignedTo(task.getAssignedTo());
         String note = "Part of " + task.getTaskNo() + (task.getNote() == null ? "" : ": " + task.getNote());
         part.setNote(note.length() > 500 ? note.substring(0, 500) : note);
@@ -243,9 +281,12 @@ public class WarehouseTaskService {
 
     /** An ordinary transfer of the task's quantity to its place; the task is then done and points to it. */
     private WarehouseTask finish(WarehouseTask task) {
-        String transferId = inventoryTransferService.transfer(new InventoryTransferRequest(
-            task.getInventoryId(), task.getToLocation(), task.getQuantity(), "warehouse-task:" + task.getTaskId(),
-            "Task " + task.getTaskNo())).transferId();
+        String transferId = task.getAllocationId() == null
+            ? inventoryTransferService.transfer(new InventoryTransferRequest(task.getInventoryId(), task.getToLocation(), task.getQuantity(),
+                "warehouse-task:" + task.getTaskId(), "Task " + task.getTaskNo())).transferId()
+            : allocatedStockTransferService.transfer(new AllocatedStockTransferRequest(task.getProjectId(), task.getWorkOrderId(),
+                task.getAllocationId(), task.getInventoryId(), task.getToLocation(), task.getQuantity(),
+                UUID.nameUUIDFromBytes(("warehouse-task:" + task.getTaskId()).getBytes(StandardCharsets.UTF_8)))).transferId();
         task.setStatus("done");
         task.setTransferId(transferId);
         task.setFinishedBy(projectAccessService.requireCurrentUserId());
@@ -291,7 +332,7 @@ public class WarehouseTaskService {
             .stream().collect(Collectors.toMap(LotMaster::getLotId, Function.identity()));
         return rows.stream()
             .filter(row -> AVAILABLE.equals(row.getInventoryStatus()))
-            .filter(row -> row.getAvailableQuantity() != null && row.getAvailableQuantity().signum() > 0)
+            .filter(row -> row.getAvailableQuantity() != null && row.getQuantity() != null && row.getQuantity().signum() > 0)
             .filter(row -> {
                 LotMaster lot = row.getLotId() == null ? null : lots.get(row.getLotId());
                 return row.getLotId() == null || (lot != null && LotStatus.fromCode(lot.getLotStatus()).usable() && !lot.isExpiredOn(today));
@@ -341,7 +382,7 @@ public class WarehouseTaskService {
     private Map<String, BigDecimal> plannedByRecord(String projectId) {
         Map<String, BigDecimal> planned = new HashMap<>();
         for (WarehouseTask task : taskRepository.findAllByProjectIdAndStatus(projectId, OPEN)) {
-            planned.merge(task.getInventoryId(), task.getQuantity(), BigDecimal::add);
+            if (task.getAllocationId() == null) planned.merge(task.getInventoryId(), task.getQuantity(), BigDecimal::add);
         }
         return planned;
     }
@@ -377,7 +418,7 @@ public class WarehouseTaskService {
                 task.getLotId(), lot == null ? null : lot.getLotNo(), task.getQuantity(), task.getFromLocation(), task.getToLocation(),
                 task.getWorkOrderId(), order == null ? null : order.workOrderNumber(), task.getNote(), task.getCreatedBy(),
                 task.getCreatedAt(), task.getFinishedBy(), task.getFinishedAt(), task.getTransferId(), task.getCancelReason(),
-                task.getAssignedTo());
+                task.getAssignedTo(), task.getAllocationId());
         }).toList();
     }
 

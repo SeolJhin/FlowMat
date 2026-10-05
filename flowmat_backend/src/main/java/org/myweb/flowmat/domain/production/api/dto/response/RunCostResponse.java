@@ -1,32 +1,23 @@
 package org.myweb.flowmat.domain.production.api.dto.response;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.List;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogUnitCostView.CostBasis;
 
-/**
- * What a run's recorded inputs cost at today's unit costs (docs/domain/material-cost.md "실행 재료비"). Nothing is stored;
- * the numbers follow the recordings and the item costs as they are now.
- *
- * @param costPerUnit materialCost / outputQuantity; null until the run has an output quantity or when cost is incomplete.
- */
+/** Input cost computed from recordings and unit-price history, never an authoritative stored amount. */
 public record RunCostResponse(
     String productionRunId,
     BigDecimal materialCost,
     boolean costComplete,
     BigDecimal outputQuantity,
     BigDecimal costPerUnit,
-    List<Line> lines
+    List<Line> lines,
+    OffsetDateTime costBasisAt,
+    CostBasis costBasis,
+    boolean estimated
 ) {
-
-    /** One input item, its recordings added up in the item's own unit. */
-    public record Line(
-        String itemId,
-        String itemCode,
-        String itemName,
-        BigDecimal quantity,
-        String unit,
-        BigDecimal unitCost,
-        BigDecimal cost
-    ) {
-    }
+    /** One input item in its item unit. Unknown prices are null, independently of historical certainty. */
+    public record Line(String itemId, String itemCode, String itemName, BigDecimal quantity,
+        String unit, BigDecimal unitCost, BigDecimal cost, CostBasis costBasis) {}
 }

@@ -134,6 +134,10 @@ Stock 탭에서 재고 행의 **History**를 열고 움직임을 **Issue** 또�
 - 기존 `LotIntegrationTest` 10건, `WorkOrderReadinessIntegrationTest` 2건 통과
 - 실 화면: LOTs 탭의 만료 표시와 안내, Stock 탭 LOT 선택지 표시 확인. 콘솔 오류 0
 
+## 2026-10-05 확정: 프로젝트 시간대
+
+**Accepted (정책).** B 승인. Project.timeZone IANA ID, 기존 Asia/Seoul backfill, timestamp UTC 저장, 업무 날짜는 프로젝트 시간대. 앱 단일 시간대 권장안 A는 채택하지 않는다. 아래 메모는 검토 이력이며 구현 전이다. [최종 결정](../status/DECISIONS-2026-10-05.md)이 아래 예전 선택지보다 우선한다.
+
 ## 결정 메모: 오늘을 정하는 시간대 (Proposed, 2026-10-04)
 
 > **결정이 아니다.** [WORKBOARD](../status/WORKBOARD.md) §4 "프로젝트별 시간대"를 고르기 위한 자료다. 고르기 전에는 구현하지 않는다.

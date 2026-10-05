@@ -37,6 +37,12 @@ function task(inventoryId: string, quantity: number, status: WarehouseTaskDto['s
 }
 
 describe('freeToMove and movableRecords', () => {
+  it('keeps reserved pick tasks separate from free stock already planned for putaway', () => {
+    const reserved = { ...task('r1', 6), taskType: 'pick' as const, allocationId: 'allocation-1', workOrderId: 'order-1' }
+    const stock = record('r1', { availableQuantity: 4, reservedQuantity: 6 })
+    expect(freeToMove(stock, [reserved])).toBe(4)
+    expect(freeToMove(stock, [reserved, task('r1', 2)])).toBe(2)
+  })
   it('takes open tasks off what is available and leaves out held or fully planned records', () => {
     expect(freeToMove(record('r1'), [task('r1', 6), task('r1', 1, 'done'), task('r2', 3)])).toBe(4)
     const records = [record('r1'), record('r2', { inventoryStatus: 'hold' }), record('r3', { availableQuantity: 2 })]

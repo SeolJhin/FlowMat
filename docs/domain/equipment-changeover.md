@@ -66,6 +66,10 @@ DB 제약: 분 범위 CHECK, 삭제되지 않은 규칙은 설비·앞 품목·�
 - `changeoverModel.test.ts` 2건: 분 표시(`45 min`, `2 h`, `1 h 30 min`), `Any item`, 분 읽기(1~10080 정수), 요청 본문과 이미 있는 쌍 거절
 - 실 화면 `e2e/equipment-changeover.spec.ts`(REAL_API_E2E, CI browser-e2e에 추가): 품목 둘·설비(시간당 10, 09–17 월–금)·작업지시 둘(월요일 앞 품목 승인, 화–수 다음 품목)을 API로 만들고 → Schedule의 Changeovers에서 90분 추가 → `1 h 30 min` → 같은 쌍 다시 추가는 경고 → Change time으로 120 → `2 h` → 다음 작업지시 Readiness에 앞 작업지시 번호, `120 min changeover from A to B`, `needs 12 h (with 2 h changeover) of the 16 h`. 끝나면 작업지시 취소, 설비 삭제
 
+## 2026-10-05 확정: Setup 속성과 비용
+
+**Accepted (정책).** 다차원 setup attributes 승인, 단일 setup_group 문자열 미채택. 품목 쌍 > 속성 쌍 > default. setupCost = 시간 × 설비 시간당 원가, Material Cost와 분리. 계획 estimate·실제 snapshot 구분. 아래 메모는 검토 이력이며 구현 전이다. [최종 결정](../status/DECISIONS-2026-10-05.md)이 아래 예전 선택지보다 우선한다.
+
 ## 결정 메모: setup 묶음과 전환 비용 (Proposed, 2026-10-04)
 
 > **결정이 아니다.** [WORKBOARD](../status/WORKBOARD.md) §4의 제품 규칙 묶음 중 전환 쪽을 고르기 위한 자료다. 고르기 전에는 구현하지 않는다.

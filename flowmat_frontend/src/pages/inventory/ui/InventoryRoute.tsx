@@ -11,6 +11,7 @@ import type { ItemDto } from '../../../shared/types/api'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { StockPanel } from './StockPanel'
 import { CountPanel } from './CountPanel'
+import { CountPlansPanel } from './CountPlansPanel'
 import { CountHistory } from './CountHistory'
 import { MovementsTab } from './MovementsTab'
 import { UnitsPanel } from './UnitsPanel'
@@ -31,7 +32,7 @@ import { StockValueTrend } from './StockValueTrend'
 import { StockWastePanel } from './StockWastePanel'
 import { WorkInstructionsPanel } from './WorkInstructionsPanel'
 
-const TABS = ['items', 'stock', 'tasks', 'count', 'movements', 'analysis', 'lots', 'quality', 'boms', 'instructions', 'units', 'equipment',
+const TABS = ['items', 'stock', 'tasks', 'count', 'count-plans', 'movements', 'analysis', 'lots', 'quality', 'boms', 'instructions', 'units', 'equipment',
   'locations'] as const
 type Tab = (typeof TABS)[number]
 const TAB_LABELS: Record<Tab, string> = {
@@ -39,6 +40,7 @@ const TAB_LABELS: Record<Tab, string> = {
   stock: 'Stock',
   tasks: 'Tasks',
   count: 'Count',
+  'count-plans': 'Count plans',
   movements: 'Movements',
   analysis: 'Analysis',
   lots: 'LOTs',
@@ -222,6 +224,7 @@ export function InventoryRoute() {
           <CountHistory projectId={projectId} />
         </>
       )}
+      {tab === 'count-plans' && <CountPlansPanel key={projectId} projectId={projectId} items={items} />}
       {tab === 'movements' && <MovementsTab projectId={projectId} items={items} />}
       {tab === 'analysis' && (
         <>

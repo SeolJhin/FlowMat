@@ -2,10 +2,11 @@
 
 | ADR | 제목 | 상태 | 요약 |
 |---|---|---|---|
-| [ADR-001](ADR-001-organization-project-boundary.md) | Organization / Project 경계 | **Proposed** | Organization은 상위 소유·계정 그룹 경계, Project는 데이터 격리·접근권한 집행 경계. 권한 의미가 남아 있다: 수용 기준 4개(멤버십 분리, cross-project deny-by-default, 조직 OWNER·ADMIN override, 마이그레이션 호환성 불변식)가 닫히면 Accepted |
+| [ADR-001](ADR-001-organization-project-boundary.md) | Organization / Project 경계 | **Accepted** 2026-10-05 | 멤버십 분리·cross-project DENY·업무 데이터 override 없음. 조직 관리자 metadata만 허용, 탈퇴 시 프로젝트 멤버 비활성화·소유권 이전 보호 |
 | [ADR-002](ADR-002-module-dependency.md) | 모듈 의존 규칙 | **Accepted** 2026-10-02 | 다른 도메인의 repository는 쓰지 않고 `application.publicapi`로만 접근한다. 기존 위반은 동결하고 손댈 때 고친다 |
-| [ADR-003](ADR-003-resource-port-contract.md) | Resource·Port 계약과 실행 Core | **Accepted(원칙)** 2026-10-02 + Registry **Experimental** | ProcessIo는 Port Contract, `itemId`는 선택적 binding, `schemaJson`은 정의 시점 계약, 실행값은 FlowRunStep snapshot, Resource 슈퍼테이블 없음. 정확한 `resourceType` 값 목록은 Experimental registry. FlowRun의 범용성은 비제조 검증 전까지 목표 |
-| [ADR-004](ADR-004-flow-run-execution-policy.md) | Flow Run 실행 정책(FM-RUN-005) | **Proposed** 2026-10-03 | 시간 제한·재시도 횟수·간격·동시 실행 제한은 노드에, 실패 후 갈 길(stop·skip·retry)은 연결에 둔다. 기본값은 지금 동작과 같다. 재시도 간격은 `retry_at`·`scheduled_at`으로 외부 보고 모델 위에서 지키고, 시간 제한만 서버가 감시한다. Agent 초안이며 수용 기준 5개가 닫히면 Accepted |
+| [ADR-003](ADR-003-resource-port-contract.md) | Resource·Port 계약과 실행 Core | **Accepted(원칙)** 2026-10-02 + Registry **Experimental** | ProcessIo는 Port Contract, `itemId`는 선택적 binding, `schemaJson`은 정의 시점 계약, 실행값은 FlowRunStep snapshot, Resource 슈퍼테이블 없음. 정확한 `resourceType` 값 목록은 Experimental registry. 후속 ADR-005에서 backend VALIDATED / 제품 PARTIALLY VALIDATED와 계측 필드 선택 정책을 분리 |
+| [ADR-004](ADR-004-flow-run-execution-policy.md) | Flow Run 실행 정책(FM-RUN-005) | **Accepted** 2026-10-05 | 노드 정책·연결 실패 정책, TIMEOUT 실패, 외부 executor 지연 start, workflowRevision + node 동시성 |
+| [ADR-005](ADR-005-port-measurement-and-validation.md) | Port 계측·검증 수준 후속 결정 | **Accepted** 2026-10-05 | 비제조 quantity/unit 선택, 실행 요건 분리, backend VALIDATED / 제품 PARTIALLY VALIDATED |
 | [editor ADR-0001](../../editor/adr-0001-flowmat-editor-core-boundary.md) | 에디터 Core 경계 | Accepted 2026-08-12 | 순수 TypeScript editor core를 React Flow와 분리한다 |
 
 ## 규칙

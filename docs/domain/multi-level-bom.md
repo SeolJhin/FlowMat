@@ -117,6 +117,10 @@
 - 준비 점검의 반제품 작업지시(2026-10-03): `readinessModel.test.ts` `plannedSupply`(승인·진행 중만, 목표 − 생산량, 초안·완료·자기 자신·목표 없음 제외)·`subAssemblyToMake`(0 미만 없음, 소수 4자리). 화면 `e2e/sub-assembly-order.spec.ts`(**가짜 API**, BOM을 개발 DB에 넣지 않음, CI의 일반 browser-e2e 단계에 포함): 케이크 작업지시 Readiness → SPONGE 부족 17, 승인된 스펀지 작업지시 5 → `Make 12`·`(5 already planned)`, FLOUR(구매 자재)는 버튼 없음 → **Make** → 제목 `SPONGE for WO-0001`, 대상 sponge, 수량 12, BOM sponge v1, 계획 끝 `2030-01-07T09:00`(케이크 계획 시작, Asia/Seoul). `e2e/multi-level-bom.spec.ts` 끝(가짜 API): Open work order needs의 **Draft 1 work order for short sub-assemblies** → 확인 → 요청 본문 `SPONGE for open work orders`·sponge·20·sponge-bom, `Drafted WO-0101 (SPONGE 20)`, 그 뒤 버튼 대신 `Not drafted: SPONGE already has draft WO-0101`(모든 단계 한 번에, `stockAlertModel.test.ts` `subAssemblyDrafts`: 두 단계 초안, 구매 자재·부족 0 제외, 승인 BOM 없음·초안 있음·단종 이유, 승인된 작업지시는 막지 않음). 이어서 SPONGE **Make** 링크 → 제목 `SPONGE for open work orders`, 대상 sponge, 수량 20, BOM sponge v1
 - 화면 `e2e/multi-level-bom.spec.ts`: **API를 가짜로 대신해**(개발 DB에 BOM을 넣지 않기 위해) BOMs 탭에서 케이크 BOM → `SPONGE … has its own BOM` → 10개로 전개 → `2 levels · 2 bought materials · cost 28`, 트리의 스펀지 `own BOM v1`, 밀가루 `4 kg`, 달걀 `40 ea` → Stock 탭 Open work order needs에 스펀지 `made here · own BOM`, 밀가루 `via SPONGE 4`, 달걀 `via SPONGE 40`. CI의 browser E2E 단계에서 함께 돎
 
+## 2026-10-05 확정: 유효일 BOM과 팬텀
+
+**Accepted (정책).** 유효일 B 승인: 기간 비중첩 다중 approved·자동 retire 금지·작업지시 plannedStartAt 기준 선택과 실행 revision 고정. 팬텀은 A(BomLine.phantom), Item 전역 플래그 권장안은 미채택. 여러 draft·품목당 pending 하나. 아래 메모는 검토 이력이며 구현 전이다. [최종 결정](../status/DECISIONS-2026-10-05.md)이 아래 예전 선택지보다 우선한다.
+
 ## 결정 메모: 유효일 BOM과 팬텀 반제품 (Proposed, 2026-10-04)
 
 > **결정이 아니다.** [WORKBOARD](../status/WORKBOARD.md) §4의 제품 규칙 묶음 중 BOM 쪽을 고르기 위한 자료다. 고르기 전에는 구현하지 않는다.

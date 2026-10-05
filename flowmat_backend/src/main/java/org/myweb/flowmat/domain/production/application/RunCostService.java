@@ -2,16 +2,18 @@ package org.myweb.flowmat.domain.production.application;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
-import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.domain.entity.UnitMaster;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
-import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogUnitCostQuery;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogUnitCostView;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogUnitCostView.CostBasis;
 import org.myweb.flowmat.domain.production.api.dto.response.RunCostResponse;
 import org.myweb.flowmat.domain.production.domain.entity.ProductionRun;
 import org.myweb.flowmat.domain.production.domain.entity.ProductionRunItem;
@@ -23,76 +25,67 @@ import org.myweb.flowmat.global.exception.ErrorCode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/**
- * A run's material cost (docs/domain/material-cost.md "실행 재료비"): every input recording that counts (not cancelled,
- * with an actual quantity) converted to its item's own unit and priced at the item's unit cost. Read only; the run and
- * its recordings are not changed.
- */
+/** Read-time input cost: current prices while open, original end-time prices once finished (decision D+). */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class RunCostService {
-
     private static final int SCALE = 4;
-
     private final ProductionRunRepository productionRunRepository;
     private final ProductionRunItemRepository productionRunItemRepository;
-    private final ItemRepository itemRepository;
+    private final CatalogQuery catalogQuery;
+    private final CatalogUnitCostQuery unitCosts;
     private final UnitConverter unitConverter;
-    private final UnitMasterRepository unitMasterRepository;
     private final ProjectAccessService projectAccessService;
 
     public RunCostResponse cost(String productionRunId) {
         ProductionRun run = productionRunRepository.findByProductionRunIdAndDeletedYn(productionRunId, "N")
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         projectAccessService.requireProjectReadAccess(run.getProjectId());
-
-        // Add each item's recordings up in the item's own unit; a unit that cannot be converted leaves the cost unknown.
-        Map<String, BigDecimal> quantityByItem = new LinkedHashMap<>();
+        boolean finished = "finished".equalsIgnoreCase(run.getRunStatus());
+        OffsetDateTime basisAt = finished ? run.getActualEndAt() : null;
+        CostBasis basis = !finished ? CostBasis.CURRENT : basisAt == null ? CostBasis.ESTIMATED : CostBasis.HISTORICAL;
+        List<ProductionRunItem> recordings = productionRunItemRepository.findAllByProductionRunIdOrderByProductionRunItemIdAsc(productionRunId)
+            .stream().filter(row -> "input".equals(row.getDirection()) && !row.isCancelled() && row.getActualQty() != null).toList();
+        List<String> ids = recordings.stream().map(ProductionRunItem::getItemId).distinct().toList();
+        Map<String, CatalogItemView> items = catalogQuery.findItems(ids);
+        Map<String, CatalogUnitCostView> prices = unitCosts.findUnitCostsAt(run.getProjectId(), ids, basisAt);
+        Map<String, BigDecimal> quantities = new LinkedHashMap<>();
         Map<String, Boolean> convertible = new LinkedHashMap<>();
-        Map<String, Item> items = new LinkedHashMap<>();
-        for (ProductionRunItem recording : productionRunItemRepository.findAllByProductionRunIdOrderByProductionRunItemIdAsc(productionRunId)) {
-            if (!"input".equals(recording.getDirection()) || recording.isCancelled() || recording.getActualQty() == null) {
-                continue;
+        for (ProductionRunItem recording : recordings) {
+            String id = recording.getItemId();
+            CatalogItemView item = items.get(id);
+            convertible.putIfAbsent(id, true);
+            if (item == null || !run.getProjectId().equals(item.projectId())) {
+                convertible.put(id, false);
+                continue; // Invalid historical references stay incomplete and reveal no other project's metadata.
             }
-            Item item = items.computeIfAbsent(recording.getItemId(), id -> itemRepository.findById(id).orElse(null));
-            if (item == null) {
-                continue;
-            }
-            convertible.putIfAbsent(item.getItemId(), true);
             try {
-                BigDecimal inItemUnit = unitConverter.toItemUnit(recording.getActualQty(), recording.getUnit(), item.getUnitId()).quantity();
-                quantityByItem.merge(item.getItemId(), inItemUnit, BigDecimal::add);
-            } catch (BusinessException e) {
-                convertible.put(item.getItemId(), false);
-            }
+                BigDecimal quantity = unitConverter.toItemUnit(recording.getActualQty(), recording.getUnit(), item.unitId()).quantity();
+                quantities.merge(id, quantity, BigDecimal::add);
+            } catch (BusinessException exception) { convertible.put(id, false); }
         }
-
         List<RunCostResponse.Line> lines = new ArrayList<>();
         BigDecimal total = BigDecimal.ZERO;
         boolean complete = true;
         for (Map.Entry<String, Boolean> entry : convertible.entrySet()) {
-            Item item = items.get(entry.getKey());
-            BigDecimal quantity = quantityByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO).setScale(SCALE, RoundingMode.HALF_UP);
-            BigDecimal unitCost = item.getUnitCost() != null && item.getUnitCost().signum() > 0 ? item.getUnitCost() : null;
+            String id = entry.getKey();
+            CatalogItemView item = items.get(id);
+            if (item != null && !run.getProjectId().equals(item.projectId())) item = null;
+            CatalogUnitCostView price = prices.get(id);
+            BigDecimal quantity = quantities.getOrDefault(id, BigDecimal.ZERO).setScale(SCALE, RoundingMode.HALF_UP);
+            BigDecimal unitCost = price != null && price.unitCost() != null && price.unitCost().signum() > 0 ? price.unitCost() : null;
             BigDecimal cost = entry.getValue() && unitCost != null ? quantity.multiply(unitCost).setScale(SCALE, RoundingMode.HALF_UP) : null;
-            if (cost == null) {
-                complete = false;
-            } else {
-                total = total.add(cost);
-            }
-            lines.add(new RunCostResponse.Line(item.getItemId(), item.getItemCode(), item.getItemName(),
-                entry.getValue() ? quantity : null, unitCodeOf(item), unitCost, cost));
+            CostBasis lineBasis = !finished ? CostBasis.CURRENT : basisAt == null || price == null ? CostBasis.ESTIMATED : price.costBasis();
+            if (lineBasis == CostBasis.ESTIMATED) basis = CostBasis.ESTIMATED;
+            if (cost == null) complete = false;
+            else total = total.add(cost);
+            lines.add(new RunCostResponse.Line(id, item == null ? id : item.itemCode(), item == null ? null : item.itemName(),
+                entry.getValue() ? quantity : null, item == null ? null : item.unitCode(), unitCost, cost, lineBasis));
         }
         BigDecimal output = run.getActualOutputQty();
-        BigDecimal perUnit = complete && output != null && output.signum() > 0
-            ? total.divide(output, SCALE, RoundingMode.HALF_UP)
-            : null;
-        return new RunCostResponse(run.getProductionRunId(), total.setScale(SCALE, RoundingMode.HALF_UP), complete, output, perUnit, lines);
-    }
-
-    private String unitCodeOf(Item item) {
-        return item.getUnitId() == null ? null
-            : unitMasterRepository.findById(item.getUnitId()).map(UnitMaster::getUnitCode).orElse(null);
+        BigDecimal perUnit = complete && output != null && output.signum() > 0 ? total.divide(output, SCALE, RoundingMode.HALF_UP) : null;
+        return new RunCostResponse(run.getProductionRunId(), total.setScale(SCALE, RoundingMode.HALF_UP), complete, output,
+            perUnit, lines, basisAt, basis, basis == CostBasis.ESTIMATED);
     }
 }

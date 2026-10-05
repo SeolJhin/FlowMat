@@ -128,6 +128,8 @@ export interface ProductionRunItemDto {
 }
 
 /** A run's material cost at today's unit costs (docs/domain/material-cost.md). Nothing is stored. */
+export type RunCostBasis = 'CURRENT' | 'HISTORICAL' | 'ESTIMATED'
+
 export interface RunCostDto {
   productionRunId: string
   materialCost: number
@@ -136,6 +138,10 @@ export interface RunCostDto {
   outputQuantity: number | null
   /** materialCost / outputQuantity; null until there is an output quantity or while the cost is incomplete. */
   costPerUnit: number | null
+  /** Price instant for completed runs; null when the original end time is unavailable. */
+  costBasisAt?: string | null
+  costBasis?: RunCostBasis
+  estimated?: boolean
   lines: {
     itemId: string
     itemCode: string
@@ -144,6 +150,7 @@ export interface RunCostDto {
     unit: string | null
     unitCost: number | null
     cost: number | null
+    costBasis?: RunCostBasis
   }[]
 }
 

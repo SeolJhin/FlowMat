@@ -74,6 +74,10 @@
 - `workInstructionModel.test.ts` 3건(revision 묶기·보여 줄 revision·상태 문구, 단계 요청·링크 검사, 진행 문구)
 - 실 화면 `e2e/work-instructions.spec.ts`(REAL_API_E2E, CI browser-e2e에 추가, BOM 없음): 새 제품 → Instructions 탭에서 지침 시작 → 값 기록 단계(`Oven °C`)·필수 단계·선택 단계 추가 → Release → API로 실행 시작 → 실행 상세 `0 of 2 required steps done`과 마감 옆 알림 → 250 입력 후 Done(한계 200–230 밖이라 `(outside 200–230)` 표시, 2026-10-03), 둘째 Done → `All 2 required steps done`, 알림 사라짐. 끝나면 실행 마감. 이 테스트가 단계 입력 중 폼이 지워지는 경합을 찾아냄(위 화면 설명대로 고침)
 
+## 2026-10-05 확정: 파일 첨부
+
+**Accepted (정책).** A 기반 StorageService 추상화 승인. Local/S3-compatible 설정 선택·메타데이터 DB·기본 10MB 설정 가능·다운로드 read/업로드 write·과거 지침 참조 보존. 아래 메모는 검토 이력이며 구현 전이다. [최종 결정](../status/DECISIONS-2026-10-05.md)이 아래 예전 선택지보다 우선한다.
+
 ## 결정 메모: 이미지·파일 첨부 (Proposed, 2026-10-03)
 
 > **결정이 아니다.** [WORKBOARD](../status/WORKBOARD.md) §4 "작업 지침 이미지·파일 첨부"를 고르기 위한 자료다. 고르기 전에는 구현하지 않는다.

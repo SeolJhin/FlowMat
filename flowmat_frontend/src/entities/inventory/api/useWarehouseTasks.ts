@@ -32,6 +32,8 @@ export interface WarehouseTaskDto {
   cancelReason: string | null
   /** Who should do the task (docs/domain/warehouse-task.md W7); null while no one is named. */
   assignedTo: string | null
+  /** Reserved pick tasks keep this allocation when moved (V54). */
+  allocationId?: string | null
 }
 
 export interface PutawayInput {
@@ -111,7 +113,13 @@ export function useWarehouseTaskMutations(projectId: string) {
     mutationFn: async ({ taskId, quantity, expectedToLocation }: { taskId: string; quantity?: number; expectedToLocation?: string }) =>
       unwrapApiResponse(await httpClient.post<ApiEnvelope<WarehouseTaskDto>>(`${task(taskId)}/complete`,
         { quantity, expectedToLocation })),
-    onSuccess: refreshStock,
+    onSuccess: async (result) => {
+      await refreshStock()
+      if (result.workOrderId) {
+        void queryClient.invalidateQueries({ queryKey: ['work-order-allocations', result.workOrderId] })
+        void queryClient.invalidateQueries({ queryKey: ['work-order-readiness', result.workOrderId] })
+      }
+    },
     onError: refreshTasks,
   })
   const cancel = useMutation({

@@ -5,6 +5,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.time.LocalDate;
+import org.hibernate.annotations.DynamicUpdate;
 import lombok.Getter;
 import lombok.Setter;
 import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
@@ -13,6 +15,7 @@ import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
 @Getter
 @Setter
 @Entity
+@DynamicUpdate
 @Table(name = "bom_header")
 public class BomHeader extends CreatedUpdatedAuditEntity {
 
@@ -37,4 +40,9 @@ public class BomHeader extends CreatedUpdatedAuditEntity {
     private String approvedBy;
     private OffsetDateTime approvedAt;
     private String note;
+
+    /** Inclusive dates; a missing boundary is unbounded. Managed through the explicit effectivity command. */
+    private LocalDate effectiveFrom;
+    private LocalDate effectiveTo;
+    private Long effectivePeriodVersion = 0L;
 }

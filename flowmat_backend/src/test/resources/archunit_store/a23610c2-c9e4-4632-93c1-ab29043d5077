@@ -38,8 +38,6 @@ org.myweb.flowmat.domain.production.application.ProductionRunServiceImpl uses or
 org.myweb.flowmat.domain.production.application.ProductionRunServiceImpl uses org.myweb.flowmat.domain.workflow.repository.ProcessRepository
 org.myweb.flowmat.domain.production.application.ProductionRunServiceImpl uses org.myweb.flowmat.domain.workflow.repository.WorkflowRepository
 org.myweb.flowmat.domain.production.application.ProductionRunServiceImpl uses org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository
-org.myweb.flowmat.domain.production.application.RunCostService uses org.myweb.flowmat.domain.catalog.repository.ItemRepository
-org.myweb.flowmat.domain.production.application.RunCostService uses org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository
 org.myweb.flowmat.domain.production.application.RunInputAllocationService uses org.myweb.flowmat.domain.catalog.repository.ItemRepository
 org.myweb.flowmat.domain.production.application.RunInputAllocationService uses org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository
 org.myweb.flowmat.domain.production.application.RunInputAllocationService uses org.myweb.flowmat.domain.inventory.repository.InventoryRepository

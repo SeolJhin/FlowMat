@@ -3,13 +3,14 @@ import { errorMessage } from '../../../shared/lib/errorMessage'
 import type { RunMaterialUsageDto } from '../../../shared/types/api'
 import { basisLabel, formatVariance, varianceTone, yieldLabel, type VarianceTone } from '../model/usageModel'
 import { formatQty } from './runDisplay'
+import { costBasisLabel } from '../model/costBasisModel'
 
 const cell = { padding: '4px 6px' } as const
 const num = { ...cell, textAlign: 'right' } as const
 const TONE_COLORS: Record<VarianceTone, string | undefined> = { over: '#b45309', under: '#0369a1', even: undefined, unknown: undefined }
 
 /**
- * What the run's inputs cost at today's unit costs, and per unit made (docs/domain/material-cost.md). Items without a
+ * What the run's inputs cost at current or original finish-time unit costs, and per unit made (docs/domain/material-cost.md). Items without a
  * unit cost are shown as such and keep the total marked incomplete. A run started from a BOM also shows its use against
  * the BOM, scaled to the output.
  */
@@ -22,6 +23,7 @@ export function RunCostPanel({ runId }: { runId: string }) {
   return (
     <section aria-label="Material cost" style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 18 }}>
       <h3 style={{ marginTop: 0 }}>Material cost</h3>
+      {cost && <p aria-label="Price basis" className="inspector-hint">{costBasisLabel(cost)}</p>}
       {costQuery.isError && <p style={{ color: '#dc2626', fontSize: 12 }}>{errorMessage(costQuery.error, 'Could not work out the cost.')}</p>}
       {cost && cost.lines.length === 0 && <p className="inspector-hint">No inputs recorded yet.</p>}
       {cost && cost.lines.length > 0 && (
@@ -32,6 +34,7 @@ export function RunCostPanel({ runId }: { runId: string }) {
                 <td style={cell}>
                   {line.itemCode}
                   {line.itemName ? ` · ${line.itemName}` : ''}
+                  {line.costBasis === 'ESTIMATED' && <span style={{ marginLeft: 6 }}>· estimated price</span>}
                 </td>
                 <td style={num}>{line.quantity == null ? '-' : `${formatQty(line.quantity)} ${line.unit ?? ''}`}</td>
                 <td style={{ ...num, opacity: line.cost == null ? 0.5 : 1 }}>{line.cost == null ? 'no cost' : formatQty(line.cost)}</td>
@@ -48,7 +51,7 @@ export function RunCostPanel({ runId }: { runId: string }) {
       {cost && cost.lines.length > 0 && (
         <p style={{ fontSize: 12, margin: '8px 0 0' }}>
           {!cost.costComplete
-            ? 'Some inputs have no unit cost; the total leaves them out and there is no cost per unit.'
+            ? 'Some inputs have no known cost or compatible unit; the total leaves them out and there is no cost per unit.'
             : cost.costPerUnit != null
               ? `Per unit made: ${formatQty(cost.costPerUnit)} (${formatQty(cost.outputQuantity ?? 0)} made)`
               : 'Cost per unit appears once the run has an output quantity.'}

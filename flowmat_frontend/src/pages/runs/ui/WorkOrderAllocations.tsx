@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { AllocatedStockMove } from './AllocatedStockMove'
 import { useStockAllocationMutations, useStockAllocationsQuery } from '../../../entities/production/api/useStockAllocations'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
@@ -12,12 +14,16 @@ const num = { ...cell, textAlign: 'right', whiteSpace: 'nowrap' } as const
  * given back. Allocating takes the BOM's materials for what is still to make, expiring LOTs first.
  */
 export function WorkOrderAllocations({ order, projectId }: { order: WorkOrderDto; projectId: string }) {
+  const [moveId, setMoveId] = useState<string | null>(null)
+  const [moveLocked, setMoveLocked] = useState(false)
   const query = useStockAllocationsQuery(order.workOrderId)
   const { allocate, release, releaseAll } = useStockAllocationMutations(projectId, order.workOrderId)
   const allocations = query.data?.allocations ?? []
   const plan = allocate.data?.plan ?? []
   const failure = allocate.isError ? allocate.error : release.isError ? release.error : releaseAll.isError ? releaseAll.error : null
-  const busy = allocate.isPending || release.isPending || releaseAll.isPending
+  const stockBusy = allocate.isPending || release.isPending || releaseAll.isPending
+  const busy = stockBusy || moveLocked
+  const moving = allocations.find((allocation) => allocation.allocationId === moveId)
   if (allocations.length === 0 && !canAllocateFromBom(order)) return null
 
   return (
@@ -60,12 +66,14 @@ export function WorkOrderAllocations({ order, projectId }: { order: WorkOrderDto
                         Release
                       </button>
                     )}
+                    {allocation.status === 'open' && <button type="button" disabled={busy} onClick={() => setMoveId(allocation.allocationId)}>Move allocated</button>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
+      {moving && <AllocatedStockMove key={`${order.workOrderId}:${moving.allocationId}`} projectId={projectId} workOrderId={order.workOrderId} allocation={moving} blocked={stockBusy} onLocked={setMoveLocked} />}
     </section>
   )
 }

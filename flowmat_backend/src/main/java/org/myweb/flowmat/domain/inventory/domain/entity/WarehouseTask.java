@@ -43,6 +43,8 @@ public class WarehouseTask {
     private String fromLocation;
     private String toLocation;
     private String workOrderId;
+    /** The reservation used by this pick; null for free-stock picks and putaways. */
+    private String allocationId;
     private String note;
     private String createdBy;
     private OffsetDateTime createdAt;

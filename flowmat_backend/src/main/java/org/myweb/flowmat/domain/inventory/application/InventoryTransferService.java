@@ -17,6 +17,7 @@ import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 /**
  * Moving stock to another place (docs/domain/stock-transfer.md): a transfer_out from the source record and a transfer_in
@@ -41,6 +42,16 @@ public class InventoryTransferService {
 
     @Transactional
     public InventoryTransferResponse transfer(InventoryTransferRequest request) {
+        return transfer(request, false);
+    }
+
+    /** Reserved movement for the allocation orchestrator; it must hold the production allocation lock. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    InventoryTransferResponse transferReserved(InventoryTransferRequest request) {
+        return transfer(request, true);
+    }
+
+    private InventoryTransferResponse transfer(InventoryTransferRequest request, boolean reserved) {
         Inventory from = inventoryRepository.findByInventoryIdAndDeletedYn(request.fromInventoryId(), NOT_DELETED)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         projectAccessService.requireProjectWriteAccess(from.getProjectId());
@@ -83,9 +94,9 @@ public class InventoryTransferService {
         String transferId = idGenerator.generate();
         String note = trimToNull(request.note());
         InventoryMovement out = new InventoryMovement(from.getInventoryId(), InventoryTransactionType.TRANSFER_OUT, quantity.negate(),
-            BigDecimal.ZERO, REFERENCE_TYPE, transferId, note != null ? note : "Moved to " + describe(toLocation), requestId, actor);
+            reserved ? quantity.negate() : BigDecimal.ZERO, REFERENCE_TYPE, transferId, note != null ? note : "Moved to " + describe(toLocation), requestId, actor);
         InventoryMovement in = new InventoryMovement(to.getInventoryId(), InventoryTransactionType.TRANSFER_IN, quantity,
-            BigDecimal.ZERO, REFERENCE_TYPE, transferId, note != null ? note : "Moved from " + describe(trimToNull(from.getLocation())),
+            reserved ? quantity : BigDecimal.ZERO, REFERENCE_TYPE, transferId, note != null ? note : "Moved from " + describe(trimToNull(from.getLocation())),
             null, actor);
         // Lock the two rows in a fixed order so two opposite transfers cannot deadlock.
         if (from.getInventoryId().compareTo(to.getInventoryId()) < 0) {
@@ -132,7 +143,7 @@ public class InventoryTransferService {
         return inventoryRepository.saveAndFlush(row);
     }
 
-    private InventoryTransferResponse response(String transferId) {
+    InventoryTransferResponse response(String transferId) {
         List<InventoryTransaction> legs = inventoryTransactionRepository.findAllByReferenceTypeAndReferenceId(REFERENCE_TYPE, transferId);
         return new InventoryTransferResponse(
             transferId,

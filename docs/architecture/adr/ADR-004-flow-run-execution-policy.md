@@ -4,20 +4,21 @@
 
 ## 상태
 
-**Proposed.** Agent가 쓴 초안이며 의사결정자 검토 전이다. 아래 "수용 기준"이 모두 닫히면 Accepted로 올린다. 그 전에는 실행 정책 마이그레이션·스케줄러·화면을 만들지 않는다.
+**Accepted (2026-10-05).** 사용자 수정 승인. 동시성 범위는 workflowRevision + node이며 alert-only·서버 자동 실행·대기열은 도입하지 않는다. [최종 결정](../../status/DECISIONS-2026-10-05.md) §8. 구현 완료를 뜻하지 않는다.
 
 상태 이력:
 - 2026-10-03 작성: Proposed.
+- 2026-10-05 사용자 승인: Accepted, concurrency scope를 workflowRevision + node로 수정.
 
 근거: [벤치마크](../../reference/benchmarks/FlowMat_GitHub_Benchmark_2026-09-24.md) FM-RUN-005, BPM-07 Conductor(`TaskDef`의 `retryCount`·`retryLogic`·`retryDelaySeconds`·`timeoutSeconds`·`timeoutPolicy`·`concurrentExecLimit`), BPM-08 Temporal(`retry_at`, 분산 런타임은 들이지 않음). [ADR-003](ADR-003-resource-port-contract.md) 결정 9-(b)("노드 실행기는 별도 ADR에서 FM-RUN-005와 함께"), [결정 인계](../decision-handoff.md) §3 보류 행, 2026-09-24 인계의 D7.
 
-## 수용 기준 (모두 닫히면 Accepted)
+## 수용 기준 (2026-10-05 사용자 확정)
 
-- [ ] 정책을 두는 곳: 아래 결정 1(노드에 실행 정책, 연결에는 지금의 실패 정책)을 받아들이는가
-- [ ] 시간 제한이 지난 시도의 처리: 결정 4(서버가 실패로 기록하고 연결의 실패 정책을 그대로 적용)를 받아들이는가. 알림만 하는 `alert`를 첫 버전에 넣는가
-- [ ] 재시도 간격: 결정 3(외부 보고 모델을 유지하고, 서버는 다음 시도를 `planned` + `scheduledAt`으로 되돌리기만 함)을 받아들이는가, 아니면 서버가 시각이 되면 시도를 직접 여는가
-- [ ] 동시 실행 제한의 단위와 초과 시 동작: 결정 5(같은 워크플로·같은 노드의 running 단계 수, 초과하면 `start` 409, 대기열 없음)
-- [ ] 노드 실행기(ADR-003 9-(b))와의 순서: 이 정책을 외부 보고 모델 위에 먼저 넣고, 실행기는 따로 정하는가
+- [x] 실행 정책은 노드, 실패 정책은 연결.
+- [x] TIMEOUT을 failed로 기록하고 연결 실패 정책 적용. alert-only는 첫 버전에서 제외.
+- [x] 지연 재시도는 planned + scheduledAt. 시각 이후 외부 executor가 start, 서버가 자동 시작하지 않음.
+- [x] 동시성은 workflowRevision + node. 초과 start는 409, 대기열 없음.
+- [x] 외부 보고 모델에 정책을 먼저 적용. 노드 실행기는 별도 결정.
 
 ## 배경 (2026-10-03 코드 기준)
 
@@ -31,7 +32,7 @@
 - 스케줄러: `@EnableScheduling`이 켜져 있고 재고 경보 배치·워크플로 접속 정리가 `@Scheduled`를 쓴다. 재고 경보는 행마다 잠금 아래에서 다시 확인하므로 인스턴스가 여럿이어도 한 번만 처리된다. Flow Run에는 스케줄러가 없다.
 - 이벤트 기록기는 사용자 없이 기록하면 `actor_type = system`으로 남긴다(V26 CHECK `user`·`system`).
 
-## 제안하는 결정
+## 결정
 
 1. **실행 정책은 노드(Process)에, 실패 후 갈 길은 연결에 둔다.**
    - 시간 제한·재시도 횟수·간격·동시 실행 제한은 "이 노드를 실행하는 방법"이라 노드 정의에 둔다(Conductor `TaskDef`와 같은 자리).
@@ -47,14 +48,14 @@
    | `retryDelaySeconds` | 첫 재시도까지 기다리는 시간 | 0(즉시) | 0 ~ 86 400 |
    | `retryBackoff` | `fixed`(매번 같은 간격) 또는 `exponential`(n번째 재시도는 간격 × 2^(n−1)) | `fixed` | |
    | `maxRetryDelaySeconds` | `exponential`의 상한 | 없음 | `retryDelaySeconds` 이상 |
-   | `concurrencyLimit` | 같은 워크플로의 모든 실행에서 이 노드가 동시에 `running`일 수 있는 단계 수 | 없음(제한 없음) | 1 ~ 1 000 |
+   | `concurrencyLimit` | 같은 workflowRevision의 모든 실행에서 이 노드가 동시에 `running`일 수 있는 단계 수 | 없음(제한 없음) | 1 ~ 1 000 |
 
    - 저장은 노드 열 + CHECK 제약으로 한다(연결의 `failure_policy`와 같은 방식). 마이그레이션 번호는 Accepted 뒤의 빈 번호다.
    - 범위 밖 값은 노드 저장 시 400으로 막는다. 이미 저장된 그래프를 깨지 않도록 새 열은 모두 null 또는 기본값을 가진다.
 
 3. **재시도 간격은 외부 보고 모델 위에서 지킨다.** 서버가 시도를 대신 시작하지 않는다.
    - 연결 정책이 `retry`이고 남은 횟수가 있으면:
-     - 간격이 0이면 지금처럼 즉시 새 시도를 연다.
+     - 간격이 0인 기존 정책의 동작은 유지한다. 지연 정책에서는 아래처럼 planned + scheduledAt만 기록하며 서버가 시각에 자동으로 start하지 않는다.
      - 간격이 있으면 실패한 시도에 `retry_at`(= 지금 + 간격)을 쓰고, 단계를 `planned`로 되돌리며 `scheduled_at = retry_at`으로 둔다. 이벤트 `step_retry_scheduled {attemptNo, retryAt}`.
    - 외부 실행자는 `retry_at` 이후 `start`로 다음 시도를 연다. 그 전의 `start`는 기존 규칙대로 409다.
    - 이미 있는 두 열(`retry_at`, `scheduled_at`)과 기존 규칙만 쓰므로 스케줄러가 필요 없다.
@@ -66,8 +67,8 @@
    - 시간 제한 뒤 늦게 온 `complete`·`fail`은 시도가 이미 끝났으므로 409다(지금 `runningAttempt` 규칙).
 
 5. **동시 실행 제한은 `start`에서 막는다. 대기열은 없다.**
-   - `start`(재시도 시작 포함) 때, 같은 워크플로의 running 실행들에서 같은 노드의 `running` 단계 수가 `concurrencyLimit` 이상이면 409 `Node … already has N running steps (limit N).` 단계는 `planned`로 남고, 외부 실행자가 나중에 다시 시작한다.
-   - 실행이 달라도 같은 수를 세야 하므로, 제한이 있는 노드의 `start`는 워크플로 행을 잠근 뒤 센다(실행 시작이 이미 같은 행을 잠근다).
+   - `start`(재시도 시작 포함) 때, 같은 workflowRevision의 running 실행들에서 같은 노드의 `running` 단계 수가 `concurrencyLimit` 이상이면 409 `Node … already has N running steps (limit N).` 단계는 `planned`로 남고, 외부 실행자가 나중에 다시 시작한다.
+   - 같은 revision·node의 start는 하나의 잠금 경계 안에서 running 수를 세고 시작한다. 다른 revision은 같은 제한에 합산하지 않는다. 잠금 구현은 별도 설계하며 물리 설비의 global capacity와 혼합하지 않는다.
    - 결정 3의 즉시 재시도(간격 0)가 제한에 걸리면 즉시 재시도 대신 결정 3의 `planned` 경로로 돌린다(`scheduled_at` 없음).
 
 6. **첫 범위는 일반 그래프 실행이다.**
@@ -94,7 +95,7 @@
   - 실행기를 정하기 전에도 외부 실행자(사람·스크립트·CI)가 정책의 이득을 본다.
 - 비용
   - 시간 제한 감시가 주기적으로 `running` 시도를 조회한다. `flow_run_step_attempt(status, started_at)` 인덱스가 필요할 수 있다.
-  - 동시 실행 제한이 있는 노드의 `start`는 워크플로 단위로 직렬화된다.
+  - 같은 workflowRevision·node의 제한 검사와 start는 직렬화가 필요하다.
   - 단계가 `failed`를 거치지 않고 `planned`로 돌아가므로, 화면과 이벤트 해석이 "재시도 대기"를 알아야 한다.
 
 ## 검증 (Accepted 뒤 구현할 때)
@@ -103,5 +104,5 @@
 - `retryDelaySeconds 60`: 실패 → 단계 `planned`, `scheduledAt` = 시도의 `retryAt`, 이벤트 `step_retry_scheduled` → 그 전 `start` 409 → 시각 뒤 `start`로 2번째 시도. `exponential` 상한 계산 단위 테스트.
 - `retryLimit 0`: 첫 실패에 연결 정책이 `retry`여도 실행 실패.
 - 시간 제한: 기한이 지난 시도가 `TIMEOUT`으로 실패하고 연결 정책이 적용된다. 감시 작업 두 개를 동시에 돌려도 실패 이벤트가 하나다. 늦은 `complete`는 409.
-- 동시 실행 제한 1: 두 실행의 같은 노드 중 두 번째 `start` 409 → 첫 단계가 끝나면 시작된다. 동시에 두 `start`를 보내도 하나만 성공한다.
+- 동시 실행 제한 1: 같은 revision·node의 두 실행 중 두 번째 start는 409, 종료 후 시작 가능. 동시 요청 하나만 성공. 다른 revision의 같은 node는 별도 한도이며 기존 snapshot의 정책을 사용한다.
 - 범위 밖 값 저장 400, 생산 연결 실행에는 정책이 적용되지 않음.
