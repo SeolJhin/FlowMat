@@ -137,7 +137,8 @@ export interface UpdateProcessInput {
 
 export interface CreateProcessIoInput {
   processId: string
-  itemId: string
+  /** Optional catalog item binding; data, file and API ports have none (ADR-003). */
+  itemId?: string
   ioName: string
   direction: 'input' | 'output'
   ioType: string
@@ -154,6 +155,7 @@ export interface CreateProcessIoInput {
 }
 
 export interface UpdateProcessIoInput extends Partial<Omit<CreateProcessIoInput, 'processId'>> {
+  clearItem?: boolean
   clearSchema?: boolean
   processIoId: string
 }

@@ -1,4 +1,4 @@
-// First use of the widgets/ FSD layer in this repo — see docs/nekopunch/toolbar_ribbon_migration_plan.md §0-1.
+// First use of the widgets/ FSD layer in this repo — see docs/editor/toolbar_ribbon_migration_plan.md §0-1.
 // Ribbon UI is page-independent reusable UI, not tied to the workspace page, hence widgets/ over pages/.
 import { RibbonTab } from './RibbonTab'
 import { RibbonGroup } from './RibbonGroup'

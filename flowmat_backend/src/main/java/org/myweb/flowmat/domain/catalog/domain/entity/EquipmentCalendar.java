@@ -9,8 +9,9 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * The shift one piece of equipment works (docs/domain/equipment-schedule.md). A shift that ends at or before its start
- * runs past midnight, and equal times mean the whole day. Equipment without a calendar is always available.
+ * One shift a piece of equipment works (docs/domain/equipment-schedule.md); a calendar is all the equipment's shifts. A
+ * shift that ends at or before its start runs past midnight, and equal times mean the whole day. Equipment without a
+ * shift is always available.
  */
 @Getter
 @Setter
@@ -19,6 +20,8 @@ import lombok.Setter;
 public class EquipmentCalendar {
 
     @Id
+    private String shiftId;
+
     private String equipmentId;
 
     private LocalTime shiftStart;

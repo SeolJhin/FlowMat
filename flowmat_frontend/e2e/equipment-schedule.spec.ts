@@ -80,6 +80,36 @@ test('a shift and downtime decide whether the equipment has the hours a work ord
     await call('DELETE', `/equipments/${equipment.equipmentId}/downtimes/${saved.downtimes[0].downtimeId}`)
     await readiness.getByRole('button', { name: 'Check again' }).click()
     await expect(readiness).toContainText('needs 10 h of the 16 h available in the planned window')
+
+    // A second, evening shift (docs/domain/equipment-schedule.md "교대"): overlaps are refused, touching shifts are fine.
+    await page.goto(`/projects/${PROJECT}/inventory?tab=equipment`)
+    await page.getByRole('row', { name: new RegExp(CODE) }).getByRole('button', { name: 'Schedule' }).click()
+    const shifts = page.getByRole('region', { name: `Schedule of ${CODE}` })
+    await shifts.getByRole('button', { name: 'Add shift' }).click()
+    await expect(shifts.getByLabel('Shift 2 start')).toHaveValue('17:00')
+    await shifts.getByLabel('Shift 2 start').fill('16:00')
+    await shifts.getByRole('button', { name: 'Save calendar' }).click()
+    await expect(shifts.getByRole('alert')).toContainText('Shifts 1 and 2 overlap on Mon.')
+    await shifts.getByLabel('Shift 2 start').fill('17:00')
+    await shifts.getByRole('button', { name: 'Save calendar' }).click()
+    await expect(shifts.getByRole('status'))
+      .toContainText('09:00–17:00 · Mon–Fri · 8 h a shift; 17:00–01:00 (ends next day) · Mon–Fri · 8 h a shift · 80 h a week')
+
+    // Monday 09:00 to Tuesday 17:00 now holds Monday's two shifts and Tuesday's day shift.
+    await page.goto(`/projects/${PROJECT}/runs?view=work-orders`)
+    await page.getByRole('row', { name: new RegExp(TITLE) }).getByRole('button', { name: 'Readiness' }).click()
+    await expect(page.locator('[aria-label="Readiness"]')).toContainText('needs 10 h of the 24 h available in the planned window')
+
+    // Status history (equipment.md): a change to maintenance with a note is kept and shown when editing.
+    await page.goto(`/projects/${PROJECT}/inventory?tab=equipment`)
+    await page.getByRole('row', { name: new RegExp(CODE) }).getByRole('button', { name: 'Edit' }).click()
+    await page.getByLabel('Status', { exact: true }).selectOption('maintenance')
+    await page.getByLabel('Status note').fill('Bearing replaced')
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page.getByRole('row', { name: new RegExp(CODE) })).toContainText('maintenance')
+    await page.getByRole('row', { name: new RegExp(CODE) }).getByRole('button', { name: 'Edit' }).click()
+    await expect(page.getByLabel('Status history')).toContainText('active → maintenance · Bearing replaced')
+    await expect(page.getByLabel('Status history')).toContainText('added as active')
   } finally {
     await call('PUT', `/work-orders/${order.workOrderId}/equipment`, { equipmentId: null })
     await call('POST', `/work-orders/${order.workOrderId}/cancel`, {})

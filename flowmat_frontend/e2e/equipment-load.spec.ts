@@ -52,7 +52,7 @@ test('the load board sets a week of orders against the equipment calendar', asyn
   }
   // 100 at 10 an hour on Monday-Tuesday (10 h) and a 50 draft on Wednesday (5 h) in a 40 h week.
   const first = await order(`Load ${suffix}`, 100, '2030-01-07T09:00:00+09:00', '2030-01-08T17:00:00+09:00', true)
-  await order(`Draft ${suffix}`, 50, '2030-01-09T09:00:00+09:00', '2030-01-09T17:00:00+09:00', false)
+  const draft = await order(`Draft ${suffix}`, 50, '2030-01-09T09:00:00+09:00', '2030-01-09T17:00:00+09:00', false)
   try {
     await login(page)
     await page.goto(`/projects/${PROJECT}/inventory?tab=equipment`)
@@ -69,6 +69,12 @@ test('the load board sets a week of orders against the equipment calendar', asyn
     await order(`More ${suffix}`, 400, '2030-01-07T09:00:00+09:00', '2030-01-11T17:00:00+09:00', true)
     await board.getByRole('button', { name: 'Refresh' }).click()
     await expect(row).toContainText('125% · Overloaded')
+
+    // The week as a timeline: the two approved orders overlap and clash; the draft never does.
+    const timeline = board.getByRole('list', { name: `Timeline of ${CODE}` })
+    await expect(timeline.getByRole('listitem')).toHaveCount(3)
+    await expect(timeline.getByRole('listitem', { name: `${first.workOrderNumber} · clashes`, exact: true })).toBeVisible()
+    await expect(timeline.getByRole('listitem', { name: `${draft.workOrderNumber} · draft`, exact: true })).toBeVisible()
 
     await board.getByRole('button', { name: 'Next week' }).click()
     await expect(row).not.toContainText(first.workOrderNumber)

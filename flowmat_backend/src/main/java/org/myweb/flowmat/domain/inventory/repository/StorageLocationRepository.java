@@ -13,6 +13,10 @@ public interface StorageLocationRepository extends JpaRepository<StorageLocation
 
     Optional<StorageLocation> findByLocationIdAndDeletedYn(String locationId, String deletedYn);
 
+    /** Resolve the lock scope without caching location state before waiting for another mutation. */
+    @Query("select l.projectId from StorageLocation l where l.locationId = :id and l.deletedYn = 'N'")
+    Optional<String> findLiveProjectId(@Param("id") String locationId);
+
     List<StorageLocation> findAllByParentLocationIdAndDeletedYn(String parentLocationId, String deletedYn);
 
     boolean existsByParentLocationIdAndDeletedYn(String parentLocationId, String deletedYn);

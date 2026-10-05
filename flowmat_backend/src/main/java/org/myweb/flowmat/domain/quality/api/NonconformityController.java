@@ -7,8 +7,11 @@ import org.myweb.flowmat.domain.quality.api.dto.request.CorrectiveActionRequest;
 import org.myweb.flowmat.domain.quality.api.dto.request.NonconformityCreateRequest;
 import org.myweb.flowmat.domain.quality.api.dto.request.NonconformityDefectsRequest;
 import org.myweb.flowmat.domain.quality.api.dto.request.NonconformityUpdateRequest;
+import org.myweb.flowmat.domain.quality.api.dto.request.NonconformityVerifyRequest;
 import org.myweb.flowmat.domain.quality.api.dto.request.QualityNoteRequest;
+import org.myweb.flowmat.domain.quality.api.dto.response.NonconformityDefectLinkResponse;
 import org.myweb.flowmat.domain.quality.api.dto.response.NonconformityResponse;
+import org.myweb.flowmat.domain.quality.application.NonconformityDefectLinkService;
 import org.myweb.flowmat.domain.quality.application.NonconformityService;
 import org.myweb.flowmat.global.response.ApiResponse;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,6 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class NonconformityController {
 
     private final NonconformityService nonconformityService;
+    private final NonconformityDefectLinkService nonconformityDefectLinkService;
 
     @GetMapping
     public ApiResponse<List<NonconformityResponse>> list(
@@ -34,6 +38,12 @@ public class NonconformityController {
         @RequestParam(required = false) String status
     ) {
         return ApiResponse.ok(nonconformityService.list(projectId, status));
+    }
+
+    /** Which open or closed nonconformity holds each of the project's defects. */
+    @GetMapping("/defect-links")
+    public ApiResponse<List<NonconformityDefectLinkResponse>> defectLinks(@RequestParam String projectId) {
+        return ApiResponse.ok(nonconformityDefectLinkService.links(projectId));
     }
 
     @GetMapping("/{nonconformityId}")
@@ -94,6 +104,15 @@ public class NonconformityController {
         @Valid @RequestBody QualityNoteRequest request
     ) {
         return ApiResponse.ok(nonconformityService.close(nonconformityId, request.note()));
+    }
+
+    /** Whether a closed nonconformity's actions worked (docs/domain/nonconformity.md N12). */
+    @PostMapping("/{nonconformityId}/verify")
+    public ApiResponse<NonconformityResponse> verify(
+        @PathVariable String nonconformityId,
+        @Valid @RequestBody NonconformityVerifyRequest request
+    ) {
+        return ApiResponse.ok(nonconformityService.verify(nonconformityId, request.result(), request.note()));
     }
 
     @PostMapping("/{nonconformityId}/cancel")

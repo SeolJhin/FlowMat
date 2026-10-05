@@ -80,7 +80,7 @@ export function applyItemDefaults(state: PortFormState, item: ItemDto | undefine
 export function toCreateProcessIoInput(processId: string, state: PortFormState): CreateProcessIoInput {
   return {
     processId,
-    itemId: state.itemId,
+    itemId: normalizeOptionalText(state.itemId),
     ioName: state.ioName.trim(),
     direction: state.direction,
     ioType: state.ioType.trim().toLowerCase(),
@@ -98,9 +98,11 @@ export function toCreateProcessIoInput(processId: string, state: PortFormState):
 }
 
 export function toUpdateProcessIoInput(state: PortFormState): UpdateProcessIoInput {
+  const itemId = normalizeOptionalText(state.itemId)
   return {
     processIoId: state.processIoId ?? '',
-    itemId: state.itemId,
+    // "No item" removes the binding; the server keeps the item when itemId is merely blank.
+    ...(itemId ? { itemId } : { clearItem: true }),
     ioName: state.ioName.trim(),
     direction: state.direction,
     ioType: state.ioType.trim().toLowerCase(),
@@ -119,7 +121,7 @@ export function toUpdateProcessIoInput(state: PortFormState): UpdateProcessIoInp
 }
 
 export function hasValidPortSelection(state: PortFormState): boolean {
-  return Boolean(state.itemId.trim()) && Boolean(state.unit.trim()) && Boolean(state.resourceType.trim())
+  return Boolean(state.unit.trim()) && Boolean(state.resourceType.trim())
     && isValidQuantity(state.quantity)
     && state.ioName.trim().length <= 100 && state.ioType.trim().length <= 30
     && state.role.trim().length <= 50 && state.resourceType.trim().length <= 50

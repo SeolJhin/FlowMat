@@ -87,7 +87,69 @@ class StockAnalysisIntegrationTest extends IntegrationTestSupport {
             .andExpect(status().isForbidden());
     }
 
+    @Test
+    void onePlaceIsAnalysedWithThePlacesInsideIt() throws Exception {
+        // Its own project: once a project lists places, free-text stock locations stop working there.
+        String project = id(call(post("/projects"), "{\"projectName\":\"Analysis " + suffix() + "\",\"ownerId\":\"" + DEMO_OWNER + "\"}"),
+            "projectId");
+        String warehouse = place(project, "WH-A", "warehouse", null);
+        place(project, "BIN-A1", "bin", warehouse);
+        place(project, "WH-B", "warehouse", null);
+        String bolt = projectItem(project);
+        String inBin = projectStock(project, bolt, "10", "bin-a1");
+        String elsewhere = projectStock(project, bolt, "50", "WH-B");
+        move(inBin, "issue", "4");
+        move(elsewhere, "issue", "20");
+
+        String line = "$.data.lines[?(@.itemId == '" + bolt + "')]";
+        call(get("/stock-analysis").param("projectId", project))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.location").doesNotExist())
+            .andExpect(jsonPath(line + ".onHandQuantity").value(hasItem(36.0)))
+            .andExpect(jsonPath(line + ".consumedQuantity").value(hasItem(24.0)));
+        // The warehouse takes the bin inside it, whatever the case of the code asked for (A5).
+        call(get("/stock-analysis").param("projectId", project).param("location", "wh-a"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.location").value("WH-A"))
+            .andExpect(jsonPath(line + ".onHandQuantity").value(hasItem(6.0)))
+            .andExpect(jsonPath(line + ".consumedQuantity").value(hasItem(4.0)));
+        call(get("/stock-analysis").param("projectId", project).param("location", "WH-B"))
+            .andExpect(jsonPath(line + ".onHandQuantity").value(hasItem(30.0)))
+            .andExpect(jsonPath(line + ".consumedQuantity").value(hasItem(20.0)));
+        call(get("/stock-analysis").param("projectId", project).param("location", "NOWHERE"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("Location NOWHERE is not in this project's location list."));
+    }
+
     // ---- helpers ----
+
+    private String place(String project, String code, String type, String parent) throws Exception {
+        return id(call(post("/storage-locations"), "{\"projectId\":\"" + project + "\",\"locationCode\":\"" + code
+            + "\",\"locationType\":\"" + type + "\"" + (parent == null ? "" : ",\"parentLocationId\":\"" + parent + "\"") + "}")
+            .andExpect(status().isOk()), "locationId");
+    }
+
+    private String projectStock(String project, String itemId, String quantity, String location) throws Exception {
+        return id(call(post("/inventories"), "{\"projectId\":\"" + project + "\",\"itemId\":\"" + itemId + "\",\"quantity\":"
+            + quantity + ",\"location\":\"" + location + "\"}").andExpect(status().isOk()), "inventoryId");
+    }
+
+    private String projectItem(String project) {
+        String id = "itm-splace-" + suffix();
+        Item item = new Item();
+        item.setItemId(id);
+        item.setProjectId(project);
+        item.setItemCode(id.toUpperCase());
+        item.setItemName(id);
+        item.setItemType("material");
+        item.setResourceCategory("material");
+        item.setUnitId("unit_kg");
+        item.setItemStatus("active");
+        item.setLotManageYn("N");
+        item.setDeletedYn("N");
+        itemRepository.save(item);
+        return id;
+    }
 
     private void backdate(String inventoryTransactionId, int days) {
         jdbcTemplate.update("update inventory_transaction set created_at = created_at - make_interval(days => ?) "

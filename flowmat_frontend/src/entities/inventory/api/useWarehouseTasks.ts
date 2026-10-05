@@ -30,6 +30,8 @@ export interface WarehouseTaskDto {
   finishedAt: string | null
   transferId: string | null
   cancelReason: string | null
+  /** Who should do the task (docs/domain/warehouse-task.md W7); null while no one is named. */
+  assignedTo: string | null
 }
 
 export interface PutawayInput {
@@ -104,15 +106,24 @@ export function useWarehouseTaskMutations(projectId: string) {
       unwrapApiResponse(await httpClient.post<ApiEnvelope<PickListResult>>('/warehouse-tasks/pick-list', { projectId, ...input })),
     onSuccess: refreshTasks,
   })
+  /** Without a quantity the whole task; with a smaller one only that much moves and the rest stays open. */
   const complete = useMutation({
-    mutationFn: async (taskId: string) =>
-      unwrapApiResponse(await httpClient.post<ApiEnvelope<WarehouseTaskDto>>(`${task(taskId)}/complete`, {})),
+    mutationFn: async ({ taskId, quantity, expectedToLocation }: { taskId: string; quantity?: number; expectedToLocation?: string }) =>
+      unwrapApiResponse(await httpClient.post<ApiEnvelope<WarehouseTaskDto>>(`${task(taskId)}/complete`,
+        { quantity, expectedToLocation })),
     onSuccess: refreshStock,
+    onError: refreshTasks,
   })
   const cancel = useMutation({
     mutationFn: async ({ taskId, reason }: { taskId: string; reason: string }) =>
       unwrapApiResponse(await httpClient.post<ApiEnvelope<WarehouseTaskDto>>(`${task(taskId)}/cancel`, { reason })),
     onSuccess: refreshTasks,
   })
-  return { create, pickList, complete, cancel }
+  /** Null or blank leaves the task to no one. */
+  const assign = useMutation({
+    mutationFn: async ({ taskId, assignedTo }: { taskId: string; assignedTo: string | null }) =>
+      unwrapApiResponse(await httpClient.put<ApiEnvelope<WarehouseTaskDto>>(`${task(taskId)}/assignee`, { assignedTo })),
+    onSuccess: refreshTasks,
+  })
+  return { create, pickList, complete, cancel, assign }
 }

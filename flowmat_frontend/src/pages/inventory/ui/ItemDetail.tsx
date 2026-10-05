@@ -1,5 +1,6 @@
 import { useBomWhereUsedQuery, useBomsQuery, useBuildableBomsQuery } from '../../../entities/bom/api/useBoms'
 import { useItemsQuery } from '../../../entities/catalog/api/useItemsQuery'
+import { useItemCostHistoryQuery } from '../../../entities/catalog/api/useItemCostHistory'
 import { isActiveItem } from '../model/itemStatusModel'
 import { useInventoriesQuery } from '../../../entities/inventory/api/useInventoriesQuery'
 import { useLedgerSearchQuery } from '../../../entities/inventory/api/useLedgerSearch'
@@ -9,7 +10,7 @@ import { useStockWasteQuery } from '../../../entities/inventory/api/useStockWast
 import { useDefectsQuery, useQualityInspectionsQuery } from '../../../entities/quality/api/useQuality'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { ItemDto } from '../../../shared/types/api'
-import { summariseItemStock } from '../model/itemDetailModel'
+import { costChangeText, summariseItemStock } from '../model/itemDetailModel'
 import { itemInfoLines } from '../model/itemInfoModel'
 import { coverLabel, idleLabel } from '../model/stockAnalysisModel'
 
@@ -46,6 +47,7 @@ export function ItemDetail({
   const ledgerQuery = useLedgerSearchQuery(projectId, { itemId: item.itemId }, 10)
   const inspectionsQuery = useQualityInspectionsQuery(projectId, { itemId: item.itemId })
   const defectsQuery = useDefectsQuery(projectId, { itemId: item.itemId })
+  const costHistory = useItemCostHistoryQuery(projectId, item.itemId).data ?? []
 
   const records = (inventoriesQuery.data ?? []).filter((row) => row.itemId === item.itemId)
   const stock = summariseItemStock(records, item.itemId)
@@ -101,6 +103,20 @@ export function ItemDetail({
             </div>
           ))}
         </dl>
+      )}
+
+      {costHistory.length > 0 && (
+        <div aria-label="Unit cost history" style={block}>
+          <strong>Unit cost history</strong>
+          <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+            {costHistory.slice(0, 5).map((change, index) => (
+              <li key={`${change.changedAt}-${index}`}>
+                {costChangeText(change, formatQty)}{' '}
+                <span className="inspector-hint">· {change.changedBy} · {new Date(change.changedAt).toLocaleString()}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       <div aria-label="Item stock" style={block}>

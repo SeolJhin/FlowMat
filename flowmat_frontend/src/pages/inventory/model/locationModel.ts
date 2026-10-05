@@ -4,6 +4,7 @@ import type {
   StorageLocationType,
   StorageLocationUpdateInput,
 } from '../../../entities/inventory/api/useStorageLocations'
+import type { InventoryDto } from '../../../shared/types/api'
 
 /** From the outermost kind to the innermost; a place sits only inside a kind earlier in this list. */
 export const LOCATION_TYPES: StorageLocationType[] = ['site', 'warehouse', 'zone', 'location', 'bin']
@@ -60,6 +61,12 @@ export function placesInside(locations: StorageLocationDto[], locationId: string
   return inside
 }
 
+/** Lower-case codes of a place and every place inside it, to match stock records' places ignoring case. */
+export function codesWithin(locations: StorageLocationDto[], locationId: string): Set<string> {
+  const ids = placesInside(locations, locationId).add(locationId)
+  return new Set(locations.filter((one) => ids.has(one.locationId)).map((one) => one.locationCode.trim().toLowerCase()))
+}
+
 /**
  * The places a place of this kind can sit in: active places of an outer kind, never the place itself or one inside it.
  * The place's current parent stays offered even when inactive, so editing other fields does not move it.
@@ -83,6 +90,48 @@ export function parentOptions(
 /** The codes new stock can go to: active places in list order. Empty while the project keeps free-text locations. */
 export function stockPlaceCodes(locations: StorageLocationDto[]): string[] {
   return locations.filter((one) => one.active).map((one) => one.locationCode)
+}
+
+/** Records holding stock and their different items. */
+export interface StockHeld {
+  records: number
+  items: number
+}
+
+/**
+ * Stock held at each place counting every place inside it (docs/domain/storage-location.md "화면"): records with stock
+ * on hand or reserved, and their different items. Records are matched to places by code ignoring case, as the server
+ * does; records at codes the list does not have count nowhere.
+ */
+export function stockWithin(
+  locations: StorageLocationDto[],
+  stock: Pick<InventoryDto, 'itemId' | 'quantity' | 'reservedQuantity' | 'location'>[],
+): Map<string, StockHeld> {
+  const byCode = new Map(locations.map((one) => [one.locationCode.trim().toLowerCase(), one]))
+  const byId = new Map(locations.map((one) => [one.locationId, one]))
+  const records = new Map<string, number>()
+  const items = new Map<string, Set<string>>()
+  for (const row of stock) {
+    if (row.quantity === 0 && row.reservedQuantity === 0) continue
+    let place = row.location ? byCode.get(row.location.trim().toLowerCase()) : undefined
+    const seen = new Set<string>()
+    while (place && !seen.has(place.locationId)) {
+      seen.add(place.locationId)
+      records.set(place.locationId, (records.get(place.locationId) ?? 0) + 1)
+      items.set(place.locationId, (items.get(place.locationId) ?? new Set<string>()).add(row.itemId))
+      place = place.parentLocationId ? byId.get(place.parentLocationId) : undefined
+    }
+  }
+  return new Map(locations.map((one) => [one.locationId, {
+    records: records.get(one.locationId) ?? 0,
+    items: items.get(one.locationId)?.size ?? 0,
+  }]))
+}
+
+/** "empty" or "3 records, 2 items". */
+export function stockText(held: StockHeld): string {
+  if (held.records === 0) return 'empty'
+  return `${held.records} ${held.records === 1 ? 'record' : 'records'}, ${held.items} ${held.items === 1 ? 'item' : 'items'}`
 }
 
 /** Places stock records name that the list does not have, compared ignoring case as the server does, sorted. */

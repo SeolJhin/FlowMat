@@ -39,6 +39,11 @@ export interface EquipmentLoadRowDto {
   unplannedOrders: number
   unmeasuredOrders: number
   orders: EquipmentLoadOrderDto[]
+  /**
+   * The window's changeovers in planned order and an order of the same work orders with fewer (docs/domain/equipment-load.md
+   * "전환 순서 제안"); null without two orders with items or any changeover time.
+   */
+  changeovers?: { plannedMinutes: number; suggestedMinutes: number | null; suggestedOrder: string[] | null } | null
 }
 
 /** Each equipment's available hours against what its work orders need (docs/domain/equipment-load.md). */

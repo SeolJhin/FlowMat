@@ -1,4 +1,5 @@
-import { expect, test, type Route } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+import { answerAuth, mockedLogin, ok } from './support/mockApi'
 
 /**
  * BOM by-product and waste lines (docs/domain/bom-by-products.md) against a mocked API, so no BOM is written to a real
@@ -6,9 +7,6 @@ import { expect, test, type Route } from '@playwright/test'
  * The server side is covered by BomByProductIntegrationTest.
  */
 test('by-products and waste are tagged, added and shown as coming out of a batch', async ({ page }) => {
-  const ok = async (route: Route, data: unknown) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data, message: null }) })
-  }
   const item = (itemId: string, itemCode: string) => ({
     itemId, projectId: 'prj-e2e', itemCode, itemName: itemCode.toLowerCase(), itemType: 'material', resourceCategory: null,
     resourceType: null, unitId: 'unit_kg', itemStatus: 'active', lotManageYn: 'N', unitCost: null,
@@ -23,25 +21,19 @@ test('by-products and waste are tagged, added and shown as coming out of a batch
     lines: [line('l1', 'oranges', 2, 'material'), line('l2', 'peel', 0.5, 'by_product')],
   }
   let posted: Record<string, unknown> | null = null
+  let imported: unknown = null
 
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const request = route.request()
     const url = new URL(request.url())
     const { pathname } = url
     const method = request.method()
-    if (pathname === '/api/auth/csrf') return route.fulfill({
-      status: 200, headers: { 'content-type': 'application/json', 'set-cookie': 'XSRF-TOKEN=test-csrf; Path=/' },
-      body: JSON.stringify({ success: true, data: 'test-csrf', message: null }),
-    })
-    if (pathname === '/api/auth/login') return route.fulfill({
-      status: 200, headers: { 'content-type': 'application/json', 'set-cookie': 'flowmat_rt=test-refresh; HttpOnly; Path=/api/auth' },
-      body: JSON.stringify({ success: true, data: {
-        accessToken: 'eyJ.fake.access', refreshToken: null, deviceId: 'device-1', additionalInfoRequired: false,
-      }, message: null }),
-    })
-    if (pathname === '/api/auth/refresh') return ok(route, { accessToken: 'eyJ.fake.access', refreshToken: null })
-    if (pathname === '/api/users/me') return ok(route, { userId: 'demo-owner', userName: 'Demo Owner' })
-    if (pathname === '/api/users/me/permissions') return ok(route, { canManageUsers: false })
+    if (await answerAuth(route, pathname)) return
+    if (pathname === '/api/boms/juice-bom/lines/import' && method === 'POST') {
+      imported = request.postDataJSON()
+      return ok(route, { dryRun: true, applied: false, added: 1, removed: 0, errors: 0,
+        rows: [{ row: 1, itemCode: 'PULP', action: 'add', message: null }] })
+    }
     if (pathname === '/api/boms/juice-bom/lines' && method === 'POST') {
       posted = request.postDataJSON()
       bom.lines.push(line('l3', String(posted?.childItemId), Number(posted?.quantity), String(posted?.lineType)))
@@ -57,10 +49,7 @@ test('by-products and waste are tagged, added and shown as coming out of a batch
     return ok(route, [])
   })
 
-  await page.goto('/')
-  await page.locator('input').nth(0).fill('demo-owner')
-  await page.locator('input[type="password"]').fill('demo1234')
-  await page.getByRole('button', { name: 'Log in' }).click()
+  await mockedLogin(page)
   await page.goto('/projects/prj-e2e/inventory?tab=boms')
 
   const row = page.getByRole('row', { name: /Juice/ })
@@ -74,4 +63,11 @@ test('by-products and waste are tagged, added and shown as coming out of a batch
   await page.getByRole('button', { name: 'Add', exact: true }).click()
   await expect(page.getByRole('cell', { name: /PULP.*waste/ })).toBeVisible()
   expect(posted).toMatchObject({ childItemId: 'pulp', quantity: 0.3, lineType: 'waste' })
+
+  // A materials CSV can say the line type in a type column (bom-by-products.md); it is sent with each row.
+  await page.getByLabel('Import materials file').setInputFiles({
+    name: 'juice.csv', mimeType: 'text/csv', buffer: Buffer.from('item_code,quantity,unit,type\nPULP,0.3,kg,waste\n'),
+  })
+  await expect(page.getByLabel('Materials from CSV')).toContainText('1 to add')
+  expect(imported).toMatchObject({ dryRun: true, rows: [{ itemCode: 'PULP', quantity: '0.3', unit: 'kg', lineType: 'waste' }] })
 })

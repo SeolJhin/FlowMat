@@ -6,6 +6,7 @@ import {
   type NcrActionType,
   type NcrDisposition,
   type NcrStatus,
+  type NcrVerification,
   type NonconformityDto,
 } from '../../../entities/quality/api/useNonconformities'
 import { errorMessage } from '../../../shared/lib/errorMessage'
@@ -21,8 +22,10 @@ import {
   actionPayload,
   actionProgress,
   closeBlockers,
+  followUpForm,
   ncrPayload,
   subjectText,
+  verificationPayload,
 } from '../model/nonconformityModel'
 
 const STATUS_FILTERS: { value: NcrStatus | ''; label: string }[] = [
@@ -79,6 +82,11 @@ export function NonconformityPanel({ projectId }: { projectId: string }) {
       </div>
       {raising && (
         <form aria-label="Raise nonconformity" onSubmit={raise} style={{ display: 'grid', gap: 8, fontSize: 13, maxWidth: 520, marginBottom: 12 }}>
+          {form.followUp && (
+            <p className="inspector-hint" style={{ margin: 0 }}>
+              Follow-up to {form.followUp.ncrNo}{form.followUp.about ? `, about ${form.followUp.about}` : ''}.
+            </p>
+          )}
           <label style={{ display: 'grid', gap: 4 }}>Title *
             <input value={form.title} maxLength={200} onChange={(event) => setForm({ ...form, title: event.target.value })} />
           </label>
@@ -135,7 +143,11 @@ export function NonconformityPanel({ projectId }: { projectId: string }) {
                 {actionProgress(ncr)}
                 {ncr.overdueActions > 0 && <span style={{ color: '#b91c1c' }}> · {ncr.overdueActions} overdue</span>}
               </td>
-              <td>{ncr.status}</td>
+              <td>
+                {ncr.status}
+                {ncr.status === 'closed' && !ncr.verificationResult && <span className="inspector-hint"> · not checked</span>}
+                {ncr.verificationResult === 'not_effective' && <span style={{ color: '#b91c1c' }}> · not effective</span>}
+              </td>
               <td><button type="button" onClick={() => setSelectedId(ncr.nonconformityId === selectedId ? null : ncr.nonconformityId)}>
                 {ncr.nonconformityId === selectedId ? 'Hide' : 'Open'}
               </button></td>
@@ -143,13 +155,27 @@ export function NonconformityPanel({ projectId }: { projectId: string }) {
           ))}</tbody>
         </table>
       )}
-      {selected && <NonconformityDetail key={selected.nonconformityId} projectId={projectId} ncr={selected} />}
+      {selected && <NonconformityDetail key={selected.nonconformityId} projectId={projectId} ncr={selected}
+        onFollowUp={(ncr) => {
+          create.reset()
+          setFormError(null)
+          setForm(followUpForm(ncr))
+          setRaising(true)
+        }} />}
     </section>
   )
 }
 
-function NonconformityDetail({ projectId, ncr }: { projectId: string; ncr: NonconformityDto }) {
-  const { update, addAction, finishAction, close, cancel } = useNonconformityMutations(projectId)
+function NonconformityDetail({ projectId, ncr, onFollowUp }: {
+  projectId: string
+  ncr: NonconformityDto
+  /** Raise a new nonconformity for what this one's actions did not fix. */
+  onFollowUp: (ncr: NonconformityDto) => void
+}) {
+  const { update, addAction, finishAction, close, cancel, verify } = useNonconformityMutations(projectId)
+  const [verification, setVerification] = useState<NcrVerification | ''>('')
+  const [verificationNote, setVerificationNote] = useState('')
+  const [verificationError, setVerificationError] = useState<string | null>(null)
   const [rootCause, setRootCause] = useState(ncr.rootCause ?? '')
   const [disposition, setDisposition] = useState<NcrDisposition>(ncr.disposition)
   const [actionForm, setActionForm] = useState(EMPTY_ACTION_FORM)
@@ -159,7 +185,14 @@ function NonconformityDetail({ projectId, ncr }: { projectId: string; ncr: Nonco
   const [closeNote, setCloseNote] = useState('')
   const open = ncr.status === 'open'
   const blockers = closeBlockers(ncr)
-  const failure = [update, addAction, finishAction, close, cancel].find((mutation) => mutation.isError)
+  const failure = [update, addAction, finishAction, close, cancel, verify].find((mutation) => mutation.isError)
+
+  function saveVerification(event: FormEvent) {
+    event.preventDefault()
+    const payload = verificationPayload(verification, verificationNote)
+    setVerificationError(payload.error)
+    if (payload.input) verify.mutate({ id: ncr.nonconformityId, ...payload.input })
+  }
 
   function saveAction(event: FormEvent) {
     event.preventDefault()
@@ -186,6 +219,33 @@ function NonconformityDetail({ projectId, ncr }: { projectId: string; ncr: Nonco
       </p>
       {ncr.description && <p style={{ margin: '0 0 8px' }}>{ncr.description}</p>}
       {ncr.closureNote && <p style={{ margin: '0 0 8px' }}>Note: {ncr.closureNote}</p>}
+      {ncr.status === 'closed' && (ncr.verificationResult ? (
+        <section aria-label="Effectiveness" style={{ margin: '0 0 8px' }}>
+          <strong style={{ color: ncr.verificationResult === 'effective' ? '#047857' : '#b91c1c' }}>
+            {ncr.verificationResult === 'effective' ? 'The actions worked' : 'The actions did not work'}
+          </strong>
+          <span className="inspector-hint">
+            {' '}· checked by {ncr.verifiedBy}{ncr.verifiedAt ? ` ${new Date(ncr.verifiedAt).toLocaleString()}` : ''}
+          </span>
+          {ncr.verificationNote && <div>{ncr.verificationNote}</div>}
+          {ncr.verificationResult === 'not_effective' && (
+            <button type="button" style={{ marginTop: 4 }} onClick={() => onFollowUp(ncr)}>Raise a follow-up</button>
+          )}
+        </section>
+      ) : (
+        <form aria-label="Check the actions" onSubmit={saveVerification}
+          style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', margin: '0 0 8px' }}>
+          <span>Did the actions work?</span>
+          <label><input type="radio" name={`verify-${ncr.nonconformityId}`} checked={verification === 'effective'}
+            onChange={() => setVerification('effective')} /> Yes</label>
+          <label><input type="radio" name={`verify-${ncr.nonconformityId}`} checked={verification === 'not_effective'}
+            onChange={() => setVerification('not_effective')} /> No</label>
+          <input aria-label="What was checked" value={verificationNote} maxLength={1000} style={{ minWidth: 260 }}
+            placeholder="What was checked, or what still goes wrong" onChange={(event) => setVerificationNote(event.target.value)} />
+          <button type="submit" disabled={verify.isPending}>{verify.isPending ? 'Saving...' : 'Record check'}</button>
+          {verificationError && <p role="alert" style={{ color: '#dc2626', margin: 0, flexBasis: '100%' }}>{verificationError}</p>}
+        </form>
+      ))}
 
       {ncr.defects.length > 0 && (
         <ul aria-label="Gathered defects" style={{ margin: '0 0 8px', paddingLeft: 18 }}>

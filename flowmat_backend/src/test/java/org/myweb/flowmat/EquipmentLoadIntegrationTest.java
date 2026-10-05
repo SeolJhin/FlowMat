@@ -90,6 +90,35 @@ class EquipmentLoadIntegrationTest extends IntegrationTestSupport {
             .andExpect(status().isForbidden());
     }
 
+    @Test
+    void theWeeksChangeoversAreAddedUpAndAnOrderWithFewerIsSuggested() throws Exception {
+        String tag = tag();
+        String press = equipment("SEQ-" + tag, 10);
+        String a = item("SEQA-" + tag);
+        String b = item("SEQB-" + tag);
+        call(post("/equipments/" + press + "/changeovers"), json(Map.of("fromItemId", a, "toItemId", b, "minutes", 30)))
+            .andExpect(status().isOk());
+        call(post("/equipments/" + press + "/changeovers"), json(Map.of("fromItemId", b, "toItemId", a, "minutes", 45)))
+            .andExpect(status().isOk());
+        // A on Monday, B on Tuesday and A again (a draft) on Wednesday: 30 + 45 min as planned, 30 with both A first.
+        String first = order("A1 " + tag, a, 10, "2030-01-07T09:00:00+09:00", "2030-01-07T17:00:00+09:00", press, true);
+        String middle = order("B " + tag, b, 10, "2030-01-08T09:00:00+09:00", "2030-01-08T17:00:00+09:00", press, true);
+        String last = order("A2 " + tag, a, 10, "2030-01-09T09:00:00+09:00", "2030-01-09T17:00:00+09:00", press, false);
+
+        String plan = "$.data.equipment[?(@.equipmentId == '" + press + "')].changeovers";
+        load(MONDAY, NEXT_MONDAY)
+            .andExpect(jsonPath(plan + ".plannedMinutes").value(hasItem(75)))
+            .andExpect(jsonPath(plan + ".suggestedMinutes").value(hasItem(30)))
+            .andExpect(jsonPath(plan + ".suggestedOrder").value(hasItem(List.of(number(first), number(last), number(middle)))));
+
+        // The next week has no order with an item on the press: nothing to add up.
+        load(NEXT_MONDAY, "2030-01-21T00:00:00+09:00").andExpect(jsonPath(plan + ".plannedMinutes").isEmpty());
+    }
+
+    private String number(String workOrderId) throws Exception {
+        return data(call(get("/work-orders/" + workOrderId))).path("workOrderNumber").asText();
+    }
+
     private ResultActions load(String from, String to) throws Exception {
         return call(get("/equipment-load").param("projectId", DEMO_PROJECT).param("from", from).param("to", to));
     }

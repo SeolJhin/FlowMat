@@ -2,6 +2,8 @@ package org.myweb.flowmat.domain.catalog.api;
 
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.api.dto.request.EquipmentCalendarRequest;
+import org.myweb.flowmat.domain.catalog.api.dto.request.EquipmentDayCopyRequest;
+import org.myweb.flowmat.domain.catalog.api.dto.request.EquipmentDayRequest;
 import org.myweb.flowmat.domain.catalog.api.dto.request.EquipmentDowntimeRequest;
 import org.myweb.flowmat.domain.catalog.api.dto.response.EquipmentAvailabilityResponse;
 import org.myweb.flowmat.domain.catalog.api.dto.response.EquipmentScheduleResponse;
@@ -41,6 +43,35 @@ public class EquipmentScheduleController {
     @DeleteMapping("/calendar")
     public ApiResponse<EquipmentScheduleResponse> clearCalendar(@PathVariable("equipmentId") String equipmentId) {
         return ApiResponse.ok(equipmentScheduleService.clearCalendar(equipmentId));
+    }
+
+    /** One date's shifts in place of the calendar's; no shifts close the day (docs/domain/equipment-schedule.md). */
+    @PutMapping("/days/{date}")
+    public ApiResponse<EquipmentScheduleResponse> setDay(
+        @PathVariable("equipmentId") String equipmentId,
+        @PathVariable("date") String date,
+        @RequestBody(required = false) EquipmentDayRequest request
+    ) {
+        return ApiResponse.ok(equipmentScheduleService.setDay(equipmentId, date, request));
+    }
+
+    /** The date, or with {@code through} every date of its own up to that one, back to the calendar (D6). */
+    @DeleteMapping("/days/{date}")
+    public ApiResponse<EquipmentScheduleResponse> clearDay(
+        @PathVariable("equipmentId") String equipmentId,
+        @PathVariable("date") String date,
+        @RequestParam(value = "through", required = false) String through
+    ) {
+        return ApiResponse.ok(equipmentScheduleService.clearDay(equipmentId, date, through));
+    }
+
+    /** This equipment's own dates onto another equipment of the project; the answer is that equipment's schedule (D7). */
+    @PostMapping("/days/copy")
+    public ApiResponse<EquipmentScheduleResponse> copyDays(
+        @PathVariable("equipmentId") String equipmentId,
+        @RequestBody(required = false) EquipmentDayCopyRequest request
+    ) {
+        return ApiResponse.ok(equipmentScheduleService.copyDays(equipmentId, request));
     }
 
     @PostMapping("/downtimes")

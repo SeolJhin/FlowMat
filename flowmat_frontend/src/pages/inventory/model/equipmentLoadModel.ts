@@ -1,4 +1,5 @@
 import type { EquipmentLoadOrderDto, EquipmentLoadRowDto } from '../../../entities/production/api/useEquipmentLoad'
+import { formatMinutes } from './changeoverModel'
 import { formatHours } from './equipmentScheduleModel'
 
 /** Monday 00:00 (local) of the week the date falls in. */
@@ -44,6 +45,85 @@ export function loadLabel(row: EquipmentLoadRowDto): string {
   return row.loadPercent === null ? '—' : `${Number(row.loadPercent.toFixed(1))}%`
 }
 
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+function pad(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+/** "Mon 01-07" for each of the seven days from the week's Monday, local time. */
+export function dayLabels(start: Date): string[] {
+  return Array.from({ length: 7 }, (_, offset) => {
+    const day = new Date(start.getFullYear(), start.getMonth(), start.getDate() + offset)
+    return `${DAY_NAMES[day.getDay()]} ${pad(day.getMonth() + 1)}-${pad(day.getDate())}`
+  })
+}
+
+/** "Mon 01-07 09:00", local time. */
+function stamp(iso: string): string {
+  const time = new Date(iso)
+  return `${DAY_NAMES[time.getDay()]} ${pad(time.getMonth() + 1)}-${pad(time.getDate())} ${pad(time.getHours())}:${pad(time.getMinutes())}`
+}
+
+/** An order's planned window inside the shown week, as a share of it. */
+export interface TimelineBar {
+  workOrderId: string
+  workOrderNumber: string
+  /** Percent of the week from its start, and of its length. */
+  left: number
+  width: number
+  /** Row within the equipment's strip, so overlapping bars do not cover each other. */
+  lane: number
+  draft: boolean
+  /** Approved or running, and overlapping another approved or running order on the equipment. */
+  clash: boolean
+  /** The order line and its full planned window. */
+  title: string
+}
+
+/**
+ * One equipment's orders as bars on the week [from, to) (docs/domain/equipment-load.md "타임라인"): each planned window
+ * clipped to the week, earliest first, in the first lane that is free by then. Approved and running orders whose planned
+ * windows overlap clash, as readiness's "schedule" check says; drafts are not planned work yet and never clash.
+ */
+export function timelineBars(orders: EquipmentLoadOrderDto[], from: string, to: string): { bars: TimelineBar[]; lanes: number } {
+  const weekStartAt = Date.parse(from)
+  const length = Date.parse(to) - weekStartAt
+  const planned = orders.filter((order) => order.workOrderStatus !== 'draft')
+  const overlaps = (left: EquipmentLoadOrderDto, right: EquipmentLoadOrderDto) =>
+    Date.parse(left.plannedStartAt) < Date.parse(right.plannedEndAt) && Date.parse(right.plannedStartAt) < Date.parse(left.plannedEndAt)
+  const shown = orders
+    .map((order) => ({
+      order,
+      start: Math.max(Date.parse(order.plannedStartAt), weekStartAt),
+      end: Math.min(Date.parse(order.plannedEndAt), weekStartAt + length),
+    }))
+    .filter((one) => one.end > one.start)
+    .sort((left, right) => left.start - right.start || left.end - right.end)
+  const laneEnds: number[] = []
+  const bars = shown.map(({ order, start, end }) => {
+    let lane = laneEnds.findIndex((laneEnd) => laneEnd <= start)
+    if (lane === -1) {
+      lane = laneEnds.length
+      laneEnds.push(end)
+    } else {
+      laneEnds[lane] = end
+    }
+    const draft = order.workOrderStatus === 'draft'
+    return {
+      workOrderId: order.workOrderId,
+      workOrderNumber: order.workOrderNumber,
+      left: ((start - weekStartAt) / length) * 100,
+      width: Math.max(((end - start) / length) * 100, 0.5),
+      lane,
+      draft,
+      clash: !draft && planned.some((other) => other.workOrderId !== order.workOrderId && overlaps(order, other)),
+      title: `${orderLine(order)} · ${stamp(order.plannedStartAt)} → ${stamp(order.plannedEndAt)}`,
+    }
+  })
+  return { bars, lanes: Math.max(laneEnds.length, 1) }
+}
+
 /** One line per order, e.g. "WO-1 · RED · 10 h", "WO-2 · draft · 5 h", "WO-3 · 15.5 of 31 h", "WO-4 · hours unknown". */
 export function orderLine(order: EquipmentLoadOrderDto): string {
   const parts = [order.workOrderNumber]
@@ -58,4 +138,12 @@ export function orderLine(order: EquipmentLoadOrderDto): string {
   }
   if (order.changeoverMinutes) parts.push(`incl. ${order.changeoverMinutes} min changeover`)
   return parts.join(' · ')
+}
+
+/** "Changeovers 3 h as planned · 1 h as WO-2, WO-1, WO-3", without the suggestion when none changes over less. */
+export function changeoverPlanText(plan: NonNullable<EquipmentLoadRowDto['changeovers']>): string {
+  const planned = `Changeovers ${formatMinutes(plan.plannedMinutes)} as planned`
+  return plan.suggestedMinutes === null || !plan.suggestedOrder
+    ? planned
+    : `${planned} · ${formatMinutes(plan.suggestedMinutes)} as ${plan.suggestedOrder.join(', ')}`
 }

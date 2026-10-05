@@ -20,6 +20,16 @@ describe('stockRowsFromCsv', () => {
     expect(stockRowsFromCsv(STOCK_CSV_TEMPLATE)).toEqual({ ok: false, error: 'The file has no stock rows under its header.' })
   })
 
+  it.each([
+    ['item_code,quantity,qty', 'SUG-1,50,5', 'quantity'],
+    ['item_code,bags,packs', 'SUG-1,2,20', 'bags'],
+    ['item_code,quantity,location,Location', 'SUG-1,5,SRC,DEST', 'location'],
+  ])('refuses ambiguous stock columns %s instead of overriding a value', (header, row, column) => {
+    expect(stockRowsFromCsv(`${header}\n${row}\n`)).toEqual({
+      ok: false, error: `Use only one ${column} column, including aliases.`,
+    })
+  })
+
   it('takes packs instead of a quantity', () => {
     expect(stockRowsFromCsv('item_code,location,bags\nFLR-1,WH-A,2\n')).toEqual({ ok: true, rows: [{ itemCode: 'FLR-1', location: 'WH-A', packs: '2' }] })
   })

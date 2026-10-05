@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
+import './inventory.css'
 import { useItemsQuery } from '../../../entities/catalog/api/useItemsQuery'
 import { useCreateItemMutation } from '../../../entities/catalog/api/useCreateItemMutation'
 import { useDeleteItemMutation } from '../../../entities/catalog/api/useDeleteItemMutation'
@@ -25,6 +26,7 @@ import { ItemInfoFields } from './ItemInfoFields'
 import { EMPTY_ITEM_INFO, itemInfoForm, itemInfoPayload } from '../model/itemInfoModel'
 import { EMPTY_ITEM_FILTER, duplicateCodes, filterItems, type ItemFilter } from '../model/listFilterModel'
 import { StockAnalysisPanel } from './StockAnalysisPanel'
+import { StockTransfersPanel } from './StockTransfersPanel'
 import { StockValueTrend } from './StockValueTrend'
 import { StockWastePanel } from './StockWastePanel'
 import { WorkInstructionsPanel } from './WorkInstructionsPanel'
@@ -184,11 +186,12 @@ export function InventoryRoute() {
   const isPending = createMutation.isPending || updateMutation.isPending
 
   return (
-    <div style={{ padding: 32, maxWidth: 1120, margin: '0 auto' }}>
+    <div className="inventory-route" style={{ padding: 'clamp(12px, 4vw, 32px)', maxWidth: 1120, margin: '0 auto' }}>
       <Link to="/" style={{ fontSize: 13, color: 'var(--accent)' }}>Back to home</Link>
       <h1>Inventory</h1>
 
-      <div role="tablist" style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', marginBottom: 20 }}>
+      {/* The tabs wrap rather than widen the page past the screen (a phone, or a narrow window). */}
+      <div role="tablist" style={{ display: 'flex', flexWrap: 'wrap', columnGap: 4, borderBottom: '1px solid var(--border)', marginBottom: 20 }}>
         {TABS.map((name) => (
           <button
             key={name}
@@ -224,6 +227,7 @@ export function InventoryRoute() {
         <>
           <StockValueTrend projectId={projectId} />
           <StockWastePanel projectId={projectId} />
+          <StockTransfersPanel projectId={projectId} />
           <StockAnalysisPanel projectId={projectId} />
         </>
       )}

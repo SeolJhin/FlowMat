@@ -3,6 +3,7 @@ import type {
   NcrActionType,
   NcrCreateInput,
   NcrDisposition,
+  NcrVerification,
   NonconformityDto,
 } from '../../../entities/quality/api/useNonconformities'
 import type { DefectSeverity } from '../../../shared/types/api'
@@ -58,6 +59,8 @@ export interface NcrForm {
   description: string
   severity: DefectSeverity | ''
   defectLogIds: string[]
+  /** Raised because another nonconformity's actions did not work: about what that one was about. */
+  followUp?: { ncrNo: string; about: string; itemId: string | null; lotId: string | null; productionRunId: string | null }
 }
 
 export const EMPTY_NCR_FORM: NcrForm = { title: '', description: '', severity: '', defectLogIds: [] }
@@ -73,6 +76,9 @@ export function ncrPayload(form: NcrForm): { input: NcrCreateInput; error: null 
       description: form.description.trim() || null,
       severity: form.severity || null,
       defectLogIds: form.defectLogIds,
+      ...(form.followUp
+        ? { itemId: form.followUp.itemId, lotId: form.followUp.lotId, productionRunId: form.followUp.productionRunId }
+        : {}),
     },
     error: null,
   }
@@ -96,4 +102,29 @@ export function actionPayload(form: ActionForm): { input: NcrActionInput; error:
     input: { actionType: form.actionType, description, ownerId: form.ownerId.trim() || null, dueDate: form.dueDate || null },
     error: null,
   }
+}
+
+/** A new nonconformity for what a closed one's actions did not fix (N12): same subject and severity, no defects yet. */
+export function followUpForm(
+  ncr: Pick<NonconformityDto, 'ncrNo' | 'title' | 'severity' | 'verificationNote' | 'itemId' | 'itemCode' | 'lotId' | 'lotNo'
+    | 'productionRunId' | 'runNumber'>,
+): NcrForm {
+  return {
+    title: `Follow-up to ${ncr.ncrNo}: ${ncr.title}`.slice(0, 200),
+    description: `The actions of ${ncr.ncrNo} did not work.${ncr.verificationNote ? ` ${ncr.verificationNote}` : ''}`.slice(0, 2000),
+    severity: ncr.severity,
+    defectLogIds: [],
+    followUp: { ncrNo: ncr.ncrNo, about: subjectText(ncr), itemId: ncr.itemId, lotId: ncr.lotId, productionRunId: ncr.productionRunId },
+  }
+}
+
+/** Checks whether the actions worked before it is sent: a "no" says what still goes wrong. */
+export function verificationPayload(
+  result: NcrVerification | '',
+  note: string,
+): { input: { result: NcrVerification; note: string | null }; error: null } | { input: null; error: string } {
+  if (!result) return { input: null, error: 'Say whether the actions worked.' }
+  const text = note.trim()
+  if (result === 'not_effective' && !text) return { input: null, error: 'Say what still goes wrong.' }
+  return { input: { result, note: text || null }, error: null }
 }

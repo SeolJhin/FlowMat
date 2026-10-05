@@ -107,6 +107,26 @@ public interface InventoryTransactionRepository
         """, nativeQuery = true)
     List<ItemMovementTotals> findItemMovementTotals(@Param("projectId") String projectId, @Param("since") OffsetDateTime since);
 
+    /** {@link #findItemMovementTotals} for the stock records at the given places only (lower-cased codes). */
+    @Query(value = """
+        select t.item_id as "itemId",
+               coalesce(sum(case when t.transaction_type in ('issue', 'production_input') and t.created_at >= :since
+                                 then -t.quantity_delta end), 0) as "consumed",
+               max(case when t.transaction_type in ('issue', 'production_input') then t.created_at end) as "lastConsumedAt",
+               min(case when t.transaction_type in ('receipt', 'production_output') then t.created_at end) as "firstReceivedAt",
+               max(case when t.transaction_type in ('receipt', 'production_output') then t.created_at end) as "lastReceivedAt"
+          from inventory_transaction t
+          join inventory i on i.inventory_id = t.inventory_id
+         where t.project_id = :projectId
+           and lower(trim(i.location)) in (:codes)
+           and t.transaction_type in ('issue', 'production_input', 'receipt', 'production_output')
+           and not exists (select 1 from inventory_transaction r
+                            where r.transaction_type = 'reversal' and r.reference_id = t.inventory_transaction_id)
+         group by t.item_id
+        """, nativeQuery = true)
+    List<ItemMovementTotals> findItemMovementTotalsAt(@Param("projectId") String projectId, @Param("since") OffsetDateTime since,
+        @Param("codes") Collection<String> codes);
+
     /**
      * Stock each item lost since a moment, by why (docs/domain/stock-analysis.md "폐기·손실"): written off as expired,
      * scrapped from a defect, or missing at a stock count. Only movements that took stock away; reversed ones do not count.
@@ -138,6 +158,42 @@ public interface InventoryTransactionRepository
          group by t.item_id
         """, nativeQuery = true)
     List<ItemWaste> findItemWaste(@Param("projectId") String projectId, @Param("since") OffsetDateTime since);
+
+    /**
+     * Stock moved between places since a moment, per route and item (docs/domain/stock-analysis.md "위치 간 이동"): each
+     * transfer's way out joined to its way in, at the places of the two stock records. A blank place is null.
+     */
+    interface PlaceTransfer {
+
+        String getFromLocation();
+
+        String getToLocation();
+
+        String getItemId();
+
+        BigDecimal getQuantity();
+
+        Long getMoves();
+    }
+
+    @Query(value = """
+        select nullif(trim(f.location), '') as "fromLocation",
+               nullif(trim(d.location), '') as "toLocation",
+               o.item_id as "itemId",
+               sum(-o.quantity_delta) as "quantity",
+               count(*) as "moves"
+          from inventory_transaction o
+          join inventory_transaction i on i.reference_type = 'inventory_transfer' and i.reference_id = o.reference_id
+                                      and i.transaction_type = 'transfer_in'
+          left join inventory f on f.inventory_id = o.inventory_id
+          left join inventory d on d.inventory_id = i.inventory_id
+         where o.project_id = :projectId
+           and o.created_at > :since
+           and o.transaction_type = 'transfer_out'
+           and o.reference_type = 'inventory_transfer'
+         group by nullif(trim(f.location), ''), nullif(trim(d.location), ''), o.item_id
+        """, nativeQuery = true)
+    List<PlaceTransfer> findPlaceTransfers(@Param("projectId") String projectId, @Param("since") OffsetDateTime since);
 
     Optional<InventoryTransaction> findByInventoryTransactionId(String inventoryTransactionId);
 

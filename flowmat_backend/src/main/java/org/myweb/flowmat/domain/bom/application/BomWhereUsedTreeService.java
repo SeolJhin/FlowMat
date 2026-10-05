@@ -9,7 +9,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -20,10 +19,8 @@ import org.myweb.flowmat.domain.bom.domain.entity.BomLine;
 import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
 import org.myweb.flowmat.domain.bom.repository.BomLineRepository;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
-import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.domain.entity.UnitMaster;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
-import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
@@ -43,13 +40,11 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class BomWhereUsedTreeService {
 
-    private static final String NOT_DELETED = "N";
     private static final int SHOWN_SCALE = 6;
 
     private final BomHeaderRepository bomHeaderRepository;
     private final BomLineRepository bomLineRepository;
-    private final ItemRepository itemRepository;
-    private final UnitMasterRepository unitMasterRepository;
+    private final CatalogQuery catalogQuery;
     private final UnitConverter unitConverter;
     private final ProjectAccessService projectAccessService;
 
@@ -63,8 +58,7 @@ public class BomWhereUsedTreeService {
         }
         String project = projectId.trim();
         projectAccessService.requireProjectReadAccess(project);
-        Item start = itemRepository.findByItemIdAndDeletedYn(itemId.trim(), NOT_DELETED)
-            .filter(item -> project.equals(item.getProjectId()))
+        CatalogItemView start = catalogQuery.findProjectItem(project, itemId.trim())
             .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "Item does not exist in this project."));
 
         Map<String, BomHeader> approvedByBom = BomTree.approvedByItem(bomHeaderRepository, project).values().stream()
@@ -73,14 +67,10 @@ public class BomWhereUsedTreeService {
             .filter(line -> BomTree.isMaterial(line.getLineType()))
             .toList();
         Set<String> itemIds = new HashSet<>();
-        itemIds.add(start.getItemId());
+        itemIds.add(start.itemId());
         approvedByBom.values().forEach(header -> itemIds.add(header.getTargetItemId()));
         lines.forEach(line -> itemIds.add(line.getChildItemId()));
-        Map<String, Item> items = itemRepository.findAllById(itemIds).stream()
-            .collect(Collectors.toMap(Item::getItemId, Function.identity()));
-        Map<String, String> units = unitMasterRepository.findAllById(items.values().stream()
-                .map(Item::getUnitId).filter(Objects::nonNull).distinct().toList()).stream()
-            .collect(Collectors.toMap(UnitMaster::getUnitId, UnitMaster::getUnitCode));
+        Map<String, CatalogItemView> items = catalogQuery.findItems(itemIds);
 
         List<String> problems = new ArrayList<>();
         Map<String, List<Edge>> usedBy = new HashMap<>();
@@ -94,21 +84,21 @@ public class BomWhereUsedTreeService {
 
         List<BomWhereUsedTreeResponse.Use> uses = new ArrayList<>();
         Map<String, TopTotal> tops = new LinkedHashMap<>();
-        List<String> path = new ArrayList<>(List.of(code(items, start.getItemId())));
-        Set<String> onRoute = new HashSet<>(Set.of(start.getItemId()));
-        walk(start.getItemId(), 1, BigDecimal.ONE, path, onRoute, usedBy, items, units, uses, tops);
+        List<String> path = new ArrayList<>(List.of(code(items, start.itemId())));
+        Set<String> onRoute = new HashSet<>(Set.of(start.itemId()));
+        walk(start.itemId(), 1, BigDecimal.ONE, path, onRoute, usedBy, items, uses, tops);
 
         List<BomWhereUsedTreeResponse.TopProduct> topProducts = tops.entrySet().stream()
             .map(entry -> {
-                Item product = items.get(entry.getKey());
+                CatalogItemView product = items.get(entry.getKey());
                 TopTotal total = entry.getValue();
                 return new BomWhereUsedTreeResponse.TopProduct(entry.getKey(), code(items, entry.getKey()),
-                    product == null ? null : product.getItemName(), unit(product, units), shown(total.perUnit), total.levels,
+                    product == null ? null : product.itemName(), unit(product), shown(total.perUnit), total.levels,
                     total.routes);
             })
             .sorted(Comparator.comparing(BomWhereUsedTreeResponse.TopProduct::itemCode))
             .toList();
-        return new BomWhereUsedTreeResponse(start.getItemId(), start.getItemCode(), unit(start, units), uses, topProducts, problems);
+        return new BomWhereUsedTreeResponse(start.itemId(), start.itemCode(), unit(start), uses, topProducts, problems);
     }
 
     private static final class TopTotal {
@@ -124,8 +114,7 @@ public class BomWhereUsedTreeService {
         List<String> path,
         Set<String> onRoute,
         Map<String, List<Edge>> usedBy,
-        Map<String, Item> items,
-        Map<String, String> units,
+        Map<String, CatalogItemView> items,
         List<BomWhereUsedTreeResponse.Use> uses,
         Map<String, TopTotal> tops
     ) {
@@ -138,9 +127,9 @@ public class BomWhereUsedTreeService {
             BigDecimal perProductUnit = perMaterialUnit == null || edge.rate() == null ? null : perMaterialUnit.multiply(edge.rate());
             boolean top = usedBy.getOrDefault(product, List.of()).isEmpty();
             path.add(code(items, product));
-            Item productItem = items.get(product);
+            CatalogItemView productItem = items.get(product);
             uses.add(new BomWhereUsedTreeResponse.Use(level, material, code(items, material), product, code(items, product),
-                productItem == null ? null : productItem.getItemName(), unit(productItem, units), edge.header().getBomId(),
+                productItem == null ? null : productItem.itemName(), unit(productItem), edge.header().getBomId(),
                 edge.header().getBomVersion(), edge.line().getQuantity(), edge.line().getUnit(), edge.header().getBaseQuantity(),
                 edge.header().getBaseUnit(), shown(perProductUnit), top, List.copyOf(path)));
             if (top) {
@@ -150,7 +139,7 @@ public class BomWhereUsedTreeService {
                 total.routes++;
             } else {
                 onRoute.add(product);
-                walk(product, level + 1, perProductUnit, path, onRoute, usedBy, items, units, uses, tops);
+                walk(product, level + 1, perProductUnit, path, onRoute, usedBy, items, uses, tops);
                 onRoute.remove(product);
             }
             path.remove(path.size() - 1);
@@ -158,11 +147,10 @@ public class BomWhereUsedTreeService {
     }
 
     /** Material per one unit of the product: line quantity in the material's unit ÷ batch size in the product's unit. */
-    private BigDecimal rate(BomHeader header, BomLine line, Map<String, Item> items, List<String> problems) {
-        Item material = items.get(line.getChildItemId());
-        Item product = items.get(header.getTargetItemId());
+    private BigDecimal rate(BomHeader header, BomLine line, Map<String, CatalogItemView> items, List<String> problems) {
         try {
-            return BomTree.perProductUnit(unitConverter, header, line, material, product);
+            return BomTree.perProductUnit(unitConverter, header, line, unitId(items, line.getChildItemId()),
+                unitId(items, header.getTargetItemId()));
         } catch (BusinessException e) {
             problems.add(code(items, header.getTargetItemId()) + " v" + header.getBomVersion() + ", material "
                 + code(items, line.getChildItemId()) + ": " + e.getMessage());
@@ -174,12 +162,17 @@ public class BomWhereUsedTreeService {
         return value == null ? null : value.setScale(SHOWN_SCALE, RoundingMode.HALF_UP).stripTrailingZeros();
     }
 
-    private static String code(Map<String, Item> items, String itemId) {
-        Item item = items.get(itemId);
-        return item == null ? itemId : item.getItemCode();
+    private static String code(Map<String, CatalogItemView> items, String itemId) {
+        CatalogItemView item = items.get(itemId);
+        return item == null ? itemId : item.itemCode();
     }
 
-    private static String unit(Item item, Map<String, String> units) {
-        return item == null || item.getUnitId() == null ? null : units.get(item.getUnitId());
+    private static String unitId(Map<String, CatalogItemView> items, String itemId) {
+        CatalogItemView item = items.get(itemId);
+        return item == null ? null : item.unitId();
+    }
+
+    private static String unit(CatalogItemView item) {
+        return item == null ? null : item.unitCode();
     }
 }

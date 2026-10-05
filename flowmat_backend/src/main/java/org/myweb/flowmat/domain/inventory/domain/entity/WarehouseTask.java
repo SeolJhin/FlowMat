@@ -52,4 +52,7 @@ public class WarehouseTask {
     /** The transfer that did the task. */
     private String transferId;
     private String cancelReason;
+
+    /** Who should do the task (W7, V49); null while no one is named. */
+    private String assignedTo;
 }

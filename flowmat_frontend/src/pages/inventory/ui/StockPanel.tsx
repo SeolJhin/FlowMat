@@ -14,6 +14,7 @@ import { ReorderList } from './ReorderList'
 import { StockImportPanel } from './StockImportPanel'
 import { FefoIssuePanel } from './FefoIssuePanel'
 import { OpenOrderNeeds } from './OpenOrderNeeds'
+import { ReceivedLotChecks } from './ReceivedLotChecks'
 import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { InventoryDto, ItemDto } from '../../../shared/types/api'
@@ -68,6 +69,8 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
   const [editing, setEditing] = useState<InventoryDto | null>(null)
   const [historyFor, setHistoryFor] = useState<string | null>(null)
   const [form, setForm] = useState<StockForm>(EMPTY_FORM)
+  // The LOT stock was just added for, so its receipt checks can be recorded right away.
+  const [received, setReceived] = useState<{ lotId: string; lotNo: string; itemId: string } | null>(null)
   const transactionsQuery = useInventoryTransactionsQuery(historyFor)
 
   const inventories = inventoriesQuery.data ?? []
@@ -120,7 +123,8 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
           expectedVersion: editing.version ?? undefined,
         })
       } else {
-        await createMutation.mutateAsync(payload)
+        const created = await createMutation.mutateAsync(payload)
+        setReceived(created.lotId ? { lotId: created.lotId, lotNo: created.lotNo ?? created.lotId, itemId: created.itemId } : null)
       }
       resetForm()
     } catch {
@@ -157,8 +161,9 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
   const available = form.quantity === '' ? null : Number(form.quantity) - reserved
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>
-      <section>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 340px', gap: 24, alignItems: 'start' }}>
+      {/* Wide tables scroll inside this column instead of pushing the Add Stock form out of the page. */}
+      <section style={{ minWidth: 0, overflowX: 'auto' }}>
         <LocationOptions projectId={projectId} />
         <ReorderList projectId={projectId} />
         <OpenOrderNeeds projectId={projectId} />
@@ -514,6 +519,10 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
             </button>
           )}
         </form>
+        {received && !editing && (
+          <ReceivedLotChecks key={received.lotId} projectId={projectId} lot={received}
+            itemLabel={(itemId) => itemLabel.get(itemId) ?? itemId} stock={inventories} onClose={() => setReceived(null)} />
+        )}
       </section>
     </div>
   )

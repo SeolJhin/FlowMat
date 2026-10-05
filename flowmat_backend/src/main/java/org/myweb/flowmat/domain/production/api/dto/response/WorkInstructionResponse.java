@@ -29,7 +29,10 @@ public record WorkInstructionResponse(
         String text,
         boolean required,
         boolean recordsValue,
-        String valueLabel
+        String valueLabel,
+        /** Limits for the recorded value; null when there are none. */
+        java.math.BigDecimal valueMin,
+        java.math.BigDecimal valueMax
     ) {
     }
 }

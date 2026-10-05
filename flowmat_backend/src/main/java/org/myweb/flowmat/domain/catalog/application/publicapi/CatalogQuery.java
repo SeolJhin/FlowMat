@@ -1,0 +1,55 @@
+package org.myweb.flowmat.domain.catalog.application.publicapi;
+
+import java.time.OffsetDateTime;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
+
+/**
+ * Catalog reads for other bounded contexts, which use this instead of the catalog repositories
+ * (docs/architecture/adr/ADR-002-module-dependency.md). Add an operation only when a caller needs it.
+ */
+public interface CatalogQuery {
+
+    /** The item if it exists, is not deleted and belongs to the project. */
+    Optional<CatalogItemView> findProjectItem(String projectId, String itemId);
+
+    /**
+     * The item if it exists and is not deleted, whatever its project; for callers that answer "no such item" and
+     * "item of another project" differently.
+     */
+    Optional<CatalogItemView> findActiveItem(String itemId);
+
+    /** Whether a unit with this code exists, ignoring case. */
+    boolean isKnownUnitCode(String unitCode);
+
+    /** Items by id, deleted ones included so old references still show a code; ids that do not exist are left out. */
+    Map<String, CatalogItemView> findItems(Collection<String> itemIds);
+
+    /** The project's items that are not deleted, oldest first. */
+    List<CatalogItemView> findProjectItems(String projectId);
+
+    /** The equipment if it exists, is not deleted and belongs to the project. */
+    Optional<CatalogEquipmentView> findProjectEquipment(String projectId, String equipmentId);
+
+    /** The project's equipment that is not deleted, newest first. */
+    List<CatalogEquipmentView> findProjectEquipments(String projectId);
+
+    /**
+     * The equipment's working time in [from, to), with no access check (callers check it); empty when the equipment is
+     * gone. The caller keeps the window at most 366 days long.
+     */
+    Optional<EquipmentWindow> equipmentWindow(String equipmentId, OffsetDateTime from, OffsetDateTime to);
+
+    /**
+     * The earliest stretch from {@code from} that holds {@code seconds} of the equipment's available time: its shifts less
+     * holidays and downtime, or all the time without a calendar (docs/domain/equipment-schedule.md "계획 기간 제안").
+     * Empty when the equipment is gone or the 366 days from {@code from} do not hold that much.
+     */
+    Optional<EquipmentSlot> earliestSlot(String equipmentId, OffsetDateTime from, long seconds);
+
+    /** Minutes to change the equipment over from one item to the next, when a changeover rule applies. */
+    OptionalInt changeoverMinutes(String equipmentId, String fromItemId, String toItemId);
+}

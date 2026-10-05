@@ -59,11 +59,12 @@ export function useStorageLocationsQuery(projectId: string) {
 /** Adding, changing, switching off, deleting and adopting places; each refreshes the list. */
 export function useStorageLocationMutations(projectId: string) {
   const queryClient = useQueryClient()
-  const onSuccess = async () => {
-    // A first load still in flight may have read the list before this change; TanStack would fold the refetch into it.
-    await queryClient.cancelQueries({ queryKey: storageLocationsKey(projectId) })
-    void queryClient.invalidateQueries({ queryKey: storageLocationsKey(projectId) })
+  const refresh = async (queryKeys: readonly (readonly unknown[])[]) => {
+    // Cancel reads started before the change before refetching, including stock and tasks moved by a rename.
+    await Promise.all(queryKeys.map((queryKey) => queryClient.cancelQueries({ queryKey })))
+    await Promise.all(queryKeys.map((queryKey) => queryClient.invalidateQueries({ queryKey })))
   }
+  const onSuccess = () => refresh([storageLocationsKey(projectId)])
   const create = useMutation({
     mutationFn: async (input: StorageLocationCreateInput) =>
       unwrapApiResponse(await httpClient.post<ApiEnvelope<StorageLocationDto>>('/storage-locations', input)),
@@ -74,7 +75,9 @@ export function useStorageLocationMutations(projectId: string) {
       unwrapApiResponse(
         await httpClient.put<ApiEnvelope<StorageLocationDto>>(`/storage-locations/${encodeURIComponent(locationId)}`, input),
       ),
-    onSuccess,
+    onSuccess: () => refresh([
+      storageLocationsKey(projectId), ['inventories', projectId], ['warehouse-tasks', projectId], ['inventory-transactions'],
+    ]),
   })
   const toggle = useMutation({
     mutationFn: async ({ locationId, active }: { locationId: string; active: boolean }) =>

@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
-import { newRequestId } from '../../../shared/lib/requestId'
+import { createStockCommand } from './stockCommand'
 import type { ApiEnvelope, FefoIssueDto } from '../../../shared/types/api'
 
 export interface FefoIssueInput {
@@ -16,11 +17,13 @@ export interface FefoIssueInput {
 /** Issues or reserves an item's stock from its LOTs, first-expiring first; one movement per stock record, all or nothing. */
 export function useFefoIssueMutation(projectId: string) {
   const queryClient = useQueryClient()
+  const [command] = useState(() => createStockCommand<FefoIssueInput & { projectId: string }, FefoIssueDto>(
+    async (input) => unwrapApiResponse(
+      await httpClient.post<ApiEnvelope<FefoIssueDto>>('/inventories/issue-fefo', input),
+    ),
+  ))
   return useMutation({
-    mutationFn: async (input: FefoIssueInput) =>
-      unwrapApiResponse(
-        await httpClient.post<ApiEnvelope<FefoIssueDto>>('/inventories/issue-fefo', { projectId, ...input, requestId: newRequestId() }),
-      ),
+    mutationFn: (input: FefoIssueInput) => command({ ...input, projectId }),
     onSuccess: () => {
       // Records, LOT totals, the ledger and the alerts all read the stock that moved.
       void queryClient.invalidateQueries({ queryKey: ['inventories', projectId] })

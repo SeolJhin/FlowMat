@@ -8,10 +8,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomCostRollupResponse;
@@ -20,10 +18,8 @@ import org.myweb.flowmat.domain.bom.domain.entity.BomLine;
 import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
 import org.myweb.flowmat.domain.bom.repository.BomLineRepository;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
-import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.domain.entity.UnitMaster;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
-import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
@@ -46,8 +42,7 @@ public class BomCostRollupService {
 
     private final BomHeaderRepository bomHeaderRepository;
     private final BomLineRepository bomLineRepository;
-    private final ItemRepository itemRepository;
-    private final UnitMasterRepository unitMasterRepository;
+    private final CatalogQuery catalogQuery;
     private final UnitConverter unitConverter;
     private final ProjectAccessService projectAccessService;
 
@@ -76,22 +71,18 @@ public class BomCostRollupService {
             .collect(Collectors.groupingBy(line -> itemByBom.get(line.getBomId())));
         Set<String> itemIds = new HashSet<>(approved.keySet());
         linesByItem.values().forEach(lines -> lines.forEach(line -> itemIds.add(line.getChildItemId())));
-        Map<String, Item> items = itemRepository.findAllById(itemIds).stream()
-            .collect(Collectors.toMap(Item::getItemId, Function.identity()));
-        Map<String, String> units = unitMasterRepository.findAllById(items.values().stream()
-                .map(Item::getUnitId).filter(Objects::nonNull).distinct().toList()).stream()
-            .collect(Collectors.toMap(UnitMaster::getUnitId, UnitMaster::getUnitCode));
+        Map<String, CatalogItemView> items = catalogQuery.findItems(itemIds);
         Map<String, List<String>> tree = new HashMap<>();
         linesByItem.forEach((item, lines) -> tree.put(item, lines.stream().map(BomLine::getChildItemId).toList()));
 
         Map<String, Cost> known = new HashMap<>();
         List<BomCostRollupResponse.Line> result = new ArrayList<>();
         for (Map.Entry<String, BomHeader> entry : approved.entrySet()) {
-            Item item = items.get(entry.getKey());
+            CatalogItemView item = items.get(entry.getKey());
             Cost cost = cost(entry.getKey(), approved, linesByItem, items, known, new HashSet<>());
-            BigDecimal current = item == null || item.getUnitCost() == null || item.getUnitCost().signum() <= 0 ? null : item.getUnitCost();
-            result.add(new BomCostRollupResponse.Line(entry.getKey(), code(items, entry.getKey()), item == null ? null : item.getItemName(),
-                item == null || item.getUnitId() == null ? null : units.get(item.getUnitId()), entry.getValue().getBomId(),
+            BigDecimal current = unitCost(item);
+            result.add(new BomCostRollupResponse.Line(entry.getKey(), code(items, entry.getKey()), item == null ? null : item.itemName(),
+                item == null ? null : item.unitCode(), entry.getValue().getBomId(),
                 entry.getValue().getBomVersion(), BomTree.depth(entry.getKey(), tree), cost.value().setScale(SCALE, RoundingMode.HALF_UP),
                 cost.complete(), List.copyOf(cost.missing()), cost.problems(), current));
         }
@@ -105,7 +96,7 @@ public class BomCostRollupService {
         String itemId,
         Map<String, BomHeader> approved,
         Map<String, List<BomLine>> linesByItem,
-        Map<String, Item> items,
+        Map<String, CatalogItemView> items,
         Map<String, Cost> known,
         Set<String> path
     ) {
@@ -122,7 +113,7 @@ public class BomCostRollupService {
             String child = line.getChildItemId();
             BigDecimal rate;
             try {
-                rate = BomTree.perProductUnit(unitConverter, header, line, items.get(child), items.get(itemId));
+                rate = BomTree.perProductUnit(unitConverter, header, line, unitId(items, child), unitId(items, itemId));
             } catch (BusinessException e) {
                 problems.add(code(items, itemId) + " v" + header.getBomVersion() + ", material " + code(items, child) + ": " + e.getMessage());
                 continue;
@@ -134,9 +125,7 @@ public class BomCostRollupService {
                 missing.addAll(below.missing());
                 problems.addAll(below.problems());
             } else {
-                Item material = items.get(child);
-                BigDecimal unitCost = material == null || material.getUnitCost() == null || material.getUnitCost().signum() <= 0
-                    ? null : material.getUnitCost();
+                BigDecimal unitCost = unitCost(items.get(child));
                 if (unitCost == null) {
                     missing.add(code(items, child));
                 } else {
@@ -150,8 +139,18 @@ public class BomCostRollupService {
         return cost;
     }
 
-    private static String code(Map<String, Item> items, String itemId) {
-        Item item = items.get(itemId);
-        return item == null ? itemId : item.getItemCode();
+    private static String code(Map<String, CatalogItemView> items, String itemId) {
+        CatalogItemView item = items.get(itemId);
+        return item == null ? itemId : item.itemCode();
+    }
+
+    private static String unitId(Map<String, CatalogItemView> items, String itemId) {
+        CatalogItemView item = items.get(itemId);
+        return item == null ? null : item.unitId();
+    }
+
+    /** The stored unit cost when it is above zero; zero or none means not known. */
+    private static BigDecimal unitCost(CatalogItemView item) {
+        return item == null || item.unitCost() == null || item.unitCost().signum() <= 0 ? null : item.unitCost();
     }
 }

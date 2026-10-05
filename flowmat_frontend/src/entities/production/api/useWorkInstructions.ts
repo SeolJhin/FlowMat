@@ -11,6 +11,9 @@ export interface WorkInstructionStepDto {
   recordsValue: boolean
   /** What the value is, such as "Oven °C". */
   valueLabel: string | null
+  /** Limits for the value (docs/domain/work-instruction.md R7); null when there are none. */
+  valueMin: number | null
+  valueMax: number | null
 }
 
 /** One revision of a product's work instruction (docs/domain/work-instruction.md). */
@@ -39,10 +42,22 @@ export interface RunInstructionDto {
   /** The run can still be confirmed (pending or running). */
   open: boolean
   instruction: WorkInstructionDto | null
-  checks: { stepId: string; value: string | null; note: string | null; checkedBy: string; checkedAt: string }[]
+  /** {@code outOfLimits}: the value lies outside the step's limits; it is recorded all the same. */
+  checks: { stepId: string; value: string | null; note: string | null; checkedBy: string; checkedAt: string; outOfLimits: boolean }[]
   requiredSteps: number
   requiredDone: number
   complete: boolean
+  /** Confirmations that were undone, the earliest undo first (docs/domain/work-instruction.md R6). */
+  undone: {
+    stepId: string
+    stepNo: number
+    value: string | null
+    note: string | null
+    checkedBy: string
+    checkedAt: string
+    undoneBy: string
+    undoneAt: string
+  }[]
 }
 
 export interface WorkInstructionTextInput {
@@ -57,6 +72,8 @@ export interface WorkInstructionStepInput {
   required: boolean
   recordsValue: boolean
   valueLabel: string | null
+  valueMin?: number
+  valueMax?: number
 }
 
 const listKey = (projectId: string) => ['work-instructions', projectId]

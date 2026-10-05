@@ -1,289 +1,102 @@
-# FlowMat Execution Model
-
-## 1. 목적
-
-FlowMat의 캔버스는 단순 그림 편집기가 아닙니다.
-사용자가 만든 그래프를 실제 실행 가능한 공정 정의로 연결하는 것이 목표입니다.
-
-동시에 UI 편집 상태와 비즈니스 실행 상태를 섞지 않습니다.
-
----
-
-## 2. 4개 레이어
-
-### Layer A — Editor Document
-
-UI 표현 전용입니다.
-
-현재 관련 모델:
-
-- `WorkflowEditorDocument`
-- `WorkflowEditorElement`
-- Canvas Annotation
-- frontend `lib/flowmat-editor`
-
-책임:
-
-- 좌표
-- 크기
-- 회전
-- 스타일
-- 선택 상태
-- 커넥터 표현
-- 에디터 직렬화
-
-비즈니스 재고를 직접 변경하지 않습니다.
-
-### Layer B — Process Definition
-
-공정의 의미를 정의합니다.
-
-현재 관련 모델:
-
-- `Workflow`
-- `WorkflowRevision`
-- `Process`
-- `ProcessConnection`
-- `ProcessIo`
-- `FlowRule`
-
-예:
-
-```
-[원료 투입]
-   |
-   v
-[혼합]
- input: water 10 L
- input: powder 2 kg
- output: mixture 11.8 kg
-   |
-   v
-[충진]
-```
-
-여기서 수량은 '설계상 기대값'이며 실제 재고 트랜잭션이 아닙니다.
-
-### Layer C — Planning
-
-무엇을 언제 얼마만큼 실행할지를 정합니다.
-
-현재 관련 모델:
-
-- `BomHeader`
-- `BomLine`
-- `WorkOrder`
-
-BOM은 자재 요구량을 정의하고,
-WorkOrder는 특정 Workflow/BOM/Target Item을 실제 실행 의도로 바꿉니다.
-
-### Layer D — Execution
-
-실제 발생한 사건을 기록합니다.
-
-현재 관련 모델:
-
-- `ProductionRun`
-- `ProductionRunItem`
-- `RunStateSnapshot`
-- `InventoryTransaction`
-- `LotTrace`
-
-실제 투입과 산출은 이 레이어에서만 재고에 반영합니다.
-
----
-
-## 3. Definition과 Instance
-
-### Definition
-
-```
-Workflow
- ├─ Revision
- ├─ Process A
- │   ├─ INPUT
- │   └─ OUTPUT
- ├─ Process B
- └─ Connections
-```
-
-### Instance
-
-```
-WorkOrder
- └─ ProductionRun
-     ├─ Run Item: material A -10
-     ├─ Run Item: material B -5
-     ├─ Snapshot: Process A completed
-     └─ Run Item: product C +12
-```
-
-Definition은 수정될 수 있지만,
-이미 시작된 실행은 시작 당시의 중요한 계획값을 snapshot으로 고정해야 합니다.
-
-BOM은 현재 계약대로 run 시작 시 revision과 base quantity를 고정합니다.
-
-향후 Workflow에도 같은 원칙을 적용합니다.
-
-### 권장 확장
-
-실행 중 Workflow definition의 변경 영향을 차단하려면
-ProductionRun에 다음 중 하나가 필요합니다.
-
-- `workflow_revision_id`
-- 또는 실행 시점의 canonical definition snapshot
-
-어느 방법을 쓸지는 별도 계약에서 확정합니다.
-
----
-
-## 4. Process IO
-
-현재 `ProcessIo`는 다음을 갖습니다.
-
-- processId
-- itemId
-- ioName
-- direction
-- ioType
-- quantity
-- unit
-- formula
-- requiredYn
-- allowShortageYn
-
-이 모델은 FlowMat의 핵심 중 하나입니다.
-
-ProcessIo는 "이 공정이 무엇을 기대하는가"를 정의합니다.
-
-예:
-
-```
-Process: Pasteurization
-
-INPUT
-- raw_milk: 100 L
-- electricity: formula
-
-OUTPUT
-- pasteurized_milk: 98 L
-- waste_water: 2 L
-```
-
-### Item과 Resource
-
-모든 IO를 재고 품목으로 강제하지 않습니다.
-
-- MATERIAL: 실제 재고 추적 가능
-- PRODUCT: 실제 재고 추적 가능
-- ENERGY: 소비량 기록 중심
-- WATER: 재고 또는 계측량
-- FILE: 논리적 artifact
-- DATA: 논리적 artifact
-- WASTE: 산출 자원
-
-현재 `Item.resourceCategory`, `resourceType`을 이 방향의 기준정보로 사용할 수 있습니다.
-
-별도 `Resource` 엔티티를 만들기 전에
-기존 Item 모델로 표현할 수 없는 요구가 실제로 발생하는지 검증합니다.
-
----
-
-## 5. Resource Flow
-
-### 설계 흐름
-
-```
-Process A OUTPUT
-      |
-      | ProcessConnection
-      v
-Process B INPUT
-```
-
-### 실행 흐름
-
-```
-ProductionRunItem
-      |
-      v
-InventoryTransaction / usage record
-      |
-      v
-LOT genealogy / history
-```
-
-Connection 자체가 재고 이동을 의미하지 않습니다.
-Connection은 의미적/논리적 경로이고,
-실제 수량 변화는 실행 이벤트로 발생해야 합니다.
-
----
-
-## 6. 상태
-
-공정 시스템에서 가장 피해야 하는 것은 상태를 문자열 여러 곳에서 임의로 바꾸는 것입니다.
-
-### 설계 상태
-
-- WorkflowStatus
-- ProcessStatus
-
-### 계획 상태
-
-- WorkOrderStatus
-- BomStatus
-- ApprovalStatus
-
-### 실행 상태
-
-- RunStatus
-- InventoryStatus
-- LotStatus
-
-서로 다른 상태 머신을 하나의 범용 `status` enum으로 합치지 않습니다.
-
-향후 상태 전이는 service/application layer에서만 수행하고
-controller나 frontend가 다음 상태를 임의 계산하지 않는 방향을 유지합니다.
-
----
+# 실행 모델
+
+> **현행 문서** · 최종 확인 2026-10-02(코드 `45f5df0` + 작업 트리) · 정의·실행 모델이나 상태가 바뀌면 같은 변경에서 고친다.
+> 이전 판(2026-09-24): [archive/2026-09-architecture/execution-model.md](../archive/2026-09-architecture/execution-model.md)
+
+공정 정의가 계획과 실행 기록으로 이어지는 방식, 각 모델의 상태, 실행이 재고에 남기는 부수효과를 정리한다. 포트 계약은 [ADR-003](adr/ADR-003-resource-port-contract.md)과 [포트·연결 계약](../domain/process-port-connection-contract.md), 재고 규칙은 [재고·BOM·LOT 계약](../domain/inventory-bom-lot-contract.md)이 우선한다.
+
+## 1. 네 계층
+
+| 계층 | 묻는 것 | 모델(context) |
+|---|---|---|
+| 편집 문서 | 화면에 무엇을 그렸는가 | 도형 편집 문서·주석(`workflow.editor`, `workflow.annotation`). 공정 노드·연결은 아래 정의 계층과 같은 데이터다 |
+| 정의 | 무엇을 어떻게 해야 하는가 | Workflow, Process, ProcessIo(포트), ProcessConnection, FlowRule, 발행 WorkflowRevision(`workflow`, `rule`) |
+| 계획 | 언제, 얼마나, 무엇으로 할 것인가 | WorkOrder, BOM, 재고 할당, 준비 점검, 설비 달력·부하, 간이 MRP(`production`, `bom`, `catalog`) |
+| 실행 기록 | 실제로 무엇이 일어났는가 | FlowRun·Step·Attempt·Event(`flowrun`), ProductionRun·RunItem·RunStateSnapshot·보정 전표(`production`), InventoryTransaction·LotTrace(`inventory`), 검사·불량(`quality`) |
+
+정의는 고칠 수 있지만, 실행은 시작할 때의 정의를 고정한다(§2).
+
+## 2. 정의 → 발행 revision → 실행
+
+1. 워크플로를 편집한다. 검증 API(`GET /workflows/{id}/validation`)가 오류와 경고를 알려 준다.
+2. 발행(`POST /workflows/{id}/revisions`)하면 공정·포트·연결이 revision 스냅샷으로 고정된다. 오류가 있으면 409로 막히고 경고만 있으면 발행된다.
+3. 실행은 발행 revision을 고정한다.
+   - 생산 실행은 `production_run.workflow_revision_id`(V21)에 고정한다.
+   - Flow Run도 시작 때 revision을 고정한다.
+4. BOM은 생산 실행 시작 때 revision과 기준 수량을 고정한다(재고·BOM·LOT 계약).
+5. 폐기(retired)된 revision으로는 새 실행을 시작하지 않는다.
+
+## 3. 포트의 세 층 (ADR-003)
+
+| 층 | 질문 | 어디에 |
+|---|---|---|
+| 정의 | 무엇이 들어와야 하는가 | `ProcessIo`: `resourceType`, `schemaJson`, `validationRule`, 선택적 `itemId` |
+| 실행 | 실제로 무엇이 들어왔는가 | `FlowRunStep.inputSnapshot`·`outputSnapshot` |
+| 부수효과 | 현실에서 무엇이 바뀌는가 | 도메인 쪽: 생산 실행의 투입·산출이 재고 거래와 LOT 계보를 만든다 |
+
+포트의 Item은 선택이다(V42, 2026-10-03). 데이터·파일·API 포트는 Item 없이 `schemaJson`으로 계약한다. Item 없는 포트로는 생산 실행의 투입·산출을 기록할 수 없다(400). `quantity`·`unit`은 아직 모든 포트에 필수다.
+
+## 4. 상태
+
+| 모델 | 상태와 흐름 | 비고 |
+|---|---|---|
+| WorkflowRevision | published → retired | 발행본은 바뀌지 않는다 |
+| WorkOrder | draft → approved → in_progress → completed / cancelled | 완료·취소 시 남은 할당은 자동 반환 |
+| BOM | draft → pending_approval → approved → retired | 실행·계획은 승인본만 쓴다 |
+| ProductionRun | pending → running → finished | 끝난 실행은 고치지 않고 보정 전표로 바로잡는다(V22) |
+| FlowRun | running → finished / failed / cancelled | 끝나면 진행 중 단계는 failed 또는 cancelled가 된다 |
+| FlowRunStep | planned → running → completed / failed / skipped / cancelled | 시도(Attempt)는 running → completed / failed |
+| LOT | available / reserved / quarantined / consumed / closed | 재고 행에서 다시 계산한다. 커밋 뒤 잠금 아래 한 번 더 맞춘다 |
+
+## 5. Flow Run
+
+- 시작: `POST /flow-runs`(수동), `POST /flow-runs/graph`(발행 revision의 그래프). 순환이 있는 그래프는 실행을 거절한다.
+- 단계는 스스로 실행되지 않는다. 외부(사용자나 API 호출자)가 `start`·`complete`·`fail`·`retry`로 결과를 보고한다.
+- Flow Run은 결과를 받으면 다음을 한다.
+  - 포트 스키마와 `validationRule`로 검사한다.
+  - 연결 조건·용량으로 다음 단계를 고르고, 출처 단계를 기록한다(V40).
+  - 완료 전에는 `preview`로 경로를 미리 볼 수 있다.
+- 실패 정책은 연결마다 stop·skip·retry 중 하나다. retry는 즉시 최대 3회 다시 시도한다.
+- 아직 없는 것
+  - 노드 자동 실행기
+  - 시간 제한
+  - 재시도 간격
+  - 동시 실행 제한
+  - 여러 연결의 합류와 수량 분할
+  - 이 항목들은 [결정 인계](decision-handoff.md) §3에서 보류 중이다. 시간 제한·재시도 간격·동시 실행 제한은 [ADR-004](adr/ADR-004-flow-run-execution-policy.md) 초안(**Proposed**, 2026-10-03)이 있고, 수용 기준이 닫히기 전에는 구현하지 않는다.
+- 범용성: 비제조 흐름으로 검증될 때까지 목표로 취급한다(ADR-003 결정 8·9). 결정 9-(a)의 통합 테스트(`DataFlowRunIntegrationTest`, File → Transform → Data)는 2026-10-03에 통과했고, "검증됨"으로 바꿀지는 사용자 결정 대기다.
+
+## 6. 생산 실행과 Flow Run의 연결
+
+- 발행 revision이 있는 생산 실행은 같은 트랜잭션에서 연결된 Flow Run을 만든다.
+  - 생산 실행이 시작되면 Flow Run이 running으로 시작한다.
+  - 생산 실행이 끝나면 Flow Run은 finished가 되고, 실제 산출량이 기록된다.
+- 연결은 `flow_run.production_run_id`이다. production은 `FlowRunCommand`(flowrun 공개 API)만 호출하고, Flow Run 저장 구현은 모른다(ADR-002).
+- revision이 없는 생산 실행에는 Flow Run이 없다.
+- 공용 실행 종류가 생기기 전의 옛 실행은 연결 없이 끝낼 수 있다.
 
 ## 7. 시뮬레이션과 실제 실행
 
-FlowMat에는 시뮬레이션과 실제 생산이 모두 존재할 수 있습니다.
+| 실행 종류(`runType`) | 재고·LOT 변경 | 실행 기록 |
+|---|---|---|
+| `actual` | 있음 | 있음 |
+| `simulation`, `test`, `dry_run` | 없음(`ProductionRun.affectsPhysicalState()`가 false) | 있음 |
 
-두 경우 모두 동일 Definition을 사용할 수 있지만 side effect가 다릅니다.
+같은 정의를 쓰고 부수효과만 다르다. 새 실행 API도 이 구분을 따른다.
 
-### Simulation
+## 8. 재고 부수효과의 규칙
 
-- 실제 Inventory 변경 없음
-- 예상 시간 계산
-- 예상 소비량
-- 병목/부족 확인
-- 결과 snapshot 저장 가능
+- 재고는 `InventoryTransaction`으로만 바뀐다. 입고, 출고, 생산 투입·산출, 예약·해제, 조정, 역분개, 격리·해제, 이동 출·입이 모두 같은 원장에 남는다.
+- 클라이언트가 보낸 멱등 키는 프로젝트 안에서 유일하다(V17). 같은 명령을 다시 보내도 두 번 반영되지 않는다.
+- 거래는 지우지 않고 역분개한다. 끝난 생산 실행은 보정 전표로 바로잡는다.
+- 투입·산출은 LOT 계보(LotTrace)를 남긴다.
 
-### Execution
+## 9. 새 실행 기능을 만들기 전에
 
-- 실제 InventoryTransaction 발생
-- LOT trace 발생
-- 감사 이력 필수
-- 멱등성 필수
-
-따라서 향후 실행 API에는 실행 모드가 명확해야 합니다.
-기존 `RunType`을 우선 검토하고, 중복 모델을 만들지 않습니다.
-
----
-
-## 8. 구현 전 체크리스트
-
-신규 기능은 다음을 먼저 정의합니다.
-
-- [ ] Definition인가 Execution인가
-- [ ] project boundary가 있는가
-- [ ] immutable snapshot이 필요한가
-- [ ] inventory side effect가 있는가
-- [ ] idempotency가 필요한가
-- [ ] LOT genealogy에 영향을 주는가
-- [ ] ProcessIo와 연결되는가
-- [ ] simulation에서도 사용할 수 있는가
-- [ ] audit/history가 필요한가
-- [ ] 기존 domain service로 처리할 수 없는 이유가 있는가
+- 정의, 계획, 실행 기록 중 어느 것인가?
+- 시작할 때 고정해야 하는 값(revision, BOM, 지침)이 있는가?
+- 재고 부수효과가 있는가? 있다면 시뮬레이션에서는 막히는가?
+- 멱등 키가 필요한가?
+- LOT 계보에 영향을 주는가?
+- 포트(ProcessIo)나 Flow Run 단계와 연결되는가?
+- 감사 이력이 필요한가? 실행 기록은 고치지 않고 이벤트나 보정으로 남긴다.

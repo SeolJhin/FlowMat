@@ -10,7 +10,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
@@ -99,7 +108,13 @@ class StorageLocationIntegrationTest extends IntegrationTestSupport {
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.message").value(containsString("still holds stock")));
         call(delete("/storage-locations/" + warehouse)).andExpect(status().isConflict());
-        call(put("/storage-locations/" + warehouse), "{\"locationCode\":\"WH-9\"}").andExpect(status().isConflict());
+        // A place holding stock takes a new code and its record follows (L7); the old code takes no new stock.
+        call(put("/storage-locations/" + warehouse), "{\"locationCode\":\"WH-9\"}").andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.stockRecords").value(1));
+        call(get("/inventories/" + listed)).andExpect(jsonPath("$.data.location").value("WH-9"));
+        call(post("/inventories"), stock(project, item, "WH-2", "1")).andExpect(status().isBadRequest());
+        call(put("/storage-locations/" + warehouse), "{\"locationCode\":\"WH-2\"}").andExpect(status().isOk());
+        call(get("/inventories/" + listed)).andExpect(jsonPath("$.data.location").value("WH-2"));
 
         transfer(listed, "loose-shelf", "5").andExpect(status().isOk());
         call(put("/storage-locations/" + warehouse), "{\"active\":false}")
@@ -115,6 +130,75 @@ class StorageLocationIntegrationTest extends IntegrationTestSupport {
         call(delete("/storage-locations/" + warehouse)).andExpect(status().isOk());
         call(get("/storage-locations").param("projectId", project))
             .andExpect(jsonPath("$.data.length()").value(1));
+    }
+
+    @Test
+    void aRenameTakesTheTasksAlongAndStopsAtACodeOtherRecordsUse() throws Exception {
+        String project = project();
+        String item = item(project);
+        // Free text from before the list.
+        call(post("/inventories"), stock(project, item, "attic", "2")).andExpect(status().isOk());
+        String dock = create(project, "DOCK-1", "warehouse", null).path("locationId").asText();
+        String shelf = create(project, "SHELF-1", "warehouse", null).path("locationId").asText();
+        String record = data(call(post("/inventories"), stock(project, item, "dock-1", "5"))).path("inventoryId").asText();
+        String task = data(call(post("/warehouse-tasks"), "{\"projectId\":\"" + project + "\",\"taskType\":\"putaway\",\"inventoryId\":\""
+            + record + "\",\"quantity\":3,\"toLocation\":\"SHELF-1\"}")).path("taskId").asText();
+
+        call(put("/storage-locations/" + dock), "{\"locationCode\":\"DOCK-A\"}").andExpect(status().isOk());
+        call(put("/storage-locations/" + shelf), "{\"locationCode\":\"SHELF-A\"}").andExpect(status().isOk());
+        call(get("/inventories/" + record)).andExpect(jsonPath("$.data.location").value("DOCK-A"));
+        call(get("/warehouse-tasks").param("projectId", project).param("status", "open"))
+            .andExpect(jsonPath("$.data[?(@.taskId == '" + task + "')].fromLocation").value(org.hamcrest.Matchers.hasItem("DOCK-A")))
+            .andExpect(jsonPath("$.data[?(@.taskId == '" + task + "')].toLocation").value(org.hamcrest.Matchers.hasItem("SHELF-A")));
+        // The task still does its move, to the place under its new code.
+        call(post("/warehouse-tasks/" + task + "/complete"), "{}").andExpect(status().isOk());
+
+        call(put("/storage-locations/" + dock), "{\"locationCode\":\"attic\"}")
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.message").value(containsString("1 stock record already uses attic")));
+    }
+
+    @Test
+    void aRenameAndNewStockAtTheOldCodeTakeTurns() throws Exception {
+        String project = project();
+        String item = item(project);
+        String bin = create(project, "BIN-0", "bin", null).path("locationId").asText();
+        call(post("/inventories"), stock(project, item, "BIN-0", "1")).andExpect(status().isOk());
+        for (int round = 1; round <= 3; round++) {
+            String previous = "BIN-" + (round - 1);
+            String next = "BIN-" + round;
+            List<Integer> statuses = together(
+                () -> call(put("/storage-locations/" + bin), "{\"locationCode\":\"" + next + "\"}"),
+                () -> call(post("/inventories"), stock(project, item, previous, "1")));
+            // The rename always goes through; new stock either came first and moved along, or found the old code gone.
+            Assertions.assertEquals(200, statuses.get(0));
+            Assertions.assertTrue(statuses.get(1) == 200 || statuses.get(1) == 400, "stock: " + statuses.get(1));
+            call(get("/inventories").param("projectId", project))
+                .andExpect(jsonPath("$.data[?(@.location == '" + previous + "')]").isEmpty());
+        }
+    }
+
+    /** Runs the calls at the same moment and returns their HTTP statuses in order. */
+    private List<Integer> together(Callable<ResultActions> first, Callable<ResultActions> second) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<Integer>> results = new ArrayList<>();
+            for (Callable<ResultActions> call : List.of(first, second)) {
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return call.call().andReturn().getResponse().getStatus();
+                }));
+            }
+            start.countDown();
+            List<Integer> statuses = new ArrayList<>();
+            for (Future<Integer> result : results) {
+                statuses.add(result.get(30, TimeUnit.SECONDS));
+            }
+            return statuses;
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     private JsonNode create(String project, String code, String type, String parent) throws Exception {

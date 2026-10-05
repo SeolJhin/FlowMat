@@ -112,13 +112,23 @@ const BOM_LINE_COLUMNS: Record<string, keyof BomLineImportRowDto> = {
   unit: 'unit',
   unit_code: 'unit',
   note: 'note',
+  type: 'lineType',
+  line_type: 'lineType',
+  kind: 'lineType',
 }
 
-/** A draft's material lines from CSV text: item_code, quantity and unit columns by name, in any order. */
+/**
+ * A draft's lines from CSV text: item_code, quantity and unit columns by name, in any order; an optional type column says
+ * material (blank), by_product or waste.
+ */
 export function bomLinesFromCsv(text: string): { ok: true; rows: BomLineImportRowDto[] } | { ok: false; error: string } {
   const [header, ...data] = parseCsv(text)
   if (!header) return { ok: false, error: 'The file is empty.' }
   const fields = header.map((name) => BOM_LINE_COLUMNS[name.trim().toLowerCase().replace(/[\s-]+/g, '_')] ?? null)
+  const duplicate = fields.find((field, index) => field !== null && fields.indexOf(field) !== index)
+  if (duplicate) {
+    return { ok: false, error: `Use only one ${header[fields.indexOf(duplicate)].trim()} column, including aliases.` }
+  }
   for (const [needed, label] of [['itemCode', 'item_code'], ['quantity', 'quantity'], ['unit', 'unit']] as const) {
     if (!fields.includes(needed)) return { ok: false, error: `The first line must name the columns, with a ${label} column.` }
   }

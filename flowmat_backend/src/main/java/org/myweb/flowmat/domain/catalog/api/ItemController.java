@@ -6,8 +6,10 @@ import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.api.dto.request.ItemCreateRequest;
 import org.myweb.flowmat.domain.catalog.api.dto.request.ItemImportRequest;
 import org.myweb.flowmat.domain.catalog.api.dto.request.ItemUpdateRequest;
+import org.myweb.flowmat.domain.catalog.api.dto.response.ItemCostChangeResponse;
 import org.myweb.flowmat.domain.catalog.api.dto.response.ItemImportResponse;
 import org.myweb.flowmat.domain.catalog.api.dto.response.ItemResponse;
+import org.myweb.flowmat.domain.catalog.application.ItemCostHistoryService;
 import org.myweb.flowmat.domain.catalog.application.ItemImportService;
 import org.myweb.flowmat.domain.catalog.application.ItemService;
 import org.myweb.flowmat.global.response.ApiResponse;
@@ -27,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class ItemController {
 
     private final ItemService itemService;
+    private final ItemCostHistoryService itemCostHistoryService;
     private final ItemImportService itemImportService;
 
     @GetMapping
@@ -48,6 +51,12 @@ public class ItemController {
     @GetMapping("/{itemId}")
     public ApiResponse<ItemResponse> getItem(@PathVariable("itemId") String itemId) {
         return ApiResponse.ok(itemService.getItem(itemId));
+    }
+
+    /** Each change of the item's unit cost, newest first (docs/domain/material-cost.md "단가 이력"). */
+    @GetMapping("/{itemId}/cost-history")
+    public ApiResponse<List<ItemCostChangeResponse>> costHistory(@PathVariable("itemId") String itemId) {
+        return ApiResponse.ok(itemCostHistoryService.history(itemId));
     }
 
     @PutMapping("/{itemId}")

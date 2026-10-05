@@ -9,17 +9,19 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalInt;
+import java.util.Set;
+import java.util.function.ToIntBiFunction;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
-import org.myweb.flowmat.domain.catalog.application.EquipmentChangeoverService;
 import org.myweb.flowmat.domain.catalog.application.EquipmentScheduleService;
-import org.myweb.flowmat.domain.catalog.domain.entity.Equipment;
-import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.EquipmentRepository;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogEquipmentView;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
+import org.myweb.flowmat.domain.catalog.application.publicapi.EquipmentWindow;
 import org.myweb.flowmat.domain.production.api.dto.response.EquipmentLoadResponse;
 import org.myweb.flowmat.domain.production.domain.entity.ProductionRun;
 import org.myweb.flowmat.domain.production.domain.entity.WorkOrder;
@@ -35,6 +37,7 @@ import org.springframework.stereotype.Service;
  * The equipment load board (docs/domain/equipment-load.md): per equipment, the hours its calendar leaves in a window
  * against what its draft, approved and running orders need there. An order that runs past the window counts in proportion
  * to its equipment's available time inside the window. Read only, like readiness, so it has no transaction of its own.
+ * Equipment, items, calendars and changeovers are read through {@link CatalogQuery} (ADR-002).
  */
 @Service
 @RequiredArgsConstructor
@@ -46,12 +49,9 @@ public class EquipmentLoadService {
     private static final String FINISHED_RUN = "finished";
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
-    private final EquipmentRepository equipmentRepository;
     private final WorkOrderRepository workOrderRepository;
     private final ProductionRunRepository productionRunRepository;
-    private final ItemRepository itemRepository;
-    private final EquipmentScheduleService equipmentScheduleService;
-    private final EquipmentChangeoverService equipmentChangeoverService;
+    private final CatalogQuery catalogQuery;
     private final ProjectAccessService projectAccessService;
 
     public EquipmentLoadResponse load(String projectId, String from, String to) {
@@ -72,38 +72,40 @@ public class EquipmentLoadService {
             .filter(order -> order.getEquipmentId() != null)
             .toList();
         Map<String, BigDecimal> produced = produced(orders);
-        Map<String, String> itemCodes = itemRepository.findAllById(orders.stream()
+        Map<String, String> itemCodes = new HashMap<>();
+        catalogQuery.findItems(orders.stream()
                 .map(WorkOrder::getTargetItemId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet()))
-            .stream().collect(Collectors.toMap(Item::getItemId, Item::getItemCode));
+            .values()
+            .forEach(item -> itemCodes.put(item.itemId(), item.itemCode()));
         Map<String, List<WorkOrder>> byEquipment = orders.stream().collect(Collectors.groupingBy(WorkOrder::getEquipmentId));
 
-        List<EquipmentLoadResponse.Row> rows = equipmentRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtDesc(projectId, NOT_DELETED)
-            .stream()
-            .sorted(Comparator.comparing(EquipmentLoadService::label, String.CASE_INSENSITIVE_ORDER))
-            .map(equipment -> row(equipment, byEquipment.getOrDefault(equipment.getEquipmentId(), List.of()), start, end, produced, itemCodes))
+        List<EquipmentLoadResponse.Row> rows = catalogQuery.findProjectEquipments(projectId).stream()
+            .sorted(Comparator.comparing(CatalogEquipmentView::label, String.CASE_INSENSITIVE_ORDER))
+            .map(equipment -> row(equipment, byEquipment.getOrDefault(equipment.equipmentId(), List.of()), start, end, produced, itemCodes))
             .toList();
         return new EquipmentLoadResponse(start, end, rows);
     }
 
     private EquipmentLoadResponse.Row row(
-        Equipment equipment,
+        CatalogEquipmentView equipment,
         List<WorkOrder> mine,
         OffsetDateTime from,
         OffsetDateTime to,
         Map<String, BigDecimal> produced,
         Map<String, String> itemCodes
     ) {
-        EquipmentScheduleService.Availability window = equipmentScheduleService.window(equipment, from, to);
-        BigDecimal rate = equipment.getCapacityPerHour() != null && equipment.getCapacityPerHour().signum() > 0
-            ? equipment.getCapacityPerHour()
+        EquipmentWindow window = window(equipment.equipmentId(), from, to);
+        BigDecimal rate = equipment.capacityPerHour() != null && equipment.capacityPerHour().signum() > 0
+            ? equipment.capacityPerHour()
             : null;
         BigDecimal planned = BigDecimal.ZERO;
         BigDecimal drafts = BigDecimal.ZERO;
         int unplanned = 0;
         int unmeasured = 0;
         List<EquipmentLoadResponse.Order> shown = new ArrayList<>();
+        List<WorkOrder> inWindowOrders = new ArrayList<>();
         List<WorkOrder> sorted = mine.stream()
             .sorted(Comparator.comparing(WorkOrder::getPlannedStartAt, Comparator.nullsLast(Comparator.naturalOrder())))
             .toList();
@@ -125,9 +127,9 @@ public class EquipmentLoadService {
                 ? null
                 : order.getTargetQuantity().subtract(produced.getOrDefault(order.getWorkOrderId(), BigDecimal.ZERO))
                     .max(BigDecimal.ZERO);
-            Integer changeover = changeoverMinutes(equipment, order, mine);
+            Integer changeover = changeoverMinutes(equipment.equipmentId(), order, mine);
             BigDecimal needed = neededHours(remaining, rate, changeover);
-            BigDecimal inWindow = needed == null ? null : inWindow(equipment, needed, start, end, from, to);
+            BigDecimal inWindow = needed == null ? null : inWindow(equipment.equipmentId(), needed, start, end, from, to);
             if (inWindow == null) {
                 unmeasured++;
             } else if (status == WorkOrderStatus.DRAFT) {
@@ -135,15 +137,23 @@ public class EquipmentLoadService {
             } else {
                 planned = planned.add(inWindow);
             }
+            inWindowOrders.add(order);
             shown.add(new EquipmentLoadResponse.Order(order.getWorkOrderId(), order.getWorkOrderNumber(), order.getWorkOrderTitle(),
                 order.getWorkOrderStatus(), order.getTargetItemId(), itemCodes.get(order.getTargetItemId()), start, end, remaining,
                 changeover, needed, inWindow));
         }
         BigDecimal available = window.availableHours();
         BigDecimal percent = available.signum() > 0 ? planned.multiply(HUNDRED).divide(available, 1, RoundingMode.HALF_UP) : null;
-        return new EquipmentLoadResponse.Row(equipment.getEquipmentId(), equipment.getEquipmentCode(), equipment.getEquipmentName(),
-            equipment.getEquipmentStatus(), equipment.getCapacityPerHour(), window.calendarSet(), available, window.downtimeHours(),
-            planned, drafts, percent, planned.compareTo(available) > 0, unplanned, unmeasured, shown);
+        return new EquipmentLoadResponse.Row(equipment.equipmentId(), equipment.equipmentCode(), equipment.equipmentName(),
+            equipment.equipmentStatus(), equipment.capacityPerHour(), window.calendarSet(), available, window.downtimeHours(),
+            planned, drafts, percent, planned.compareTo(available) > 0, unplanned, unmeasured, shown,
+            changeovers(equipment.equipmentId(), inWindowOrders, mine));
+    }
+
+    /** The equipment's working time in [from, to); none when it is gone since the list was read. */
+    private EquipmentWindow window(String equipmentId, OffsetDateTime from, OffsetDateTime to) {
+        return catalogQuery.equipmentWindow(equipmentId, from, to)
+            .orElse(new EquipmentWindow(false, BigDecimal.ZERO, BigDecimal.ZERO));
     }
 
     /** Production time for what is left plus the changeover; null without a quantity or a capacity per hour. */
@@ -162,7 +172,7 @@ public class EquipmentLoadService {
      * The part of {@code needed} that falls in [from, to): all of it when the order lies inside, otherwise in proportion to
      * the equipment's available time (or, when the order's own window has none, to clock time).
      */
-    private BigDecimal inWindow(Equipment equipment, BigDecimal needed, OffsetDateTime start, OffsetDateTime end,
+    private BigDecimal inWindow(String equipmentId, BigDecimal needed, OffsetDateTime start, OffsetDateTime end,
                                 OffsetDateTime from, OffsetDateTime to) {
         if (!start.isBefore(from) && !end.isAfter(to)) {
             return needed;
@@ -170,9 +180,9 @@ public class EquipmentLoadService {
         OffsetDateTime partStart = start.isBefore(from) ? from : start;
         OffsetDateTime partEnd = end.isAfter(to) ? to : end;
         if (Duration.between(start, end).compareTo(EquipmentScheduleService.LONGEST_WINDOW) <= 0) {
-            BigDecimal whole = equipmentScheduleService.window(equipment, start, end).availableHours();
+            BigDecimal whole = window(equipmentId, start, end).availableHours();
             if (whole.signum() > 0) {
-                BigDecimal part = equipmentScheduleService.window(equipment, partStart, partEnd).availableHours();
+                BigDecimal part = window(equipmentId, partStart, partEnd).availableHours();
                 return needed.multiply(part).divide(whole, 2, RoundingMode.HALF_UP);
             }
         }
@@ -185,7 +195,7 @@ public class EquipmentLoadService {
         return BigDecimal.valueOf(duration.getSeconds()).add(BigDecimal.valueOf(duration.getNano(), 9));
     }
 
-    private Integer changeoverMinutes(Equipment equipment, WorkOrder order, List<WorkOrder> mine) {
+    private Integer changeoverMinutes(String equipmentId, WorkOrder order, List<WorkOrder> mine) {
         if (order.getTargetItemId() == null) {
             return null;
         }
@@ -194,9 +204,43 @@ public class EquipmentLoadService {
         if (previous == null) {
             return null;
         }
-        return equipmentChangeoverService.changeover(equipment.getEquipmentId(), previous.getTargetItemId(), order.getTargetItemId())
-            .map(EquipmentChangeoverService.Match::minutes)
-            .orElse(null);
+        OptionalInt minutes = catalogQuery.changeoverMinutes(equipmentId, previous.getTargetItemId(), order.getTargetItemId());
+        return minutes.isPresent() ? minutes.getAsInt() : null;
+    }
+
+    /**
+     * The window's changeovers in planned order and, when another order of the same work orders changes over less, that
+     * order (docs/domain/equipment-load.md "전환 순서 제안"). Only orders with a target item take part, drafts included;
+     * running orders stay first. The item before is the one the equipment ran last before the first of them. Null with
+     * fewer than two such orders or no changeover time in the planned order.
+     */
+    private EquipmentLoadResponse.ChangeoverPlan changeovers(String equipmentId, List<WorkOrder> inWindow, List<WorkOrder> mine) {
+        List<WorkOrder> sequence = inWindow.stream().filter(order -> order.getTargetItemId() != null).toList();
+        if (sequence.size() < 2) {
+            return null;
+        }
+        Set<String> taking = sequence.stream().map(WorkOrder::getWorkOrderId).collect(Collectors.toSet());
+        WorkOrder previous = EquipmentSequence.previous(sequence.get(0).getPlannedStartAt(),
+            mine.stream().filter(order -> !taking.contains(order.getWorkOrderId())).toList());
+        Set<Integer> running = new HashSet<>();
+        for (int index = 0; index < sequence.size(); index++) {
+            if (WorkOrderServiceImpl.status(sequence.get(index)) == WorkOrderStatus.IN_PROGRESS) {
+                running.add(index);
+            }
+        }
+        Map<String, Integer> known = new HashMap<>();
+        ToIntBiFunction<String, String> minutes = (fromItem, toItem) -> known.computeIfAbsent(fromItem + "\n" + toItem, key -> {
+            OptionalInt found = catalogQuery.changeoverMinutes(equipmentId, fromItem, toItem);
+            return found.isPresent() ? found.getAsInt() : 0;
+        });
+        ChangeoverOrder.Plan plan = ChangeoverOrder.plan(sequence.stream().map(WorkOrder::getTargetItemId).toList(), running,
+            previous == null ? null : previous.getTargetItemId(), minutes);
+        if (plan.plannedMinutes() == 0) {
+            return null;
+        }
+        return new EquipmentLoadResponse.ChangeoverPlan(plan.plannedMinutes(), plan.suggestedMinutes(),
+            plan.suggestedOrder() == null ? null
+                : plan.suggestedOrder().stream().map(index -> sequence.get(index).getWorkOrderNumber()).toList());
     }
 
     /** What finished runs of each order produced, the same measure as the work order list. */
@@ -213,10 +257,6 @@ public class EquipmentLoadService {
             }
         }
         return produced;
-    }
-
-    private static String label(Equipment equipment) {
-        return equipment.getEquipmentCode() != null ? equipment.getEquipmentCode() : equipment.getEquipmentName();
     }
 
     private static OffsetDateTime dateTime(String value, String name) {

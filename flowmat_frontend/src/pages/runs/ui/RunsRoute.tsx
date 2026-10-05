@@ -5,6 +5,8 @@ import { usePublishWorkflowRevisionMutation, useWorkflowRevisionsQuery } from '.
 import { useItemsQuery } from '../../../entities/catalog/api/useItemsQuery'
 import { useProductionRunsQuery } from '../../../entities/production/api/useProductionRunsQuery'
 import { useStartProductionRunMutation } from '../../../entities/production/api/useStartProductionRunMutation'
+import { StartReadiness } from './StartReadiness'
+import { RevisionList } from './RevisionList'
 import { useWorkOrdersQuery } from '../../../entities/production/api/useWorkOrders'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { runnableWorkOrders } from '../model/workOrderActions'
@@ -247,6 +249,7 @@ export function RunsRoute() {
                 <button type="button" onClick={() => void handlePublish()} disabled={!workflowId || publishRevision.isPending}>
                   {publishRevision.isPending ? 'Publishing...' : 'Publish current workflow'}
                 </button>
+                <RevisionList workflowId={workflowId} revisions={revisions} />
                 {revisionsQuery.isError && (
                   <p style={{ color: '#dc2626', fontSize: 12, margin: 0 }}>
                     {errorMessage(revisionsQuery.error, 'Failed to load workflow revisions.')}
@@ -276,6 +279,7 @@ export function RunsRoute() {
                     <span style={{ fontSize: 11, opacity: 0.6 }}>No approved work orders for this workflow.</span>
                   )}
                 </label>
+                {form.workOrderId && <StartReadiness workOrderId={form.workOrderId} />}
                 <label style={{ display: 'grid', gap: 4 }}>
                   <span>Target item</span>
                   <select

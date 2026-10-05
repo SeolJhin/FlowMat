@@ -57,6 +57,7 @@ test('a changeover from the previous order on the equipment is added to the time
   const earlier = await order(`Earlier ${suffix}`, first.itemId, '2030-01-07T09:00:00+09:00', '2030-01-07T17:00:00+09:00')
   await call('POST', `/work-orders/${earlier.workOrderId}/approve`, {})
   const later = await order(`Later ${suffix}`, next.itemId, '2030-01-08T09:00:00+09:00', '2030-01-09T17:00:00+09:00')
+  let third: { workOrderId: string; workOrderNumber: string } | null = null
   try {
     await login(page)
     await page.goto(`/projects/${PROJECT}/inventory?tab=equipment`)
@@ -89,7 +90,20 @@ test('a changeover from the previous order on the equipment is added to the time
     await expect(readiness).toContainText(`${earlier.workOrderNumber}`)
     await expect(readiness).toContainText(`120 min changeover from ${FIRST_ITEM} to ${NEXT_ITEM}`)
     await expect(readiness).toContainText('needs 12 h (with 2 h changeover) of the 16 h available in the planned window')
+
+    // The load board adds up the week's changeovers and names an order with fewer (equipment-load.md "전환 순서 제안"):
+    // first, next, first takes 2 h + 1 h; next first, then both of the first item, 1 h.
+    await call('POST', `/equipments/${equipment.equipmentId}/changeovers`, { fromItemId: next.itemId, toItemId: first.itemId, minutes: 60 })
+    const added = await order(`Third ${suffix}`, first.itemId, '2030-01-10T09:00:00+09:00', '2030-01-10T17:00:00+09:00')
+    third = added
+    await page.goto(`/projects/${PROJECT}/inventory?tab=equipment`)
+    await page.getByText('Load by week').click()
+    const board = page.getByRole('region', { name: 'Equipment load' })
+    await board.getByLabel('Week of').fill('2030-01-07')
+    await expect(board.getByRole('table', { name: 'Load by equipment' }).getByRole('row', { name: new RegExp(CODE) }))
+      .toContainText(`Changeovers 3 h as planned · 1 h as ${later.workOrderNumber}, ${earlier.workOrderNumber}, ${added.workOrderNumber}`)
   } finally {
+    if (third) await call('POST', `/work-orders/${third.workOrderId}/cancel`, {})
     await call('POST', `/work-orders/${later.workOrderId}/cancel`, {})
     await call('POST', `/work-orders/${earlier.workOrderId}/cancel`, {})
     await call('DELETE', `/equipments/${equipment.equipmentId}`)

@@ -121,6 +121,26 @@ describe('bomLinesFromCsv', () => {
     })
   })
 
+  it('reads an optional type column for by-products and waste', () => {
+    expect(bomLinesFromCsv('item_code,quantity,unit,Type\nORANGE,2,kg,\nPEEL,0.5,kg,by_product\n')).toEqual({
+      ok: true,
+      rows: [
+        { itemCode: 'ORANGE', quantity: '2', unit: 'kg', lineType: '' },
+        { itemCode: 'PEEL', quantity: '0.5', unit: 'kg', lineType: 'by_product' },
+      ],
+    })
+  })
+
+  it.each([
+    ['item_code,quantity,qty,unit', 'FLR-1,50,5,kg', 'quantity'],
+    ['item_code,quantity,unit,unit_code', 'FLR-1,5,kg,g', 'unit'],
+    ['item_code,quantity,unit,type,kind', 'FLR-1,5,kg,material,waste', 'type'],
+  ])('refuses ambiguous material columns %s instead of overriding a value', (header, row, column) => {
+    expect(bomLinesFromCsv(`${header}\n${row}\n`)).toEqual({
+      ok: false, error: `Use only one ${column} column, including aliases.`,
+    })
+  })
+
   it('needs item code, quantity and unit columns and at least one line', () => {
     expect(bomLinesFromCsv('item_code,quantity\nFLR-1,5')).toEqual({
       ok: false,

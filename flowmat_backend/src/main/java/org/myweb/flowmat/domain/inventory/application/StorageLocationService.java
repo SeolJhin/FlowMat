@@ -1,14 +1,19 @@
 package org.myweb.flowmat.domain.inventory.application;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.inventory.api.dto.request.StorageLocationCreateRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.request.StorageLocationUpdateRequest;
@@ -16,6 +21,7 @@ import org.myweb.flowmat.domain.inventory.api.dto.response.StorageLocationRespon
 import org.myweb.flowmat.domain.inventory.domain.entity.StorageLocation;
 import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.domain.inventory.repository.StorageLocationRepository;
+import org.myweb.flowmat.domain.inventory.repository.WarehouseTaskRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
@@ -49,6 +55,7 @@ public class StorageLocationService {
 
     private final StorageLocationRepository storageLocationRepository;
     private final InventoryRepository inventoryRepository;
+    private final WarehouseTaskRepository warehouseTaskRepository;
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
 
@@ -99,7 +106,7 @@ public class StorageLocationService {
 
     @Transactional
     public StorageLocationResponse update(String locationId, StorageLocationUpdateRequest request) {
-        StorageLocation location = findLive(locationId);
+        StorageLocation location = lockLive(locationId);
         String projectId = location.getProjectId();
         projectAccessService.requireProjectWriteAccess(projectId);
         List<StorageLocation> children = storageLocationRepository
@@ -109,8 +116,7 @@ public class StorageLocationService {
             String code = code(request.locationCode());
             if (!code.equalsIgnoreCase(location.getLocationCode())) {
                 requireFreeCode(projectId, code, location.getLocationId());
-                // Stock records keep the code as text, so renaming would leave their stock at an unlisted place.
-                requireNoHeldStock(location, "change its code");
+                rename(location, code);
             }
             location.setLocationCode(code);
         }
@@ -140,6 +146,8 @@ public class StorageLocationService {
             location.setNote(text(request.note()));
         }
         if (Boolean.FALSE.equals(request.active()) && active(location)) {
+            // New stock for this place waits for the switch-off, so the check below sees all it brought.
+            lockPlaces(projectId, location.getLocationCode());
             requireNoHeldStock(location, "deactivate it");
             children.stream().filter(StorageLocationService::active).findFirst().ifPresent(child -> {
                 throw new BusinessException(ErrorCode.CONFLICT,
@@ -159,12 +167,13 @@ public class StorageLocationService {
 
     @Transactional
     public void delete(String locationId) {
-        StorageLocation location = findLive(locationId);
+        StorageLocation location = lockLive(locationId);
         projectAccessService.requireProjectWriteAccess(location.getProjectId());
         if (storageLocationRepository.existsByParentLocationIdAndDeletedYn(location.getLocationId(), NOT_DELETED)) {
             throw new BusinessException(ErrorCode.CONFLICT,
                 "Delete or move the places inside " + location.getLocationCode() + " first.");
         }
+        lockPlaces(location.getProjectId(), location.getLocationCode());
         requireNoHeldStock(location, "delete it");
         location.setDeletedYn(DELETED);
         location.setUpdatedBy(projectAccessService.requireCurrentUserId());
@@ -216,7 +225,12 @@ public class StorageLocationService {
     /** The place to record for new stock at {@code location}; see {@link LocationCheck#resolve(String)}. */
     public String resolveForStock(String projectId, String location) {
         String code = trimToNull(location);
-        return code == null ? null : locationCheck(projectId).resolve(code);
+        if (code == null) {
+            return null;
+        }
+        // Wait for a rename, switch-off or delete of this place, so stock never lands on a code that just went away (L7).
+        lockPlaces(projectId, code);
+        return locationCheck(projectId).resolve(code);
     }
 
     /**
@@ -248,6 +262,35 @@ public class StorageLocationService {
             }
             return found.getLocationCode();
         }
+    }
+
+    /**
+     * The listed place with this code (ignoring case) and every place inside it, as lower-cased codes, with the code as
+     * the list spells it. A place the list does not have is refused.
+     */
+    public Within within(String projectId, String code) {
+        List<StorageLocation> all = storageLocationRepository.findAllByProjectIdAndDeletedYn(projectId, NOT_DELETED);
+        StorageLocation top = all.stream()
+            .filter(location -> location.getLocationCode().equalsIgnoreCase(code.trim()))
+            .findFirst()
+            .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST,
+                "Location " + code.trim() + " is not in this project's location list."));
+        Map<String, List<StorageLocation>> inside = all.stream()
+            .filter(location -> location.getParentLocationId() != null)
+            .collect(Collectors.groupingBy(StorageLocation::getParentLocationId));
+        Set<String> codes = new HashSet<>();
+        Deque<StorageLocation> todo = new ArrayDeque<>(List.of(top));
+        while (!todo.isEmpty()) {
+            StorageLocation place = todo.pop();
+            if (codes.add(key(place.getLocationCode()))) {
+                todo.addAll(inside.getOrDefault(place.getLocationId(), List.of()));
+            }
+        }
+        return new Within(top.getLocationCode(), Set.copyOf(codes));
+    }
+
+    /** @param code as the list spells it; @param codes it and the places inside it, lower-cased */
+    public record Within(String code, Set<String> codes) {
     }
 
     private StorageLocation newParent(String projectId, String parentLocationId, String selfId) {
@@ -289,12 +332,52 @@ public class StorageLocationService {
             });
     }
 
+    /**
+     * A place's stock records and warehouse tasks name it by code as text, so a new code moves them along (L7), under the
+     * lock new stock at either code takes. Records already at the new code (free text from before the list) would merge
+     * with these, so they stop the rename.
+     */
+    private void rename(StorageLocation location, String code) {
+        String projectId = location.getProjectId();
+        String previous = location.getLocationCode();
+        lockPlaces(projectId, previous, code);
+        long there = inventoryRepository.countRecordsAtLocation(projectId, code);
+        if (there > 0) {
+            throw new BusinessException(ErrorCode.CONFLICT, there + (there == 1 ? " stock record already uses " : " stock records already use ")
+                + code + ". Move them to a listed place first, or pick another code.");
+        }
+        inventoryRepository.renameLocation(projectId, previous, code, projectAccessService.requireCurrentUserId());
+        warehouseTaskRepository.renamePlace(projectId, previous, code);
+    }
+
+    /**
+     * Locks each place code (ignoring case) until the transaction ends. New stock, renames, switch-offs and deletes of a
+     * place take the same lock, in code order, so they take turns instead of racing (L7).
+     */
+    private void lockPlaces(String projectId, String... codes) {
+        Stream.of(codes)
+            .map(code -> "storage-place:" + projectId + ":" + key(code))
+            .distinct()
+            .sorted()
+            .forEach(inventoryRepository::lockStockPlace);
+    }
+
     private void requireNoHeldStock(StorageLocation location, String action) {
         long records = inventoryRepository.countHeldStockAtLocation(location.getProjectId(), location.getLocationCode());
         if (records > 0) {
             throw new BusinessException(ErrorCode.CONFLICT, location.getLocationCode() + " still holds stock in " + records
                 + (records == 1 ? " record" : " records") + ". Move the stock out before you " + action + ".");
         }
+    }
+
+    /** Load mutable state only after planning, completion and other location mutations have finished. */
+    private StorageLocation lockLive(String locationId) {
+        String id = required(locationId, "locationId");
+        String projectId = storageLocationRepository.findLiveProjectId(id)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        projectAccessService.requireProjectWriteAccess(projectId);
+        warehouseTaskRepository.lockProject(projectId);
+        return findLive(id);
     }
 
     private StorageLocation findLive(String locationId) {

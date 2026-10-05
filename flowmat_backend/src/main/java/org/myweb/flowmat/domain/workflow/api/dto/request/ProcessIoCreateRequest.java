@@ -8,7 +8,7 @@ import java.math.BigDecimal;
 
 public record ProcessIoCreateRequest(
     @NotBlank String processId,
-    @NotBlank String itemId,
+    String itemId,
     @Size(max = 100, message = "ioName must be at most 100 characters.") String ioName,
     @NotBlank String direction,
     @Size(max = 30, message = "ioType must be at most 30 characters.") String ioType,

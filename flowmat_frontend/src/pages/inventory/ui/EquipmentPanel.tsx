@@ -6,7 +6,8 @@ import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { ApiEnvelope, EquipmentDto } from '../../../shared/types/api'
 import {
-  EMPTY_DETAILS_FORM, detailsForm, detailsPayload, equipmentCsv, filterEquipment, makerModel, perHour, type EquipmentDetailsForm,
+  EMPTY_DETAILS_FORM, detailsForm, detailsPayload, equipmentCsv, filterEquipment, makerModel, perHour, statusChangeText,
+  type EquipmentDetailsForm,
 } from '../model/equipmentModel'
 import { EquipmentSchedulePanel } from './EquipmentSchedulePanel'
 import { EquipmentLoadBoard } from './EquipmentLoadBoard'
@@ -35,6 +36,15 @@ export function EquipmentPanel({ projectId }: { projectId: string }) {
     enabled: Boolean(projectId),
   })
   const [editingId, setEditingId] = useState<string | null>(null)
+  // Why the status changes; kept in the equipment's status history (docs/domain/equipment.md).
+  const [statusNote, setStatusNote] = useState('')
+  const statusHistoryQuery = useQuery({
+    queryKey: [...queryKey, 'status-history', editingId],
+    queryFn: async () => unwrapApiResponse(await httpClient.get<ApiEnvelope<{
+      previousStatus: string | null; equipmentStatus: string; note: string | null; changedBy: string; changedAt: string
+    }[]>>(`/equipments/${encodeURIComponent(editingId ?? '')}/status-history`)),
+    enabled: Boolean(editingId),
+  })
   const [form, setForm] = useState(emptyForm)
   const [details, setDetails] = useState(EMPTY_DETAILS_FORM)
   const [search, setSearch] = useState('')
@@ -59,7 +69,8 @@ export function EquipmentPanel({ projectId }: { projectId: string }) {
       const parsed = detailsPayload(details)
       if (parsed.error !== null) throw new Error(parsed.error)
       const payload = editingId
-        ? { equipmentName: form.equipmentName, equipmentType: form.equipmentType, equipmentStatus: form.equipmentStatus, details: parsed.details }
+        ? { equipmentName: form.equipmentName, equipmentType: form.equipmentType, equipmentStatus: form.equipmentStatus, details: parsed.details,
+            statusNote: statusNote.trim() || null }
         : { projectId, equipmentCode: form.equipmentCode || null, equipmentName: form.equipmentName, equipmentType: form.equipmentType,
             details: parsed.details }
       const path = editingId ? `/equipments/${encodeURIComponent(editingId)}` : '/equipments'
@@ -72,6 +83,7 @@ export function EquipmentPanel({ projectId }: { projectId: string }) {
       setEditingId(null)
       setForm(emptyForm)
       setDetails(EMPTY_DETAILS_FORM)
+      setStatusNote('')
       void queryClient.invalidateQueries({ queryKey })
     },
   })
@@ -87,6 +99,7 @@ export function EquipmentPanel({ projectId }: { projectId: string }) {
     setForm({ equipmentCode: equipment.equipmentCode ?? '', equipmentName: equipment.equipmentName,
       equipmentType: equipment.equipmentType, equipmentStatus: equipment.equipmentStatus })
     setDetails(detailsForm(equipment.details))
+    setStatusNote('')
     save.reset()
   }
 
@@ -139,7 +152,8 @@ export function EquipmentPanel({ projectId }: { projectId: string }) {
             }}>Delete</button></td>
         </tr>)}</tbody>
       </table>
-      {scheduled && <EquipmentSchedulePanel key={scheduled.equipmentId} equipment={scheduled} onClose={() => setScheduleId(null)} />}
+      {scheduled && <EquipmentSchedulePanel key={scheduled.equipmentId} equipment={scheduled}
+        others={all.filter((one) => one.equipmentId !== scheduled.equipmentId)} onClose={() => setScheduleId(null)} />}
       <details style={{ marginTop: 16 }} onToggle={(event) => setLoadOpen(event.currentTarget.open)}>
         <summary>Load by week</summary>
         {loadOpen && <EquipmentLoadBoard projectId={projectId} />}
@@ -154,11 +168,15 @@ export function EquipmentPanel({ projectId }: { projectId: string }) {
         onChange={(event) => setForm({ ...form, equipmentName: event.target.value })} /></label>
       <label>Type<input value={form.equipmentType} required maxLength={50}
         onChange={(event) => setForm({ ...form, equipmentType: event.target.value })} /></label>
-      {editingId && <label>Status<select value={form.equipmentStatus}
+      {editingId && <label>Status<select aria-label="Status" value={form.equipmentStatus}
         onChange={(event) => setForm({ ...form, equipmentStatus: event.target.value })}>
         <option value="active">Active</option><option value="inactive">Inactive</option>
         <option value="maintenance">Maintenance</option>
       </select></label>}
+      {editingId && form.equipmentStatus !== all.find((one) => one.equipmentId === editingId)?.equipmentStatus && (
+        <label>Status note<input value={statusNote} maxLength={200} placeholder="why, such as bearing replaced"
+          onChange={(event) => setStatusNote(event.target.value)} /></label>
+      )}
       <fieldset style={{ display: 'grid', gap: 8, border: '1px solid var(--border)', padding: 8 }}>
         <legend style={{ fontSize: 12 }}>Details (optional)</legend>
         {DETAIL_FIELDS.map((field) => <label key={field.key}>{field.label}<input
@@ -169,6 +187,19 @@ export function EquipmentPanel({ projectId }: { projectId: string }) {
       {save.isError && <p role="alert">{errorMessage(save.error)}</p>}
       <button type="submit" disabled={save.isPending}>{save.isPending ? 'Saving...' : 'Save'}</button>
       {editingId && <button type="button" onClick={cancel}>Cancel</button>}
+      {editingId && (statusHistoryQuery.data ?? []).length > 0 && (
+        <div aria-label="Status history" style={{ fontSize: 12 }}>
+          <strong>Status history</strong>
+          <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+            {(statusHistoryQuery.data ?? []).slice(0, 8).map((change, index) => (
+              <li key={`${change.changedAt}-${index}`}>
+                {statusChangeText(change)}{' '}
+                <span className="inspector-hint">· {change.changedBy} · {new Date(change.changedAt).toLocaleString()}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </form>
   </div>
 }

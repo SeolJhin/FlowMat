@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useExpiredWriteOffMutation } from '../../../entities/inventory/api/useExpiredWriteOffMutation'
-import { errorMessage } from '../../../shared/lib/errorMessage'
+import { useExpiredWriteOffMutation, type ExpiredWriteOffInput } from '../../../entities/inventory/api/useExpiredWriteOffMutation'
+import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { ExpiredWriteOffDto, LotDto } from '../../../shared/types/api'
 import { expiryOutlook } from '../model/expiryOutlookModel'
@@ -25,8 +25,10 @@ export function ExpiryOutlook({
   onOpen: (lotId: string) => void
 }) {
   const outlook = expiryOutlook(lots, new Date(), WEEKS)
+  const operation = useWriteOff(projectId, outlook.expired)
+  const hasOperation = operation.done !== null || operation.writeOff.isPending || operation.writeOff.isError
   const soon = outlook.weeks.reduce((sum, week) => sum + week.lots.length, 0)
-  if (outlook.expired.length === 0 && soon === 0 && outlook.later === 0) return null
+  if (outlook.expired.length === 0 && soon === 0 && outlook.later === 0 && !hasOperation) return null
 
   const lotButton = (lot: LotDto) => (
     <button
@@ -41,7 +43,7 @@ export function ExpiryOutlook({
   )
 
   return (
-    <details aria-label="Expiry outlook" style={{ marginBottom: 10, fontSize: 12 }} open={outlook.expired.length > 0}>
+    <details aria-label="Expiry outlook" style={{ marginBottom: 10, fontSize: 12 }} open={outlook.expired.length > 0 || hasOperation}>
       <summary style={{ cursor: 'pointer' }}>
         Expiry outlook:{' '}
         <span style={{ color: outlook.expired.length ? '#b91c1c' : undefined }}>{outlook.expired.length} expired with stock</span>, {soon} within{' '}
@@ -67,39 +69,56 @@ export function ExpiryOutlook({
             ))}
         </tbody>
       </table>
-      {outlook.expired.length > 0 && <ExpiredWriteOff projectId={projectId} expired={outlook.expired} />}
+      <ExpiredWriteOff operation={operation} expiredCount={outlook.expired.length} />
     </details>
   )
 }
 
-/**
- * Writes off the stock of the expired LOTs listed (docs/domain/lot-expiry.md "만료 재고 폐기"): what is available leaves as
- * an issue; quarantined and reserved stock stays and is named in the result.
- */
-function ExpiredWriteOff({ projectId, expired }: { projectId: string; expired: LotDto[] }) {
+/** State stays mounted in the outlook even when refreshing the LOTs removes every expired row. */
+function useWriteOff(projectId: string, expired: LotDto[]) {
   const writeOff = useExpiredWriteOffMutation(projectId)
   const [closeLots, setCloseLots] = useState(false)
+  const [submitted, setSubmitted] = useState<ExpiredWriteOffInput | null>(null)
   const [done, setDone] = useState<ExpiredWriteOffDto | null>(null)
+  const status = errorStatus(writeOff.error)
+  const unconfirmed = writeOff.isError && (status === null || status >= 500)
+
+  function submit() {
+    if (writeOff.isPending) return
+    // A retry confirms the previous operation; newly expired LOTs must never silently become its new targets.
+    const input = unconfirmed ? submitted : { lotIds: expired.map((lot) => lot.lotId), closeLots, note: 'Expired stock written off' }
+    if (!input || !input.lotIds?.length) return
+    if (!unconfirmed && !window.confirm(`Write off the stock of ${input.lotIds.length} expired LOT${input.lotIds.length === 1 ? '' : 's'}? It leaves as an issue.`)) return
+    setSubmitted(input)
+    setDone(null)
+    writeOff.mutate(input, { onSuccess: setDone })
+  }
+
+  function clear() {
+    setDone(null)
+    setSubmitted(null)
+    writeOff.reset()
+  }
+
+  return { writeOff, closeLots, setCloseLots, done, unconfirmed, submit, clear }
+}
+
+/** A receipt or unconfirmed operation stays visible until the user has acknowledged and cleared it. */
+function ExpiredWriteOff({ operation, expiredCount }: { operation: ReturnType<typeof useWriteOff>; expiredCount: number }) {
+  const { writeOff, closeLots, setCloseLots, done, unconfirmed, submit, clear } = operation
   return (
-    <div style={{ marginTop: 8, display: 'grid', gap: 4 }}>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          style={{ fontSize: 11 }}
-          disabled={writeOff.isPending}
-          onClick={() => {
-            if (!window.confirm(`Write off the stock of ${expired.length} expired LOT${expired.length === 1 ? '' : 's'}? It leaves as an issue.`)) return
-            setDone(null)
-            writeOff.mutate({ lotIds: expired.map((lot) => lot.lotId), closeLots, note: 'Expired stock written off' }, { onSuccess: setDone })
-          }}
-        >
-          {writeOff.isPending ? 'Writing off...' : `Write off expired stock (${expired.length})`}
-        </button>
-        <label style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-          <input type="checkbox" checked={closeLots} onChange={(e) => setCloseLots(e.target.checked)} />
-          close the LOTs afterwards (owner)
-        </label>
-      </div>
+    <div style={{ marginTop: 8, display: 'grid', gap: 4 }} aria-busy={writeOff.isPending}>
+      {(expiredCount > 0 || writeOff.isPending || unconfirmed) && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button type="button" style={{ fontSize: 11 }} disabled={writeOff.isPending} onClick={submit}>
+            {writeOff.isPending ? 'Writing off...' : unconfirmed ? 'Retry write-off' : `Write off expired stock (${expiredCount})`}
+          </button>
+          <label style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+            <input type="checkbox" checked={closeLots} disabled={writeOff.isPending || unconfirmed} onChange={(e) => setCloseLots(e.target.checked)} />
+            close the LOTs afterwards (owner)
+          </label>
+        </div>
+      )}
       {done && (
         <p role="status" style={{ margin: 0, color: '#047857' }}>
           Wrote off {done.lines.map((line) => `LOT ${line.lotNo} ${formatQty(line.writtenOff)} ${line.unit ?? ''}${line.closed ? ' (closed)' : ''}`).join(', ')}
@@ -111,7 +130,11 @@ function ExpiredWriteOff({ projectId, expired }: { projectId: string; expired: L
           )}
         </p>
       )}
-      {writeOff.isError && <p style={{ margin: 0, color: '#dc2626' }}>{errorMessage(writeOff.error, 'The write-off was refused.')}</p>}
+      {writeOff.isError && <p role="alert" style={{ margin: 0, color: '#dc2626' }}>{errorMessage(writeOff.error, 'The write-off could not be confirmed.')}</p>}
+      {unconfirmed && <p role="status" className="inspector-hint" style={{ margin: 0 }}>The write-off result is unconfirmed. Retry write-off confirms the original LOTs; newly expired LOTs are left alone.</p>}
+      {(done || writeOff.isError) && !writeOff.isPending && !unconfirmed && (
+        <button type="button" style={{ justifySelf: 'start', fontSize: 11 }} onClick={clear}>Clear write-off result</button>
+      )}
     </div>
   )
 }

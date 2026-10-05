@@ -41,4 +41,10 @@ public class Nonconformity {
     private String closedBy;
     private OffsetDateTime closedAt;
     private String closureNote;
+
+    /** effective or not_effective once the closed nonconformity's actions were checked (N12, V48); null before. */
+    private String verificationResult;
+    private String verificationNote;
+    private String verifiedBy;
+    private OffsetDateTime verifiedAt;
 }

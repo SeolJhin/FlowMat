@@ -79,6 +79,10 @@ export function rowsFromCsv(text: string): { ok: true; rows: ItemImportRowDto[];
     const key = normalise(name)
     return COLUMNS.find((column) => column.header === key || column.aliases.includes(key))?.field ?? null
   })
+  const duplicate = fields.find((field, index) => field !== null && fields.indexOf(field) !== index)
+  if (duplicate) {
+    return { ok: false, error: `Use only one ${header[fields.indexOf(duplicate)].trim()} column, including aliases.` }
+  }
   if (!fields.includes('itemCode')) return { ok: false, error: 'The first line must name the columns, with an item_code column.' }
   if (data.length === 0) return { ok: false, error: 'The file has no items under its header.' }
   const rows = data.map((cells) => {

@@ -22,6 +22,18 @@ describe('port contract form', () => {
     })
   })
 
+  it('lets a port have no item: create leaves itemId out and update clears the binding', () => {
+    const state = { ...createDefaultPortFormState('output'), ioName: 'Parsed rows', resourceType: 'data', unit: 'ea' }
+    expect(hasValidPortSelection(state)).toBe(true)
+    expect(toCreateProcessIoInput('process-1', state).itemId).toBeUndefined()
+    const update = toUpdateProcessIoInput({ ...state, processIoId: 'port-1' })
+    expect(update).toMatchObject({ processIoId: 'port-1', clearItem: true })
+    expect(update).not.toHaveProperty('itemId')
+    const bound = toUpdateProcessIoInput({ ...state, processIoId: 'port-1', itemId: 'item-1' })
+    expect(bound).toMatchObject({ itemId: 'item-1' })
+    expect(bound).not.toHaveProperty('clearItem')
+  })
+
   it('sends a structured schema and resource metadata', () => {
     const state = {
       ...createDefaultPortFormState(),

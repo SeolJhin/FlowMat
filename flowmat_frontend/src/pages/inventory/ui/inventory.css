@@ -1,0 +1,18 @@
+/*
+ * Narrow screens (a phone): a tab wider than the screen scrolls sideways inside the inventory page instead of widening
+ * the whole page (docs/domain/warehouse-task.md W9). Wide screens are untouched.
+ */
+@media (max-width: 760px) {
+  .inventory-route {
+    /* #root is a column flex box, so without a width the page takes its content's width. */
+    width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
+    overflow-x: auto;
+  }
+}
+
+/* A long option list (every item in the project) never makes a form wider than the column it sits in. */
+.inventory-route form select {
+  max-width: 100%;
+}

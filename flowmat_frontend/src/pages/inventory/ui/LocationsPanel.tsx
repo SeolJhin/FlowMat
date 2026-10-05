@@ -7,6 +7,7 @@ import {
   type StorageLocationType,
 } from '../../../entities/inventory/api/useStorageLocations'
 import { errorMessage } from '../../../shared/lib/errorMessage'
+import { labelSheetHtml } from '../model/labelModel'
 import {
   EMPTY_LOCATION_FORM,
   LOCATION_TYPES,
@@ -15,6 +16,8 @@ import {
   filterLocations,
   locationForm,
   parentOptions,
+  stockText,
+  stockWithin,
   unlistedPlaces,
   updatePayload,
 } from '../model/locationModel'
@@ -34,7 +37,23 @@ export function LocationsPanel({ projectId }: { projectId: string }) {
   const [showInactive, setShowInactive] = useState(false)
   const all = locationsQuery.data ?? []
   const shown = filterLocations(all, search, showInactive)
+  // Labels for the active places the list shows (storage-location.md L10); a new window holds the sheet to print.
+  const labelPlaces = shown.filter((location) => location.active)
+  const [labelError, setLabelError] = useState<string | null>(null)
+
+  function printLabels() {
+    const sheet = window.open('', '_blank')
+    if (!sheet) {
+      setLabelError('Allow pop-ups for this site to print labels.')
+      return
+    }
+    setLabelError(null)
+    sheet.document.write(labelSheetHtml(labelPlaces))
+    sheet.document.close()
+  }
   const unlisted = unlistedPlaces(all, (inventoriesQuery.data ?? []).map((row) => row.location))
+  const held = stockWithin(all, inventoriesQuery.data ?? [])
+  const hasInside = new Set(all.map((one) => one.parentLocationId).filter((id): id is string => id !== null))
   const parents = parentOptions(all, form.locationType, editing)
   const saving = create.isPending || update.isPending
   const saveError = formError
@@ -70,6 +89,12 @@ export function LocationsPanel({ projectId }: { projectId: string }) {
     if (editing) {
       const payload = updatePayload(form, editing)
       setFormError(payload.error)
+      // A new code moves the stock records and tasks here along with it (storage-location.md L7).
+      const renamed = form.locationCode.trim().toLowerCase() !== editing.locationCode.toLowerCase()
+      if (payload.input && renamed && editing.stockRecords > 0 && !window.confirm(
+        `${editing.locationCode} holds stock in ${editing.stockRecords} record${editing.stockRecords === 1 ? '' : 's'}. `
+          + `Rename it to ${form.locationCode.trim()} and move them, and its warehouse tasks, along?`,
+      )) return
       if (payload.input) update.mutate({ locationId: editing.locationId, input: payload.input }, { onSuccess: reset })
       return
     }
@@ -109,7 +134,11 @@ export function LocationsPanel({ projectId }: { projectId: string }) {
           placeholder="code, name or path" style={{ minWidth: 220 }} />
         <label><input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} /> Show inactive</label>
         {shown.length !== all.length && <span className="inspector-hint">{shown.length} of {all.length}</span>}
+        <button type="button" style={{ fontSize: 12, marginLeft: 'auto' }} disabled={labelPlaces.length === 0} onClick={printLabels}>
+          Print labels
+        </button>
       </div>}
+      {labelError && <p role="alert">{labelError}</p>}
       {all.length > 0 && <table aria-label="Storage locations" style={{ width: '100%', textAlign: 'left' }}>
         <thead><tr><th>Code</th><th>Name</th><th>Kind</th><th>Path</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>{shown.map((location) => <tr key={location.locationId} style={{ opacity: location.active ? 1 : 0.6 }}>
@@ -117,8 +146,10 @@ export function LocationsPanel({ projectId }: { projectId: string }) {
           <td>{location.locationName ?? '—'}</td>
           <td>{LOCATION_TYPE_LABELS[location.locationType]}</td>
           <td className="inspector-hint">{location.path}</td>
-          <td>{location.stockRecords === 0 ? 'empty'
-            : `${location.stockRecords} ${location.stockRecords === 1 ? 'record' : 'records'}, ${location.itemCount} ${location.itemCount === 1 ? 'item' : 'items'}`}</td>
+          <td>{stockText({ records: location.stockRecords, items: location.itemCount })}
+            {/* A place with places inside also counts what they hold. */}
+            {hasInside.has(location.locationId) && (held.get(location.locationId)?.records ?? 0) > location.stockRecords
+              && ` · with places inside: ${stockText(held.get(location.locationId)!)}`}</td>
           <td>{location.active ? 'active' : 'inactive'}</td>
           <td style={{ whiteSpace: 'nowrap' }}>
             <button type="button" onClick={() => startEdit(location)}>Edit</button>{' '}
@@ -138,7 +169,9 @@ export function LocationsPanel({ projectId }: { projectId: string }) {
       <h2>{editing ? `Edit ${editing.locationCode}` : 'Add location'}</h2>
       <label>Code<input value={form.locationCode} required maxLength={100}
         onChange={(event) => setForm({ ...form, locationCode: event.target.value })} /></label>
-      {editing && editing.stockRecords > 0 && <small className="inspector-hint">The code cannot change while stock is here.</small>}
+      {editing && editing.stockRecords > 0 && (
+        <small className="inspector-hint">A new code moves the {editing.stockRecords} stock record(s) and warehouse tasks here along.</small>
+      )}
       <label>Name<input value={form.locationName} maxLength={100}
         onChange={(event) => setForm({ ...form, locationName: event.target.value })} /></label>
       <label>Kind<select value={form.locationType} onChange={(event) => changeType(event.target.value as StorageLocationType)}>

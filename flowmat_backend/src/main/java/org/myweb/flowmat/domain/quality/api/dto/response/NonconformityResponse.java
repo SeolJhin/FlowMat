@@ -31,6 +31,11 @@ public record NonconformityResponse(
     String closedBy,
     OffsetDateTime closedAt,
     String closureNote,
+    /** Whether the closed nonconformity's actions worked (N12): effective, not_effective, or null until checked. */
+    String verificationResult,
+    String verificationNote,
+    String verifiedBy,
+    OffsetDateTime verifiedAt,
     List<LinkedDefect> defects,
     List<Action> actions,
     int openActions,

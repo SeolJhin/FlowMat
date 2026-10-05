@@ -2,6 +2,26 @@ import type { PickListInput, PickListLine, PutawayInput, WarehouseTaskDto } from
 import type { InventoryDto, WorkOrderDto } from '../../../shared/types/api'
 
 /** What of a record is not already planned in open tasks; the server checks the same. */
+/** The places a work order's stock was picked to: done pick tasks of the order, lower-case codes. */
+export function stagingPlacesFor(tasks: WarehouseTaskDto[], workOrderId: string | null): Set<string> {
+  if (!workOrderId) return new Set()
+  return new Set(tasks
+    .filter((task) => task.taskType === 'pick' && task.status === 'done' && task.workOrderId === workOrderId)
+    .map((task) => task.toLocation.trim().toLowerCase()))
+}
+
+/** How much of an open task to move now: above 0 and at most its quantity (docs/domain/warehouse-task.md W6). */
+export function partQuantity(
+  task: Pick<WarehouseTaskDto, 'quantity'>,
+  text: string,
+): { quantity: number; error: null } | { quantity: null; error: string } {
+  const quantity = Number(text)
+  if (!text.trim() || !Number.isFinite(quantity) || quantity <= 0 || quantity > task.quantity) {
+    return { quantity: null, error: `Enter a quantity above 0 and at most ${task.quantity}.` }
+  }
+  return { quantity, error: null }
+}
+
 export function freeToMove(record: InventoryDto, openTasks: WarehouseTaskDto[]): number {
   const planned = openTasks
     .filter((task) => task.status === 'open' && task.inventoryId === record.inventoryId)
@@ -92,4 +112,50 @@ export function pickPayload(form: PickForm): { input: PickListInput; error: null
 export function shortageText(lines: PickListLine[]): string {
   const short = lines.filter((line) => line.shortage > 0)
   return short.length === 0 ? '' : `Short: ${short.map((line) => `${line.itemCode} ${line.shortage}`).join(', ')}`
+}
+
+/** Who an open task can be given to (W7): the signed-in user and the project's active members, and whoever has it now. */
+export function assigneeChoices(
+  members: { userId: string; memberStatus: string }[],
+  me: string | null,
+  current: string | null,
+): string[] {
+  const ids = new Set(members.filter((member) => member.memberStatus === 'active').map((member) => member.userId))
+  if (me) ids.add(me)
+  if (current) ids.add(current)
+  return [...ids].sort((left, right) => left.localeCompare(right))
+}
+
+export type AssigneeFilter = 'anyone' | 'me' | 'nobody'
+
+/** The tasks given to me, or to no one yet; all of them for anyone. */
+export function tasksFor(tasks: WarehouseTaskDto[], filter: AssigneeFilter, me: string | null): WarehouseTaskDto[] {
+  if (filter === 'me') return tasks.filter((task) => me !== null && task.assignedTo === me)
+  if (filter === 'nobody') return tasks.filter((task) => !task.assignedTo)
+  return tasks
+}
+
+/** Resolve a scanner selection against current open tasks, so renamed places and partial moves stay current. */
+export function selectedScanTask(tasks: WarehouseTaskDto[], taskId: string | null): WarehouseTaskDto | null {
+  if (!taskId) return null
+  return tasks.find((task) => task.taskId === taskId && task.status === 'open') ?? null
+}
+
+/** The open tasks of the item a scan named, the ones given to me first (W8). */
+export function tasksForScan(tasks: WarehouseTaskDto[], item: { itemId: string } | null, me: string | null): WarehouseTaskDto[] {
+  if (!item) return []
+  return tasks
+    .filter((task) => task.status === 'open' && task.itemId === item.itemId)
+    .sort((left, right) => Number(me !== null && right.assignedTo === me) - Number(me !== null && left.assignedTo === me))
+}
+
+/** Whether a scanned place is where the task goes, ignoring case and spaces around it (W8). */
+export function scannedPlaceFits(task: Pick<WarehouseTaskDto, 'toLocation'>, scanned: string): boolean {
+  return scanned.trim().toLowerCase() === task.toLocation.trim().toLowerCase()
+}
+
+/** A handheld's list (W9): the open tasks given to me, then the ones given to nobody; others' tasks are left out. */
+export function scannerTasks(tasks: WarehouseTaskDto[], me: string | null): WarehouseTaskDto[] {
+  const open = tasks.filter((task) => task.status === 'open')
+  return [...open.filter((task) => me !== null && task.assignedTo === me), ...open.filter((task) => !task.assignedTo)]
 }

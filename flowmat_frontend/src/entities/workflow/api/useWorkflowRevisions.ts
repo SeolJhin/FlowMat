@@ -25,6 +25,20 @@ export function useWorkflowRevisionsQuery(workflowId: string) {
   })
 }
 
+/** A retired revision starts no new runs; runs already on it keep following it (docs/domain/workflow-revision.md V4·V5). */
+export function useRetireWorkflowRevisionMutation(workflowId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (revisionId: string) =>
+      unwrapApiResponse(await httpClient.post<ApiEnvelope<WorkflowRevisionDto>>(
+        `/workflows/${encodeURIComponent(workflowId)}/revisions/${encodeURIComponent(revisionId)}/retire`, undefined,
+      )),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['workflow-revisions', workflowId] })
+    },
+  })
+}
+
 export function usePublishWorkflowRevisionMutation(workflowId: string) {
   const queryClient = useQueryClient()
   return useMutation({

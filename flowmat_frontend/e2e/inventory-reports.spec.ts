@@ -77,4 +77,9 @@ test('quality overview, stock analysis, stock on a date and the reorder suggesti
   const reorder = page.getByLabel('Below safety stock').getByRole('row', { name: new RegExp(MALT) })
   await expect(reorder).toContainText('30 days')
   await expect(reorder).toContainText('40 kg')
+
+  // Unit cost history (material-cost.md "단가 이력"): the item was created with a cost of 2.
+  await page.getByRole('tab', { name: 'Items' }).click()
+  await page.getByRole('row', { name: new RegExp(MALT) }).getByRole('button', { name: 'Details' }).click()
+  await expect(page.getByLabel('Unit cost history')).toContainText('unknown → 2')
 })

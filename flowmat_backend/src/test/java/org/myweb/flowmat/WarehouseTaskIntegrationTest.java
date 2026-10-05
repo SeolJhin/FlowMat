@@ -1,8 +1,10 @@
 package org.myweb.flowmat;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -133,6 +135,81 @@ class WarehouseTaskIntegrationTest extends IntegrationTestSupport {
         pickList(Map.of("projectId", DEMO_PROJECT, "stagingLocation", line)).andExpect(status().isBadRequest());
         call(get("/warehouse-tasks").param("projectId", DEMO_PROJECT).param("workOrderId", order))
             .andExpect(jsonPath("$.data.length()").value(3));
+    }
+
+    @Test
+    void partOfATaskIsDoneAsATaskOfItsOwnAndTheRestStaysOpen() throws Exception {
+        String tag = tag();
+        String nut = item("WT-NUT-" + tag, "unit_ea", false);
+        String dock = "DOCK-" + tag;
+        String shelf = "SHELF-" + tag;
+        String record = id(call(post("/inventories"), json(Map.of("projectId", DEMO_PROJECT, "itemId", nut, "quantity", 10,
+            "location", dock))), "inventoryId");
+        JsonNode task = data(putaway(record, "6", shelf));
+        String taskId = task.path("taskId").asText();
+        String taskNo = task.path("taskNo").asText();
+
+        call(post("/warehouse-tasks/" + taskId + "/complete"), "{\"quantity\":0}").andExpect(status().isBadRequest());
+        call(post("/warehouse-tasks/" + taskId + "/complete"), "{\"quantity\":7}")
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value(containsString("at most 6")));
+
+        // 2 of 6 now: a done task of its own, the transfer of 2, and the first task open with 4.
+        JsonNode part = data(call(post("/warehouse-tasks/" + taskId + "/complete"), "{\"quantity\":2}")
+            .andExpect(jsonPath("$.data.status").value("done"))
+            .andExpect(jsonPath("$.data.quantity").value(2))
+            .andExpect(jsonPath("$.data.note").value("Part of " + taskNo))
+            .andExpect(jsonPath("$.data.fromLocation").value(dock))
+            .andExpect(jsonPath("$.data.toLocation").value(shelf))
+            .andExpect(jsonPath("$.data.transferId").isNotEmpty()));
+        assertThat(part.path("taskNo").asText()).isNotEqualTo(taskNo).matches("WT-\\d{4}");
+        call(get("/inventories/" + record)).andExpect(jsonPath("$.data.quantity").value(8));
+        JsonNode rest = null;
+        for (JsonNode one : data(call(get("/warehouse-tasks").param("projectId", DEMO_PROJECT).param("status", "open")))) {
+            if (taskId.equals(one.path("taskId").asText())) {
+                rest = one;
+            }
+        }
+        assertThat(rest).isNotNull();
+        assertThat(rest.path("quantity").decimalValue()).isEqualByComparingTo("4");
+
+        // The rest without a quantity, then a whole task given its own quantity: no part is split off.
+        call(post("/warehouse-tasks/" + taskId + "/complete"))
+            .andExpect(jsonPath("$.data.taskId").value(taskId))
+            .andExpect(jsonPath("$.data.status").value("done"));
+        call(get("/inventories/" + record)).andExpect(jsonPath("$.data.quantity").value(4));
+        String whole = id(putaway(record, "3", shelf), "taskId");
+        call(post("/warehouse-tasks/" + whole + "/complete"), "{\"quantity\":3}").andExpect(jsonPath("$.data.taskId").value(whole));
+    }
+
+    @Test
+    void anOpenTaskIsGivenToAProjectMember() throws Exception {
+        String tag = tag();
+        String washer = item("WT-WASHER-" + tag, "unit_ea", false);
+        String record = id(call(post("/inventories"), json(Map.of("projectId", DEMO_PROJECT, "itemId", washer, "quantity", 5,
+            "location", "DOCK-" + tag))), "inventoryId");
+        String taskId = id(putaway(record, "5", "SHELF-" + tag), "taskId");
+        String assignee = "/warehouse-tasks/" + taskId + "/assignee";
+
+        call(put(assignee), "{\"assignedTo\":\"unrelated-user\"}")
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("unrelated-user is not a member of this project."));
+        call(put(assignee), "{\"assignedTo\":\" " + DEMO_OWNER + " \"}")
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.assignedTo").value(DEMO_OWNER));
+        call(get("/warehouse-tasks").param("projectId", DEMO_PROJECT).param("assignedTo", DEMO_OWNER))
+            .andExpect(jsonPath("$.data[?(@.taskId == '" + taskId + "')]").isNotEmpty());
+        call(get("/warehouse-tasks").param("projectId", DEMO_PROJECT).param("assignedTo", "someone-else"))
+            .andExpect(jsonPath("$.data[?(@.taskId == '" + taskId + "')]").isEmpty());
+        callAs("unrelated-user", put(assignee).contentType(MediaType.APPLICATION_JSON).content("{\"assignedTo\":null}"))
+            .andExpect(status().isForbidden());
+
+        // A part done keeps the assignee (W6); blank leaves the rest to no one, and a done task cannot be given.
+        call(post("/warehouse-tasks/" + taskId + "/complete"), "{\"quantity\":2}")
+            .andExpect(jsonPath("$.data.assignedTo").value(DEMO_OWNER));
+        call(put(assignee), "{\"assignedTo\":\"\"}").andExpect(jsonPath("$.data.assignedTo").doesNotExist());
+        call(post("/warehouse-tasks/" + taskId + "/complete")).andExpect(jsonPath("$.data.status").value("done"));
+        call(put(assignee), "{\"assignedTo\":\"" + DEMO_OWNER + "\"}").andExpect(status().isConflict());
     }
 
     private ResultActions putaway(String record, String quantity, String to) throws Exception {

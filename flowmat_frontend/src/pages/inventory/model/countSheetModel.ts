@@ -27,6 +27,8 @@ export function entriesFromSheet(text: string, known: Set<string>): SheetResult 
   const [header, ...data] = parseCsv(text)
   if (!header) return { ok: false, error: 'The file is empty.' }
   const names = header.map((name) => name.trim().toLowerCase())
+  const duplicate = names.find((name, index) => (name === 'inventory_id' || name === 'counted') && names.indexOf(name) !== index)
+  if (duplicate) return { ok: false, error: `Use only one ${duplicate} column.` }
   const idColumn = names.indexOf('inventory_id')
   const countedColumn = names.indexOf('counted')
   if (idColumn < 0 || countedColumn < 0) return { ok: false, error: 'The sheet needs inventory_id and counted columns.' }
@@ -39,6 +41,9 @@ export function entriesFromSheet(text: string, known: Set<string>): SheetResult 
     if (!known.has(id)) {
       unknown += 1
       continue
+    }
+    if (Object.prototype.hasOwnProperty.call(entries, id)) {
+      return { ok: false, error: `The sheet counts stock record ${id} more than once. Keep one counted row per stock record.` }
     }
     entries[id] = counted
   }

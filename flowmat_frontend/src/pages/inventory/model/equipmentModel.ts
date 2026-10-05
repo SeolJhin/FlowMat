@@ -103,3 +103,9 @@ export function equipmentCsv(equipment: EquipmentDto[]): string {
   )
   return '\ufeff' + [header.join(','), ...lines].join('\r\n') + '\r\n'
 }
+
+/** "active → maintenance · Bearing replaced", or "added as active" for the first status (docs/domain/equipment.md). */
+export function statusChangeText(change: { previousStatus: string | null; equipmentStatus: string; note: string | null }): string {
+  const what = change.previousStatus ? `${change.previousStatus} → ${change.equipmentStatus}` : `added as ${change.equipmentStatus}`
+  return change.note ? `${what} · ${change.note}` : what
+}

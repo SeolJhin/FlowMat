@@ -169,6 +169,42 @@ jobs:
           REAL_API_E2E: '1'
         run: npm run test:e2e -- e2e/stock-allocations.spec.ts
 
+      - name: Run real data port E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/data-ports.spec.ts
+
+      - name: Run real work order plan E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/work-order-plan.spec.ts
+
+      - name: Run real NCR from defects E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/ncr-from-defects.spec.ts
+
+      - name: Run real receipt checklist E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/receipt-checklist.spec.ts
+
+      - name: Run real revision retire E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/revision-retire.spec.ts
+
+      - name: Run real equipment days E2E
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+        run: npm run test:e2e -- e2e/equipment-days.spec.ts
+
       - name: Upload backend log
         if: always()
         uses: actions/upload-artifact@v4

@@ -134,23 +134,37 @@ export function orderStockForPick(stock: InventoryDto[], lots: LotDto[]): StockP
 export interface LotOption extends StockPick {
   disabled: boolean
   useFirst: boolean
+  /** At a place the run's work order was picked to (docs/domain/warehouse-task.md); offered first. */
+  staged: boolean
 }
 
 /**
  * The item's stock records for a run's record form (docs/domain/lot-expiry.md "먼저 만료되는 LOT 먼저"). For an input
  * they are in FEFO order: expired or quarantined records cannot be picked (the server refuses them), and the first one
- * that can, if it has an expiry date and there is a choice, is marked to use first. For an output the order is kept.
+ * that can, if it has an expiry date and there is a choice, is marked to use first. Records at a place in
+ * {@code stagedAt} (lower-case codes the order was picked to) come first, FEFO within each group, and among records
+ * expiring first a staged one is the one to use first. For an output the order is kept.
  */
-export function inputLotOptions(stock: InventoryDto[], lots: LotDto[], direction: 'input' | 'output'): LotOption[] {
+export function inputLotOptions(
+  stock: InventoryDto[],
+  lots: LotDto[],
+  direction: 'input' | 'output',
+  stagedAt: ReadonlySet<string> = new Set(),
+): LotOption[] {
   if (direction === 'output') {
-    return orderStockForPick(stock, []).map((pick) => ({ ...pick, disabled: false, useFirst: false }))
+    return orderStockForPick(stock, []).map((pick) => ({ ...pick, disabled: false, useFirst: false, staged: false }))
   }
   const options = orderStockForPick(stock, lots).map((pick) => ({
     ...pick,
     disabled: pick.expired || pick.inventory.inventoryStatus === 'quarantined',
     useFirst: false,
+    staged: stagedAt.has(pick.inventory.location?.trim().toLowerCase() ?? ''),
   }))
-  const first = options.find((option) => !option.disabled)
-  if (first && first.expiryDate && options.length > 1) first.useFirst = true
-  return options
+  const usable = options.filter((option) => !option.disabled)
+  const earliest = usable[0]?.expiryDate
+  if (earliest && options.length > 1) {
+    const first = usable.find((option) => option.expiryDate === earliest && option.staged) ?? usable[0]
+    first.useFirst = true
+  }
+  return [...options.filter((option) => option.staged), ...options.filter((option) => !option.staged)]
 }

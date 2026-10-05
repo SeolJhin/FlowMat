@@ -21,6 +21,7 @@ import org.myweb.flowmat.domain.catalog.api.dto.request.EquipmentDetails;
 import org.myweb.flowmat.domain.catalog.api.dto.request.EquipmentUpdateRequest;
 import org.myweb.flowmat.domain.catalog.domain.entity.Equipment;
 import org.myweb.flowmat.domain.catalog.repository.EquipmentRepository;
+import org.myweb.flowmat.domain.catalog.repository.EquipmentStatusHistoryRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
@@ -31,6 +32,7 @@ class EquipmentServiceImplTest {
     @Mock EquipmentRepository repository;
     @Mock ProjectAccessService access;
     @Mock IdGenerator ids;
+    @Mock EquipmentStatusHistoryRepository statusHistory;
     @InjectMocks EquipmentServiceImpl service;
 
     @Test

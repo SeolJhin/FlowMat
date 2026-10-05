@@ -62,7 +62,7 @@ public class RunInstructionService {
             .filter(candidate -> candidate.stepId().equals(stepId))
             .findFirst()
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        if (checkRepository.findByProductionRunIdAndStepId(run.getProductionRunId(), stepId).isPresent()) {
+        if (checkRepository.findByProductionRunIdAndStepIdAndUndoneAtIsNull(run.getProductionRunId(), stepId).isPresent()) {
             throw new BusinessException(ErrorCode.CONFLICT, "Step " + step.stepNo() + " is already confirmed; undo it to confirm it again.");
         }
         String value = ProductionText.trimToNull(request == null ? null : request.value(), "value");
@@ -70,6 +70,11 @@ public class RunInstructionService {
         if (step.recordsValue() && value == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 "Step " + step.stepNo() + " records " + (step.valueLabel() != null ? step.valueLabel() : "a value") + "; enter it.");
+        }
+        if (value != null && (step.valueMin() != null || step.valueMax() != null) && number(value) == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Step " + step.stepNo() + " records "
+                + (step.valueLabel() != null ? step.valueLabel() : "a value") + " as a number, such as "
+                + (step.valueMin() != null ? step.valueMin() : step.valueMax()).stripTrailingZeros().toPlainString() + ".");
         }
         if (value != null && value.length() > 200) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "The value can be at most 200 characters.");
@@ -94,14 +99,16 @@ public class RunInstructionService {
     @Transactional
     public RunInstructionResponse uncheck(String runId, String stepId) {
         ProductionRun run = findOpenRun(runId);
-        RunInstructionCheck check = checkRepository.findByProductionRunIdAndStepId(run.getProductionRunId(), stepId)
+        RunInstructionCheck check = checkRepository.findByProductionRunIdAndStepIdAndUndoneAtIsNull(run.getProductionRunId(), stepId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         // Older application instances may have written checks without the persisted binding.
         if (run.getWorkInstructionId() == null) {
             pinRevision(run, bound(run, checkRepository.findAllByProductionRunId(run.getProductionRunId())));
         }
-        checkRepository.delete(check);
-        checkRepository.flush();
+        // Kept as history: who confirmed what, and who undid it when (R6).
+        check.setUndoneBy(projectAccessService.requireCurrentUserId());
+        check.setUndoneAt(OffsetDateTime.now());
+        checkRepository.saveAndFlush(check);
         return response(run);
     }
 
@@ -118,11 +125,11 @@ public class RunInstructionService {
     }
 
     private RunInstructionResponse response(ProductionRun run) {
-        List<RunInstructionCheck> checks = checkRepository.findAllByProductionRunId(run.getProductionRunId());
+        List<RunInstructionCheck> checks = checkRepository.findAllByProductionRunIdAndUndoneAtIsNull(run.getProductionRunId());
         WorkInstruction instruction = bound(run, checks);
         boolean open = isOpen(run);
         if (instruction == null) {
-            return new RunInstructionResponse(run.getProductionRunId(), open, null, List.of(), 0, 0, true);
+            return new RunInstructionResponse(run.getProductionRunId(), open, null, List.of(), 0, 0, true, List.of());
         }
         WorkInstructionResponse body = workInstructionService.response(instruction);
         Map<String, RunInstructionCheck> byStep = checks.stream()
@@ -133,12 +140,38 @@ public class RunInstructionService {
             .map(step -> {
                 RunInstructionCheck check = byStep.get(step.stepId());
                 return new RunInstructionResponse.Check(step.stepId(), check.getCheckValue(), check.getNote(), check.getCheckedBy(),
-                    check.getCheckedAt());
+                    check.getCheckedAt(), outsideLimits(step, check.getCheckValue()));
             })
             .toList();
         int required = (int) body.steps().stream().filter(WorkInstructionResponse.Step::required).count();
         int done = (int) body.steps().stream().filter(step -> step.required() && byStep.containsKey(step.stepId())).count();
-        return new RunInstructionResponse(run.getProductionRunId(), open, body, checkResponses, required, done, done == required);
+        Map<String, Integer> stepNos = body.steps().stream()
+            .collect(Collectors.toMap(WorkInstructionResponse.Step::stepId, WorkInstructionResponse.Step::stepNo));
+        List<RunInstructionResponse.Undone> undone = checkRepository
+            .findAllByProductionRunIdAndUndoneAtIsNotNullOrderByUndoneAtAsc(run.getProductionRunId()).stream()
+            .filter(check -> check.getInstructionId().equals(instruction.getInstructionId()) && stepNos.containsKey(check.getStepId()))
+            .map(check -> new RunInstructionResponse.Undone(check.getStepId(), stepNos.get(check.getStepId()), check.getCheckValue(),
+                check.getNote(), check.getCheckedBy(), check.getCheckedAt(), check.getUndoneBy(), check.getUndoneAt()))
+            .toList();
+        return new RunInstructionResponse(run.getProductionRunId(), open, body, checkResponses, required, done, done == required, undone);
+    }
+
+    /** A recorded value below the step's lower limit or above its upper one (R7). */
+    private static boolean outsideLimits(WorkInstructionResponse.Step step, String value) {
+        java.math.BigDecimal number = number(value);
+        if (number == null) {
+            return false;
+        }
+        return (step.valueMin() != null && number.compareTo(step.valueMin()) < 0)
+            || (step.valueMax() != null && number.compareTo(step.valueMax()) > 0);
+    }
+
+    private static java.math.BigDecimal number(String value) {
+        try {
+            return value == null ? null : new java.math.BigDecimal(value.trim());
+        } catch (NumberFormatException exception) {
+            return null;
+        }
     }
 
     /** The revision of the run's first confirmation, or the product's released revision before any. */

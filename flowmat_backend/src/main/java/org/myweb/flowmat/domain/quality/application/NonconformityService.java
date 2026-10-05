@@ -16,15 +16,15 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import lombok.RequiredArgsConstructor;
-import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
-import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
-import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
-import org.myweb.flowmat.domain.production.domain.entity.ProductionRun;
-import org.myweb.flowmat.domain.production.repository.ProductionRunRepository;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
+import org.myweb.flowmat.domain.inventory.application.publicapi.LotQuery;
+import org.myweb.flowmat.domain.inventory.application.publicapi.LotView;
+import org.myweb.flowmat.domain.production.application.publicapi.ProductionRunQuery;
+import org.myweb.flowmat.domain.production.application.publicapi.ProductionRunView;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.project.application.publicapi.ProjectMemberQuery;
 import org.myweb.flowmat.domain.project.domain.entity.Project;
-import org.myweb.flowmat.domain.project.repository.ProjectMemberRepository;
 import org.myweb.flowmat.domain.quality.api.dto.request.CorrectiveActionRequest;
 import org.myweb.flowmat.domain.quality.api.dto.request.NonconformityCreateRequest;
 import org.myweb.flowmat.domain.quality.api.dto.request.NonconformityUpdateRequest;
@@ -56,6 +56,7 @@ public class NonconformityService {
     private static final List<String> SEVERITIES = List.of("minor", "major", "critical");
     private static final Set<String> DISPOSITIONS = Set.of("pending", "use_as_is", "rework", "scrap", "return_to_supplier");
     private static final Set<String> ACTION_TYPES = Set.of("correction", "corrective", "preventive");
+    private static final Set<String> VERIFICATION_RESULTS = Set.of("effective", "not_effective");
     private static final String OPEN = "open";
     private static final String NOT_DELETED = "N";
 
@@ -63,10 +64,10 @@ public class NonconformityService {
     private final NonconformityDefectRepository linkRepository;
     private final CorrectiveActionRepository actionRepository;
     private final DefectLogRepository defectLogRepository;
-    private final ItemRepository itemRepository;
-    private final LotMasterRepository lotMasterRepository;
-    private final ProductionRunRepository productionRunRepository;
-    private final ProjectMemberRepository projectMemberRepository;
+    private final CatalogQuery catalogQuery;
+    private final LotQuery lotQuery;
+    private final ProductionRunQuery productionRunQuery;
+    private final ProjectMemberQuery projectMemberQuery;
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
 
@@ -234,6 +235,37 @@ public class NonconformityService {
         return responses(List.of(nonconformityRepository.saveAndFlush(ncr))).get(0);
     }
 
+    /**
+     * Records whether a closed nonconformity's actions worked (N12), once. When they did not, the note says what still goes
+     * wrong; the nonconformity stays closed and a follow-up is raised for what is left.
+     */
+    @Transactional
+    public NonconformityResponse verify(String nonconformityId, String result, String note) {
+        Nonconformity ncr = nonconformityRepository.findForUpdate(required(nonconformityId, "nonconformityId"))
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        projectAccessService.requireProjectWriteAccess(ncr.getProjectId());
+        if (!"closed".equals(ncr.getStatus())) {
+            throw new BusinessException(ErrorCode.CONFLICT,
+                ncr.getNcrNo() + " is " + ncr.getStatus() + "; only a closed nonconformity's actions can be checked.");
+        }
+        if (ncr.getVerifiedAt() != null) {
+            throw new BusinessException(ErrorCode.CONFLICT, ncr.getNcrNo() + " was already checked by " + ncr.getVerifiedBy() + ".");
+        }
+        String value = trimToNull(result) == null ? null : result.trim().toLowerCase(Locale.ROOT);
+        if (value == null || !VERIFICATION_RESULTS.contains(value)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "result must be effective or not_effective.");
+        }
+        String text = trimToNull(note);
+        if ("not_effective".equals(value) && text == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Say what still goes wrong when the actions did not work.");
+        }
+        ncr.setVerificationResult(value);
+        ncr.setVerificationNote(text);
+        ncr.setVerifiedBy(projectAccessService.requireCurrentUserId());
+        ncr.setVerifiedAt(OffsetDateTime.now());
+        return responses(List.of(nonconformityRepository.saveAndFlush(ncr))).get(0);
+    }
+
     /** Cancels a nonconformity raised by mistake: open actions are cancelled and its defects are freed. */
     @Transactional
     public NonconformityResponse cancel(String nonconformityId, String note) {
@@ -307,31 +339,25 @@ public class NonconformityService {
     }
 
     private void requireSubject(String projectId, String itemId, String lotId, String runId) {
-        if (itemId != null) {
-            itemRepository.findByItemIdAndDeletedYn(itemId, NOT_DELETED)
-                .filter(found -> projectId.equals(found.getProjectId()))
-                .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "The item was not found in this project."));
+        if (itemId != null && catalogQuery.findProjectItem(projectId, itemId).isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "The item was not found in this project.");
         }
         if (lotId != null) {
-            LotMaster lot = lotMasterRepository.findById(lotId)
-                .filter(found -> projectId.equals(found.getProjectId()))
+            LotView lot = lotQuery.findProjectLot(projectId, lotId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "The LOT was not found in this project."));
-            if (itemId != null && !itemId.equals(lot.getItemId())) {
-                throw new BusinessException(ErrorCode.BAD_REQUEST, "LOT " + lot.getLotNo() + " is a LOT of a different item.");
+            if (itemId != null && !itemId.equals(lot.itemId())) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "LOT " + lot.lotNo() + " is a LOT of a different item.");
             }
         }
-        if (runId != null) {
-            productionRunRepository.findByProductionRunIdAndDeletedYn(runId, NOT_DELETED)
-                .filter(found -> projectId.equals(found.getProjectId()))
-                .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "The run was not found in this project."));
+        if (runId != null && productionRunQuery.findProjectRun(projectId, runId).isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "The run was not found in this project.");
         }
     }
 
-    /** The owner or an active member; asked of the repositories so a refusal does not pass through a transactional proxy. */
+    /** The owner or an active member; asked as a yes or no so a refusal does not pass through a transactional proxy. */
     private boolean isMember(String projectId, String userId) {
         Project project = projectAccessService.requireProjectReadAccess(projectId);
-        return userId.equals(project.getOwnerId())
-            || projectMemberRepository.existsByProjectIdAndUserIdAndMemberStatus(projectId, userId, "active");
+        return userId.equals(project.getOwnerId()) || projectMemberQuery.isActiveMember(projectId, userId);
     }
 
     private List<NonconformityResponse> responses(List<Nonconformity> ncrs) {
@@ -345,12 +371,11 @@ public class NonconformityService {
             links.values().stream().flatMap(List::stream).map(NonconformityDefect::getDefectLogId).toList()), DefectLog::getDefectLogId);
         Map<String, List<CorrectiveAction>> actions = actionRepository.findAllByNonconformityIdInOrderByActionNoAsc(ids).stream()
             .collect(Collectors.groupingBy(CorrectiveAction::getNonconformityId));
-        Map<String, Item> items = byId(itemRepository.findAllById(distinct(Stream.concat(
-            ncrs.stream().map(Nonconformity::getItemId), defects.values().stream().map(DefectLog::getItemId)))), Item::getItemId);
-        Map<String, LotMaster> lots = byId(lotMasterRepository.findAllById(distinct(Stream.concat(
-            ncrs.stream().map(Nonconformity::getLotId), defects.values().stream().map(DefectLog::getLotId)))), LotMaster::getLotId);
-        Map<String, ProductionRun> runs = byId(productionRunRepository.findAllById(
-            distinct(ncrs.stream().map(Nonconformity::getProductionRunId))), ProductionRun::getProductionRunId);
+        Map<String, CatalogItemView> items = catalogQuery.findItems(distinct(Stream.concat(
+            ncrs.stream().map(Nonconformity::getItemId), defects.values().stream().map(DefectLog::getItemId))));
+        Map<String, LotView> lots = lotQuery.findLots(distinct(Stream.concat(
+            ncrs.stream().map(Nonconformity::getLotId), defects.values().stream().map(DefectLog::getLotId))));
+        Map<String, ProductionRunView> runs = productionRunQuery.findRuns(distinct(ncrs.stream().map(Nonconformity::getProductionRunId)));
         LocalDate today = LocalDate.now();
         return ncrs.stream().map(ncr -> {
             List<NonconformityResponse.LinkedDefect> linked = links.getOrDefault(ncr.getNonconformityId(), List.of()).stream()
@@ -367,13 +392,14 @@ public class NonconformityService {
                     action.getCreatedAt(), action.getFinishedBy(), action.getFinishedAt(),
                     OPEN.equals(action.getStatus()) && action.getDueDate() != null && action.getDueDate().isBefore(today)))
                 .toList();
-            ProductionRun run = runs.get(ncr.getProductionRunId());
+            ProductionRunView run = runs.get(ncr.getProductionRunId());
             return new NonconformityResponse(
                 ncr.getNonconformityId(), ncr.getProjectId(), ncr.getNcrNo(), ncr.getTitle(), ncr.getDescription(),
                 ncr.getSeverity(), ncr.getStatus(), ncr.getItemId(), code(items.get(ncr.getItemId())), ncr.getLotId(),
-                lotNo(lots.get(ncr.getLotId())), ncr.getProductionRunId(), run == null ? null : run.getRunNumber(),
+                lotNo(lots.get(ncr.getLotId())), ncr.getProductionRunId(), run == null ? null : run.runNumber(),
                 ncr.getRootCause(), ncr.getDisposition(), ncr.getRaisedBy(), ncr.getRaisedAt(), ncr.getClosedBy(),
-                ncr.getClosedAt(), ncr.getClosureNote(), linked, actionList,
+                ncr.getClosedAt(), ncr.getClosureNote(), ncr.getVerificationResult(), ncr.getVerificationNote(), ncr.getVerifiedBy(),
+                ncr.getVerifiedAt(), linked, actionList,
                 (int) actionList.stream().filter(action -> OPEN.equals(action.status())).count(),
                 (int) actionList.stream().filter(NonconformityResponse.Action::overdue).count());
         }).toList();
@@ -395,12 +421,12 @@ public class NonconformityService {
         return ids.filter(Objects::nonNull).collect(Collectors.toSet());
     }
 
-    private static String code(Item item) {
-        return item == null ? null : item.getItemCode();
+    private static String code(CatalogItemView item) {
+        return item == null ? null : item.itemCode();
     }
 
-    private static String lotNo(LotMaster lot) {
-        return lot == null ? null : lot.getLotNo();
+    private static String lotNo(LotView lot) {
+        return lot == null ? null : lot.lotNo();
     }
 
     private static String required(String value, String field) {

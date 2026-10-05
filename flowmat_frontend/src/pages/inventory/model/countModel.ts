@@ -8,13 +8,45 @@ export interface CountLine {
   expectedQuantity: number
 }
 
+/** Draft values and the quantities visible when each count was first entered or loaded. */
+export interface CountDraft {
+  entries: Record<string, string>
+  expectedQuantities: Record<string, number>
+}
+
+/** Editing and sheet loading share the same snapshot; clearing a value lets a new count take a new baseline. */
+export function snapshotCountEntries(draft: CountDraft, entries: Record<string, string>, rows: InventoryDto[]): CountDraft {
+  const next = { entries: { ...draft.entries }, expectedQuantities: { ...draft.expectedQuantities } }
+  const quantities = new Map(rows.map((row) => [row.inventoryId, row.quantity]))
+  for (const [id, text] of Object.entries(entries)) {
+    if (!text.trim()) {
+      delete next.entries[id]
+      delete next.expectedQuantities[id]
+      continue
+    }
+    const quantity = quantities.get(id)
+    if (quantity === undefined) continue
+    next.entries[id] = text
+    next.expectedQuantities[id] = draft.expectedQuantities[id] ?? quantity
+  }
+  return next
+}
+
 export type CountResult = { ok: true; lines: CountLine[] } | { ok: false; error: string }
 
 /**
  * Turns what was typed per record into count lines. Records left blank are not counted; a counted value must be a number
  * of 0 or more. The quantity shown when counting started goes along, so a record that moved meanwhile is not overwritten.
  */
-export function buildCountLines(entries: Record<string, string>, rows: InventoryDto[]): CountResult {
+export function buildCountLines(
+  entries: Record<string, string>,
+  rows: InventoryDto[],
+  expectedQuantities: Record<string, number> = {},
+): CountResult {
+  const known = new Set(rows.map((row) => row.inventoryId))
+  if (Object.entries(entries).some(([id, text]) => text.trim() && !known.has(id))) {
+    return { ok: false, error: 'A counted stock record is no longer available. Clear counts and recount the remaining records.' }
+  }
   const lines: CountLine[] = []
   for (const row of rows) {
     const text = (entries[row.inventoryId] ?? '').trim()
@@ -23,7 +55,7 @@ export function buildCountLines(entries: Record<string, string>, rows: Inventory
     if (!Number.isFinite(counted) || counted < 0) {
       return { ok: false, error: `"${text}" is not a count; use a number of 0 or more.` }
     }
-    lines.push({ inventoryId: row.inventoryId, countedQuantity: counted, expectedQuantity: row.quantity })
+    lines.push({ inventoryId: row.inventoryId, countedQuantity: counted, expectedQuantity: expectedQuantities[row.inventoryId] ?? row.quantity })
   }
   if (lines.length === 0) return { ok: false, error: 'Enter at least one counted quantity.' }
   return { ok: true, lines }

@@ -52,8 +52,10 @@ test('an instruction is released and a run confirms its steps', async ({ page, r
     await addStep.getByLabel('Step').fill('Preheat the oven')
     await addStep.getByLabel('Records a value').check()
     await addStep.getByLabel('Value label').fill('Oven °C')
+    await addStep.getByLabel('Min').fill('200')
+    await addStep.getByLabel('Max').fill('230')
     await addStep.getByRole('button', { name: 'Add step' }).click()
-    await expect(detail.getByRole('list', { name: 'Steps' })).toContainText('records Oven °C')
+    await expect(detail.getByRole('list', { name: 'Steps' })).toContainText('records Oven °C (200–230)')
     await addStep.getByLabel('Step').fill('Shape the rolls')
     await addStep.getByRole('button', { name: 'Add step' }).click()
     await expect(detail.getByRole('list', { name: 'Steps' }).getByRole('listitem')).toHaveCount(2)
@@ -73,13 +75,35 @@ test('an instruction is released and a run confirms its steps', async ({ page, r
     await expect(page.getByRole('note').filter({ hasText: 'required instruction steps not confirmed' })).toBeVisible()
 
     const steps = checklist.getByRole('list', { name: 'Instruction steps' })
-    await steps.getByLabel('Oven °C').fill('220')
+    // Outside the step's limits the value is recorded all the same, and marked (R7).
+    await steps.getByLabel('Oven °C').fill('250')
     await steps.getByRole('listitem').filter({ hasText: 'Preheat the oven' }).getByRole('button', { name: 'Done' }).click()
-    await expect(steps.getByRole('listitem').filter({ hasText: 'Preheat the oven' })).toContainText('Oven °C 220 · demo-owner')
+    const preheat = steps.getByRole('listitem').filter({ hasText: 'Preheat the oven' })
+    await expect(preheat).toContainText('Oven °C 250 (outside 200–230) ')
+    await expect(preheat).toContainText('· demo-owner')
+    // The value outside its limits offers a nonconformity about the run (R8); once raised, its number shows instead.
+    await preheat.getByRole('button', { name: 'Raise NCR' }).click()
+    await expect(preheat).toContainText(/\(outside 200–230\) NCR-\d+/)
+    await expect(preheat.getByRole('button', { name: 'Raise NCR' })).toHaveCount(0)
     await steps.getByRole('listitem').filter({ hasText: 'Shape the rolls' }).getByRole('button', { name: 'Done' }).click()
     await expect(checklist.getByRole('status')).toHaveText('All 2 required steps done')
     await expect(page.getByRole('note').filter({ hasText: 'required instruction step' })).toHaveCount(0)
+
+    // Undoing keeps the confirmation as history, and the step can be done again.
+    await steps.getByRole('listitem').filter({ hasText: 'Shape the rolls' }).getByRole('button', { name: 'Undo' }).click()
+    await expect(checklist.getByRole('status')).toHaveText('1 of 2 required steps done')
+    await steps.getByRole('listitem').filter({ hasText: 'Shape the rolls' }).getByRole('button', { name: 'Done' }).click()
+    await expect(checklist.getByRole('status')).toHaveText('All 2 required steps done')
+    await checklist.getByText('Undone confirmations (1)').click()
+    await expect(checklist.getByRole('list', { name: 'Undone confirmations' }))
+      .toContainText(/^Step 2 · confirmed by demo-owner .+ · undone by demo-owner /)
   } finally {
-    if (runId) await call('POST', `/production-runs/${runId}/finish`, {})
+    if (runId) {
+      await call('POST', `/production-runs/${runId}/finish`, {})
+      const ncrs: { nonconformityId: string; productionRunId: string | null; status: string }[] = await call('GET', `/nonconformities?projectId=${PROJECT}`)
+      for (const ncr of ncrs.filter((one) => one.productionRunId === runId && one.status === 'open')) {
+        await call('POST', `/nonconformities/${ncr.nonconformityId}/cancel`, { note: 'e2e clean-up' })
+      }
+    }
   }
 })

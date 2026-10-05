@@ -257,8 +257,6 @@ export function NodeInspector({
         <h4 style={{ marginTop: 0 }}>{editingPortId ? 'Edit Port' : 'Create Port'}</h4>
         {itemsQuery.isLoading ? (
           <p className="panel-placeholder">Loading project items...</p>
-        ) : itemOptions.length === 0 ? (
-          <p className="panel-placeholder">No items exist for this project. Create catalog items first.</p>
         ) : (
           <form onSubmit={handlePortSubmit} style={{ display: 'grid', gap: '10px' }}>
             <label style={{ display: 'grid', gap: '4px' }}>
@@ -288,13 +286,16 @@ export function NodeInspector({
             <label style={{ display: 'grid', gap: '4px' }}>
               <span>Item</span>
               <select value={portForm.itemId} onChange={(event) => handleItemChange(event.target.value)}>
-                <option value="">Select item</option>
+                <option value="">No item (data, file, API…)</option>
                 {itemOptions.map((item) => (
                   <option key={item.itemId} value={item.itemId}>
                     {item.itemName} ({item.itemCode})
                   </option>
                 ))}
               </select>
+              {itemOptions.length === 0 && (
+                <span className="inspector-hint">This project has no catalog items; the port describes what flows by resource type and schema.</span>
+              )}
             </label>
 
             <label style={{ display: 'grid', gap: '4px' }}>

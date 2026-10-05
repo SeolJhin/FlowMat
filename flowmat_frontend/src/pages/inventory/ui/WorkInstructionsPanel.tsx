@@ -11,6 +11,7 @@ import {
   EMPTY_STEP,
   documentUrlProblem,
   instructionStatus,
+  limitText,
   revisionsByItem,
   shownRevision,
   stepPayload,
@@ -163,7 +164,8 @@ function InstructionDetail({ instruction, revisions, projectId }: {
           <li key={one.stepId}>
             {one.text}
             {!one.required && <span className="inspector-hint"> (optional)</span>}
-            {one.recordsValue && <span className="inspector-hint"> · records {one.valueLabel ?? 'a value'}</span>}
+            {one.recordsValue && <span className="inspector-hint">
+              {' '}· records {one.valueLabel ?? 'a value'}{limitText(one) && ` (${limitText(one)})`}</span>}
             {draft && (
               <button type="button" style={{ marginLeft: 6, fontSize: 11 }} disabled={mutations.removeStep.isPending}
                 onClick={() => mutations.removeStep.mutate({ instructionId: instruction.instructionId, stepId: one.stepId })}>Remove</button>
@@ -184,6 +186,10 @@ function InstructionDetail({ instruction, revisions, projectId }: {
               onChange={(event) => setStep({ ...step, recordsValue: event.target.checked })} /> Records a value</label>
             {step.recordsValue && <label>Value label <input value={step.valueLabel} maxLength={100} placeholder="Oven °C"
               onChange={(event) => setStep({ ...step, valueLabel: event.target.value })} /></label>}
+            {step.recordsValue && <label>Min <input type="number" step="any" value={step.valueMin ?? ''} style={{ width: 80 }}
+              onChange={(event) => setStep({ ...step, valueMin: event.target.value })} /></label>}
+            {step.recordsValue && <label>Max <input type="number" step="any" value={step.valueMax ?? ''} style={{ width: 80 }}
+              onChange={(event) => setStep({ ...step, valueMax: event.target.value })} /></label>}
           </div>
           <button type="submit" disabled={mutations.addStep.isPending}>Add step</button>
         </form>

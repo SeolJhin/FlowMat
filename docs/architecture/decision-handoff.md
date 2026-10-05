@@ -1,0 +1,115 @@
+# FlowMat 아키텍처 결정 인계
+
+기준일 2026-10-02 · 코드 기준 `45f5df0`(main, 마이그레이션 V1–V41)
+
+이 문서는 다음 Agent가 **무엇이 확정됐고 무엇을 아직 결정하면 안 되는지** 알기 위한 인계서다. 구현 지시서가 아니다. 이 문서만 보고 마이그레이션을 만들지 않는다. 조직 테이블도 ADR 승인이 먼저다.
+
+상세 논의와 근거는 [FlowMat_Architecture_refactoring_Handoff.md](../reference/architecture/FlowMat_Architecture_refactoring_Handoff.md)(이하 "원문", §번호)에 있다. 두 문서가 다르면 이 문서를 따른다.
+
+## 1. 한 문장
+
+FlowMat은 업종이 아니라 흐름을 모델링하고 실행한다. 제조·재고·BOM·품질·데이터·업무 같은 업종 개념은 Core가 아니라 도메인 확장으로 둔다. (원문 §1, §2, §55)
+
+## 2. 확정된 결정
+
+결정 상태(2026-10-02 의사결정자 검토):
+
+| 묶음 | ADR | 상태 |
+|---|---|---|
+| A1–A3 조직 경계 | [ADR-001](adr/ADR-001-organization-project-boundary.md) | **Proposed.** A1 문장 자체는 사용자가 확정했지만, 권한 의미(멤버십 분리, cross-project deny-by-default, 조직 OWNER·ADMIN override, 마이그레이션 호환성 불변식)가 닫혀야 Accepted다. 그 전에는 조직 마이그레이션을 시작하지 않는다 |
+| M1–M2 모듈 경계 | [ADR-002](adr/ADR-002-module-dependency.md) | **Accepted** |
+| R1–R5, E1–E2 Port 계약·실행 | [ADR-003](adr/ADR-003-resource-port-contract.md) | 원칙 **Accepted**. 정확한 `resourceType` 값 목록은 **Experimental** registry |
+| P1–P2 금지 | 원문 §39·§48·§54 | 확정 |
+| FM-RUN-005 실행 정책 | [ADR-004](adr/ADR-004-flow-run-execution-policy.md) | **Proposed**(2026-10-03 Agent 초안, 의사결정자 검토 전). 아래 Freeze 밖에서 더한 것이다. 수용 기준 5개가 닫히기 전에는 구현하지 않는다 |
+
+ADR-001~003(Architecture Decision Freeze)과 재고·BOM·LOT 계약의 구현 결정(D2)은 별개의 결정 트랙이다. D2가 남아 있어도 아키텍처 결정을 막지 않는다([WORKBOARD](../status/WORKBOARD.md) §3).
+
+| ID | 결정 | 지금 코드에서 뜻하는 것 | 원문 |
+|---|---|---|---|
+| A1 | **Organization은 상위 소유 및 계정 그룹 경계이고, Project는 현재의 데이터 격리 및 접근권한 집행 경계다. Organization membership은 별도 정책이 도입되기 전까지 Project 접근권한을 암묵적으로 부여하지 않는다.** (사용자 확정 문장) | organization 테이블은 아직 없다. 업무 데이터는 `project_id`로 격리하고, 접근은 `ProjectAccessService`의 프로젝트 멤버십(viewer/editor/owner)과 시스템 역할로만 판정한다. 조직 OWNER/ADMIN이라도 프로젝트 멤버가 아니면 볼 수 없다. | §11–14 |
+| A2 | 모든 `project_id`를 `organization_id`로 바꾸지 않는다. 조직은 `데이터 → Project → Organization`으로 따라간다. | 기존 테이블의 `project_id`는 그대로 둔다. | §14, §48 |
+| A3 | Company → Factory → Project 같은 고정 계층을 만들지 않는다. Site와 BusinessPartner는 Organization 아래의 별도 모델이고, Project와는 선택 관계다. | 지금 만들지 않는다(§3 보류 표). | §9, §10, §15, §16 |
+| M1 | Repository는 자기 bounded context 안에서만 쓴다. 다른 도메인은 그 도메인의 `application.publicapi`(Query/Command, 불변 View DTO)로 접근한다. 지금 결과가 필요하면 동기 Query/Command를, 사건 알림이면 Domain Event를 쓴다. | 기존 위반은 100줄이다(§4). 기준 구현으로 catalog `CatalogQuery`와 flowrun `FlowRunCommand`가 생겼다. | §19–23 |
+| M2 | 기존 위반은 한 번에 고치지 않는다. 새 코드부터 막고(ArchUnit 기준선), 기존 코드는 손댈 때 바꾼다. | Stage A가 `ModuleBoundaryTest`로 적용됐다(다음 작업 3). | §25, §48 |
+| R1 | `ProcessIo`는 Process가 받거나 내보내는 **Port Contract**다. | 필드는 §4 참조. | §29 |
+| R2 | `resourceType`은 포트로 흐르는 대상(Port Resource)의 의미다. DB enum으로 고정하지 않고 애플리케이션 목록으로 관리하며, 목록 밖 값은 **경고**로 처리한다(거절하지 않음). 정확한 값 목록은 Experimental registry다. 노동·설비·연산·기술·시간 같은 실행 요건은 Port Resource가 아니다. | 저장은 자유 문자열 그대로이고, registry(`ResourceTypes`) 밖이면 검증 API가 `RESOURCE_TYPE_UNKNOWN` 경고를 낸다(다음 작업 4). `labor`는 registry에 없다 | §30 |
+| R3 | `itemId`는 범용 Resource ID가 아니라 **Catalog Item과 연결될 때만 쓰는 선택적 binding**이다. 데이터·파일·API 포트는 `itemId` 없이 `schemaJson`으로 계약한다. | | §31 |
+| R4 | `schemaJson`은 정의 시점 계약이다. 실행값은 `FlowRunStep`의 input/output snapshot에 저장한다. | 이미 이렇게 동작한다. | §32 |
+| R5 | Resource 슈퍼테이블을 만들지 않는다. 공통화는 의미가 실제로 같은 곳에서만 한다. | | §27, §43 |
+| E1 | **FlowRun을 장기적으로 도메인 독립적인 실행 Core로 사용한다. 현재 구조는 이를 지원할 기반을 갖추고 있으나, 비제조 vertical slice가 검증될 때까지 범용 실행 능력은 아키텍처 목표로 취급한다.** (사용자 확정 문장) ProductionRun은 제조 확장이다. | `flow_run.production_run_id` 연결은 호환용으로 두고 DB 관계를 뒤집지 않는다. "FlowRun은 범용이다"를 이미 증명된 사실로 문서나 코드 주석에 쓰지 않는다. | §40 |
+| E2 | 정의(Definition)와 실행(Execution)을 분리한다. Simulation은 같은 정의를 쓰지만 재고를 움직이지 않는다. | `ProductionRun.affectsPhysicalState`, FlowRun `runType`(actual·simulation·test·dry_run). | [execution-model.md](execution-model.md) |
+| P1 | `domain/erp`·`mes`·`scm`·`wms` 같은 대형 패키지를 만들지 않는다. 책임 경계가 분명할 때만 새 bounded context를 만든다. | | §39 |
+| P2 | 지금 하지 않는다: 전면 리팩토링, microservice, Kafka/RabbitMQ, Outbox, ERP 전체(GL·AR·AP·급여·세무), 에디터 전면 교체, 제조 기능을 Core로 끌어올리기. | | §48, §54 |
+
+## 3. 아직 결정하지 않은 것 — 임의로 정하지 않는다
+
+아래는 사용자 결정이나 별도 ADR이 필요하다. 구현 중 필요해 보여도 Agent가 정하지 말고 보고한다.
+
+| 항목 | 지금 상태 | 언제·어떻게 정하나 |
+|---|---|---|
+| 조직 역할의 프로젝트 접근 상속(조직 ADMIN이 조직의 모든 프로젝트를 보는가) | 상속 없음(A1) | 별도 ADR, 사용자 결정 |
+| Tenant 격리 정책(조직 간 격리 수준, 조직 단위 조회) | 없음 | 여러 조직 운영이 확정될 때(원문 §51) |
+| `project.organization_id` NOT NULL 전환 | 계획상 Phase 3에서 "검토" | backfill 결과 확인 후 |
+| Site·BusinessPartner·project_site·project_partner 테이블 | 없음 | 실제 ERP/CRM/SCM 요구가 생길 때(원문 Phase 6). 첫 후보: 출고 거래에 거래처가 없어 LOT 리콜에서 출고처를 못 보여주는 문제([현재 기능](../status/CURRENT_CAPABILITIES.md) "LOT 리콜" 행) |
+| Port binding 저장 구조(`bindingType`/`bindingId`, polymorphic 테이블) | 개념만 있음 | 비제조 실사용 검증 후(원문 §42) |
+| 데이터·파일·API 포트의 `quantity`·`unit` | 둘 다 필수라 의미 없는 값(`quantity 0`, `ea`)을 넣는다 | 데이터 흐름을 실제로 쓰기 시작할 때(ADR-003 결정하지 않은 것) |
+| FlowRun 범용성을 "검증됨"으로 바꿀지 | 9-(a) 통합 테스트 통과(2026-10-03). 결정 8은 아직 "목표" | 사용자 결정. 화면까지 포함한 vertical slice를 더 요구할지 함께 정한다 |
+| 공통 Resource contract | 없음(R5) | 두 종류 이상의 비제조 흐름에서 같은 검증·lifecycle이 반복될 때(원문 §51) |
+| 노드 실행기(Flow Run이 노드를 스스로 실행)와 실행 정책(시간 제한·재시도 간격·동시 실행 제한, FM-RUN-005) | 외부 보고 방식만 있음, 연결 실패 시 고정 3회 즉시 재시도 | 실행 정책은 [ADR-004](adr/ADR-004-flow-run-execution-policy.md) **Proposed**(2026-10-03): 정책은 노드에, 기본값은 지금 동작, 재시도 간격은 외부 보고 모델 위에서, 시간 제한만 서버 감시. 수용 기준 5개를 의사결정자가 닫아야 구현한다. 노드 실행기는 여전히 별도 결정(원문 §45 보완 (b), 2026-09-24 인계의 D7) |
+| 다른 도메인 Entity import 금지(ArchUnit Stage C) | 미적용 | Stage A·B 정리 후 |
+| Domain Event 발행 방식과 Outbox | 없음 | 첫 비동기 외부 연동 때(원문 Phase 7) |
+| 편집 협업 충돌 모델(문서 단위 409 / 요소 patch / CRDT) | 문서 단위 409 | 사용자 결정(2026-09-24 D1, [C5 비교](../archive/2026-09-handoff/reports/C-collab-model-comparison.md)) |
+| 권한 매트릭스 확정 | 초안 | 사용자 결정(2026-09-24 D3, [C4 초안](../archive/2026-09-handoff/reports/C-permission-matrix.md)). 조직 ADR과 함께 보는 것이 좋다 |
+
+## 4. 현재 코드 사실 (2026-10-02 확인)
+
+- 마이그레이션은 커밋 `45f5df0`까지 V1–V41이고, 커밋 전 작업 트리에 V42(포트 Item 선택)·V43(설비 교대 여러 개)·V44(재고 이동 원장 인덱스)·V45(설비 날짜별 교대)·V46(작업 지침 확인 취소 기록)·V47(작업 지침 단계 값 한계)·V48(부적합 효과 확인)·V49(창고 작업자 배정)·V50(품목 단가 이력)·V51(설비 상태 이력)이 있다. 모두 세션 DB에 적용돼 고칠 수 없다. 다음 빈 번호는 V52이지만, 작업 직전에 최신 main에서 다시 확인한다. 적용된 마이그레이션은 주석·공백까지 수정하지 않는다.
+- 다른 bounded context의 repository import는 도메인 간 84줄이다(`global`·`batch` 제외, 2026-10-03, ArchUnit 동결 목록과 같은 수). 많은 순서는 inventory→catalog 20, production→catalog 16, production→inventory 12, production→workflow 6, production→bom 5, quality→catalog 5이다.
+- 기준 구현(다음 작업 2) 전에는 105줄이었다. 다음 7줄을 공개 API로 바꿨다.
+  - `BomWhereUsedTreeService`·`BomCostRollupService`의 `ItemRepository`·`UnitMasterRepository` 4줄 → [`CatalogQuery`](../../flowmat_backend/src/main/java/org/myweb/flowmat/domain/catalog/application/publicapi/CatalogQuery.java)
+  - `ProductionFlowRunAdapter`의 `FlowRunRepository` 1줄 → [`FlowRunCommand`](../../flowmat_backend/src/main/java/org/myweb/flowmat/domain/flowrun/application/publicapi/FlowRunCommand.java)
+  - Stage B(2026-10-03, V42 작업 중 고친 파일): `ProcessIoServiceImpl`의 `ItemRepository`, `WorkflowValidationService`의 `UnitMasterRepository` 2줄 → `CatalogQuery`(`findActiveItem`·`isKnownUnitCode`)
+  - Stage B(2026-10-03, 창고 작업 부분 완료 중 고친 파일): `WarehouseTaskService`의 `ItemRepository`·`WorkOrderRepository` 2줄 → `CatalogQuery`(`findProjectItem`·`findItems`)와 새 production 공개 API [`WorkOrderQuery`](../../flowmat_backend/src/main/java/org/myweb/flowmat/domain/production/application/publicapi/WorkOrderQuery.java)(`findProjectWorkOrder`·`findWorkOrders`, 불변 `WorkOrderView`). inventory가 production의 엔티티·enum을 더는 import하지 않는다
+  - Stage B(2026-10-03, 작업 지침 단계 값 한계 V47 중 고친 파일): `WorkInstructionService`의 `ItemRepository` 1줄 → `CatalogQuery`(`findProjectItem`·`findItems`). 동결 96 → 95
+  - Stage B(2026-10-03, NCR 효과 확인 준비로 고친 파일): `NonconformityService`의 4줄(`ItemRepository`·`LotMasterRepository`·`ProductionRunRepository`·`ProjectMemberRepository`) → `CatalogQuery`와 새 공개 API [`LotQuery`](../../flowmat_backend/src/main/java/org/myweb/flowmat/domain/inventory/application/publicapi/LotQuery.java)(`findProjectLot`·`findLots`), [`ProductionRunQuery`](../../flowmat_backend/src/main/java/org/myweb/flowmat/domain/production/application/publicapi/ProductionRunQuery.java)(`findProjectRun`·`findRuns`), [`ProjectMemberQuery`](../../flowmat_backend/src/main/java/org/myweb/flowmat/domain/project/application/publicapi/ProjectMemberQuery.java)(`isActiveMember`, 거절하지 않고 예/아니오만). 동결 95 → 91. 같이 공개 API의 빈 결과를 `Map.of()` 대신 `Collections.emptyMap()`으로 바꿈(없는 id인 null로 찾으면 `Map.of()`는 NPE를 냄)
+  - Stage B(2026-10-03, 위치별 재고 분석 A5 중 고친 파일): `StockMovementAnalysisService`의 `ItemRepository`·`UnitMasterRepository` 2줄 → `CatalogQuery.findProjectItems`(새 연산, `CatalogItemView`에 `leadTimeDays` 추가). 동결 91 → 89
+  - Stage B(2026-10-03, BOM 자재 CSV 종류 열 중 고친 파일): `BomLineImportService`의 `ItemRepository` 1줄 → `CatalogQuery.findProjectItems`(`CatalogItemView`에 `itemStatus`, `ItemStatusRule.isActive(String)`·`refusal(code, status, action)`). 동결 89 → 88
+  - Stage B(2026-10-03, 설비 부하표 전환 순서 제안 중 고친 파일): `EquipmentLoadService`의 `EquipmentRepository`·`ItemRepository` 2줄 → `CatalogQuery`(새 `findProjectEquipments`·`equipmentWindow`, 뷰 `EquipmentWindow`). 동결 86 → 84
+  - Stage B(2026-10-03, 품목 단가 이력 V50 중 고친 파일): `ItemServiceImpl`·`ItemImportService`의 `InventoryRepository` 2줄 → 새 공개 API [`StockQuery`](../../flowmat_backend/src/main/java/org/myweb/flowmat/domain/inventory/application/publicapi/StockQuery.java)(`hasStockRecords`). 동결 88 → 86
+  - 새 코드(2026-10-03 작업지시 계획 기간 제안)는 처음부터 `CatalogQuery`(`findProjectEquipment`·`earliestSlot`·`changeoverMinutes`)를 쓴다. 위반 수는 늘지 않았다.
+- ArchUnit(테스트 의존성 1.5.1)과 `ModuleBoundaryTest`가 있다. 동결 목록은 `flowmat_backend/src/test/resources/archunit_store/`에 있다. 이 파일을 손으로 고치거나 지우지 않는다. 지우면 테스트가 실패한다(`allowStoreCreation=false`).
+- 포트의 Item은 선택이다(V42, 2026-10-03). 생성 API의 `itemId`는 선택이고, 수정 API의 `clearItem: true`가 연결을 지운다. Item 없는 포트에 생산 실행의 투입·산출을 기록하면 400이다(`itemId does not match the selected processIoId.`). `quantity`·`unit`은 여전히 필수다.
+- `ProcessIo` 필드: `itemId`, `ioName`, `direction`, `ioType`, `role`, `resourceType`, `quantity`, `unit`, `formula`, `schemaJson`, `validationRule`, `colorScheme`, `requiredYn`, `allowShortageYn`. `resourceType`은 자유 문자열이고 비우면 `ioType`(기본 `material`)이 들어간다. 세션 DB의 포트 14개는 모두 `material`이었다. `Item`에도 `resourceCategory`·`resourceType` 열이 있지만 포트의 `resourceType`과는 별개다.
+- Flow Run은 발행 revision을 고정하고, Step·Attempt·Event를 기록하며, 수동·그래프 단계 라우팅, 연결 조건·용량, 포트 스키마·검증식, stop/skip/retry 정책을 가진다. **노드를 스스로 실행하지는 않는다.** 외부가 단계를 `start`/`complete`하며 결과를 보고해야 진행된다. 상세: [포트·연결 계약](../domain/process-port-connection-contract.md).
+- 기능별 구현 현황은 [CURRENT_CAPABILITIES.md](../status/CURRENT_CAPABILITIES.md)가 기준이다.
+
+## 5. 원문 대비 보완 (2026-10-02)
+
+원문에도 같은 내용을 `> 2026-10-02 수정/보완`으로 표시해 두었다.
+
+1. **Organization/Project 문장 교체**(사용자): 원문의 "Organization은 최상위 소유/Tenant 경계"를 A1 문장으로 바꿨다(§11, §14, Invariant 1).
+2. **FlowRun 문장 추가**(사용자): E1 문장(§40, Invariant 5).
+3. **데이터 흐름 PoC 범위 정정**: Flow Run에는 Transform을 수행할 실행기가 없다. (a) 외부 실행자가 결과를 보고하는 통합 테스트는 지금 가능하며 "Core가 제조 독립적인가"를 이것으로 증명한다. (b) 노드 종류별 실행기는 별도 ADR로 정한다(§45).
+4. **조직 역할과 프로젝트 권한**: Phase 1~3에서 조직 역할은 프로젝트 접근에 영향을 주지 않는다(§12).
+5. **resourceType 호환**: 목록 밖 값은 경고로 처리한다(§30).
+6. **마이그레이션 번호**: V41은 이미 쓰였다. 조직 마이그레이션은 V42 이후다(§52).
+7. **2026-10-02 코드의 Rule 1 위반 4줄**: 동결하지 말고 먼저 고친다(§57). 같은 날 `CatalogQuery`로 고쳤다.
+
+## 6. 다음 작업 순서
+
+각 단계 전에 최신 main과 마이그레이션 번호를 확인한다. 브랜치 생성·커밋·푸시는 사용자만 한다.
+
+| 순서 | 작업 | 완료 기준 |
+|---|---|---|
+| 1 | **완료(2026-10-02).** [ADR-001 Organization/Project 경계](adr/ADR-001-organization-project-boundary.md), [ADR-002 모듈 의존 규칙](adr/ADR-002-module-dependency.md), [ADR-003 Resource·Port 계약과 실행 Core](adr/ADR-003-resource-port-contract.md). 목차는 [adr/README.md](adr/README.md). | 3개 파일 작성, 상태 Accepted |
+| 2 | **완료(2026-10-02).** catalog `application.publicapi.CatalogQuery`(`findProjectItem`·`findItems`, 불변 `CatalogItemView`)와 flowrun `application.publicapi.FlowRunCommand`(`startLinkedRun`·`finishLinkedRun`, `LinkedRun`). 실제로 쓰는 연산만 만들었고, 원문 예시의 `failLinkedRun`은 호출하는 곳이 없어 만들지 않았다. `BomTree.perProductUnit`도 Item 대신 단위 id를 받는다. | 해당 직접 참조 0줄, 기존 테스트 전부 통과 |
+| 3 | **완료(2026-10-02).** [`ModuleBoundaryTest`](../../flowmat_backend/src/test/java/org/myweb/flowmat/architecture/ModuleBoundaryTest.java)(ArchUnit 1.5.1). 위반 단위는 "클래스 X가 다른 도메인의 repository R을 쓴다"이다. 시그니처와 줄 번호를 빼서, 무관한 수정으로는 동결 목록이 깨지지 않는다. 기존 위반 100건은 `src/test/resources/archunit_store/`에 동결했고, 고친 위반은 자동으로 빠진다. 임시 위반 클래스를 넣어 실패하는 것을 확인했다. | 새 위반에서 테스트 실패, 기존 위반 목록 고정 |
+| 4 | **완료(2026-10-02).** [`ResourceTypes`](../../flowmat_backend/src/main/java/org/myweb/flowmat/domain/workflow/domain/contract/ResourceTypes.java). 목록 밖 값은 검증 API의 `RESOURCE_TYPE_UNKNOWN` 경고로만 보이고 발행은 막지 않는다. 처음에는 `labor`를 넣었으나 같은 날 의사결정자 검토로 뺐다(실행 요건이지 포트로 흐르는 대상이 아님). 포트 편집 화면 I/O Type에 `labor`가 남아 있어 그 포트는 경고를 받는다. 값 목록은 ADR-003의 Experimental registry다. | 기존 그래프 저장·발행이 그대로 통과 |
+| 5 | **완료(2026-10-03).** V42(`process_io.item_id` NOT NULL 해제), 생성 API `itemId` 선택·수정 API `clearItem`, [`DataFlowRunIntegrationTest`](../../flowmat_backend/src/test/java/org/myweb/flowmat/DataFlowRunIntegrationTest.java)(File → Transform → Data, 새 프로젝트, `actual`). `quantity`·`unit`은 여전히 필수라 데이터 포트는 `quantity 0`·`ea`를 쓴다. 결정 8의 "목표 → 검증됨" 전환은 사용자 결정 대기(§3). | Item·Inventory·LOT·BOM·ProductionRun 행 없이 Flow Run 성공, Step·Attempt·Event 기록, 스키마 위반 시 검증 실패 경로 확인 |
+| 6 | 조직 Phase 1~3(ADR-001이 수용 기준 4개를 닫고 Accepted가 된 뒤, 5번의 마이그레이션 다음 번호): `organization`·`organization_member`·`project.organization_id`(NULL) → 개인 조직 backfill → NOT NULL 검토. | 전환 전후로 모든 사용자의 프로젝트 접근 결과가 같음(권한 회귀 테스트) |
+
+## 7. 작업 전 질문과 금지 규칙
+
+- 새 기능이나 리팩토링 전에 원문 §53의 14개 질문에 답한다. 특히 다음 세 가지다. Core인가 Domain인가? 다른 bounded context의 Repository를 직접 참조하는가? 이 공통화는 의미가 같아서인가, 이름만 비슷해서인가?
+- 원문 §54의 금지 목록(대형 도메인 패키지, Resource 슈퍼테이블, `project_id` 일괄 치환, microservice, MQ, 기존 참조 전수 리팩토링, 에디터 전면 교체, 제조 기능의 Core 승격)은 별도 ADR과 실사용 근거 없이 하지 않는다.
+- 재검토 조건은 원문 §51을 따른다.

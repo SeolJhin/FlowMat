@@ -24,4 +24,7 @@ public class RunInstructionCheck {
     private String note;
     private String checkedBy;
     private OffsetDateTime checkedAt;
+    /** Set when the confirmation was undone; the row stays as history (docs/domain/work-instruction.md R6). */
+    private String undoneBy;
+    private OffsetDateTime undoneAt;
 }

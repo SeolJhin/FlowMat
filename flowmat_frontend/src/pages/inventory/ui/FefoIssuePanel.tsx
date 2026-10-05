@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useFefoIssueMutation } from '../../../entities/inventory/api/useFefoIssueMutation'
-import { errorMessage } from '../../../shared/lib/errorMessage'
+import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { FefoIssueDto, ItemDto } from '../../../shared/types/api'
 
@@ -20,6 +20,7 @@ export function FefoIssuePanel({ projectId, items }: { projectId: string; items:
 
   function submit(event: FormEvent) {
     event.preventDefault()
+    if (issue.isPending) return
     setResult(null)
     issue.mutate(
       { itemId, quantity: Number(quantity), note: note.trim() || undefined, action },
@@ -34,31 +35,32 @@ export function FefoIssuePanel({ projectId, items }: { projectId: string; items:
   }
 
   const reserving = action === 'reserve'
+  const failureStatus = errorStatus(issue.error)
   return (
     <details aria-label="Issue by item" style={{ border: '1px solid var(--border)', borderRadius: 12, padding: '8px 12px', marginBottom: 16, fontSize: 13 }}>
       <summary style={{ cursor: 'pointer' }}>Issue or reserve by item, first-expiring LOT first</summary>
-      <form onSubmit={submit} style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap', marginTop: 8, fontSize: 12 }}>
+      <form onSubmit={submit} aria-busy={issue.isPending} style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap', marginTop: 8, fontSize: 12 }}>
         <label style={{ display: 'grid', gap: 4 }}>
           <span>Action</span>
-          <select value={action} onChange={(e) => setAction(e.target.value === 'reserve' ? 'reserve' : 'issue')}>
+          <select disabled={issue.isPending} value={action} onChange={(e) => setAction(e.target.value === 'reserve' ? 'reserve' : 'issue')}>
             <option value="issue">Issue</option>
             <option value="reserve">Reserve</option>
           </select>
         </label>
         <label style={{ display: 'grid', gap: 4 }}>
           <span>Item</span>
-          <select value={itemId} onChange={(e) => setItemId(e.target.value)} required>
+          <select disabled={issue.isPending} value={itemId} onChange={(e) => setItemId(e.target.value)} required>
             <option value="" disabled>Select item</option>
             {tracked.map((item) => <option key={item.itemId} value={item.itemId}>{item.itemCode} · {item.itemName}</option>)}
           </select>
         </label>
         <label style={{ display: 'grid', gap: 4 }}>
           <span>Quantity</span>
-          <input type="number" min="0" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} required style={{ width: 90 }} />
+          <input disabled={issue.isPending} type="number" min="0" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} required style={{ width: 90 }} />
         </label>
         <label style={{ display: 'grid', gap: 4, flex: 1, minWidth: 160 }}>
           <span>Note</span>
-          <input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="e.g. order 42" />
+          <input disabled={issue.isPending} value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="e.g. order 42" />
         </label>
         <button type="submit" disabled={issue.isPending || !itemId || !(Number(quantity) > 0)}>
           {issue.isPending ? (reserving ? 'Reserving...' : 'Issuing...') : reserving ? 'Reserve' : 'Issue'}
@@ -82,8 +84,13 @@ export function FefoIssuePanel({ projectId, items }: { projectId: string; items:
         </p>
       )}
       {issue.isError && (
-        <p style={{ color: '#dc2626', fontSize: 12, margin: '6px 0 0' }}>
+        <p role="alert" style={{ color: '#dc2626', fontSize: 12, margin: '6px 0 0' }}>
           {errorMessage(issue.error, reserving ? 'The reservation was refused.' : 'The issue was refused.')}
+        </p>
+      )}
+      {issue.isError && (failureStatus === null || failureStatus >= 500) && (
+        <p className="inspector-hint" style={{ margin: '6px 0 0' }}>
+          The result is unconfirmed. Retry with the same values before changing or leaving this page.
         </p>
       )}
     </details>

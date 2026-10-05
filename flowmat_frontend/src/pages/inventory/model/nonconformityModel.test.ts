@@ -6,8 +6,10 @@ import {
   actionPayload,
   actionProgress,
   closeBlockers,
+  followUpForm,
   ncrPayload,
   subjectText,
+  verificationPayload,
 } from './nonconformityModel'
 
 function action(status: NcrAction['status'], actionNo = 1): NcrAction {
@@ -53,5 +55,32 @@ describe('payloads', () => {
     expect(actionPayload({ ...EMPTY_ACTION_FORM, description: 'Swap mould', dueDate: '2026-10-01', ownerId: ' ' }).input).toEqual({
       actionType: 'corrective', description: 'Swap mould', ownerId: null, dueDate: '2026-10-01',
     })
+  })
+})
+
+describe('checking whether the actions worked', () => {
+  it('asks for a result, and for what still goes wrong after a no', () => {
+    expect(verificationPayload('', 'x').error).toBe('Say whether the actions worked.')
+    expect(verificationPayload('not_effective', ' ').error).toBe('Say what still goes wrong.')
+    expect(verificationPayload('not_effective', ' Cracks again ').input).toEqual({ result: 'not_effective', note: 'Cracks again' })
+    expect(verificationPayload('effective', ' ').input).toEqual({ result: 'effective', note: null })
+  })
+
+  it('raises a follow-up about the same thing, with the same severity', () => {
+    const form = followUpForm({
+      ncrNo: 'NCR-0007', title: 'Cracked housings', severity: 'major', verificationNote: 'Cracks again on lot 57',
+      itemId: 'housing', itemCode: 'HOUSING', lotId: 'lot-57', lotNo: 'L57', productionRunId: null, runNumber: null,
+    })
+    expect(form.title).toBe('Follow-up to NCR-0007: Cracked housings')
+    expect(form.description).toBe('The actions of NCR-0007 did not work. Cracks again on lot 57')
+    expect(form.followUp?.about).toBe('HOUSING · LOT L57')
+    expect(ncrPayload(form).input).toEqual({
+      title: 'Follow-up to NCR-0007: Cracked housings', description: 'The actions of NCR-0007 did not work. Cracks again on lot 57',
+      severity: 'major', defectLogIds: [], itemId: 'housing', lotId: 'lot-57', productionRunId: null,
+    })
+    expect(followUpForm({
+      ncrNo: 'NCR-0008', title: 'x'.repeat(200), severity: 'minor', verificationNote: null,
+      itemId: null, itemCode: null, lotId: null, lotNo: null, productionRunId: null, runNumber: null,
+    }).title).toHaveLength(200)
   })
 })

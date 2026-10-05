@@ -142,6 +142,8 @@ test('LOT-tracked stock, quarantine, BOM approval and a run planned from the BOM
   const orderValue = await orderSelect.locator('option', { hasText: `Order ${suffix}` }).getAttribute('value')
   await orderSelect.selectOption(orderValue ?? '')
   await expect(page.getByText(/planned from the work order.s BOM/)).toBeVisible()
+  // The chosen order's readiness shows before the run starts.
+  await expect(page.locator('[aria-label="Start readiness"]')).toContainText(/^(Ready|Not ready)/)
   await page.getByRole('button', { name: 'Start' }).click()
   await expect(page.getByText('Workflow revision', { exact: true }).locator('..'))
     .toContainText(/v\d+ \(fixed at start\)/)

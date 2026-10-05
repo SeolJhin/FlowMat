@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   useSaveWorkOrderMutation,
   useWorkOrderTransitionMutation,
@@ -14,7 +15,9 @@ import { approvedRevision } from '../../inventory/model/bomModel'
 import { ItemScanInput } from '../../inventory/ui/ItemScanInput'
 import { pickableItems } from '../../inventory/model/itemStatusModel'
 import { WorkOrderReadiness } from './WorkOrderReadiness'
+import { plannedSupply } from '../model/readinessModel'
 import { WorkOrderEquipmentPicker } from './WorkOrderEquipmentPicker'
+import { WorkOrderPlanSuggestion } from './WorkOrderPlanSuggestion'
 import { WorkOrderAllocations } from './WorkOrderAllocations'
 import { useEquipmentQuery } from '../../../entities/catalog/api/useEquipment'
 
@@ -100,6 +103,12 @@ export function WorkOrdersPanel({
   const [editing, setEditing] = useState<WorkOrderDto | null>(null)
   const [form, setForm] = useState<OrderForm>(EMPTY_FORM)
   const [readinessFor, setReadinessFor] = useState<string | null>(null)
+  // Why the form was filled in for a short sub-assembly: an order's readiness, or open work order needs.
+  const [madeFor, setMadeFor] = useState<string | null>(null)
+  // Open work order needs (Stock tab) send a short sub-assembly as ?make=&quantity= (docs/domain/multi-level-bom.md).
+  const [searchParams] = useSearchParams()
+  const makeItemId = searchParams.get('make')
+  const [madeFrom, setMadeFrom] = useState<string | null>(null)
 
   const orders = ordersQuery.data ?? []
   const itemLabel = useMemo(() => new Map(items.map((item) => [item.itemId, `${item.itemCode} · ${item.itemName}`])), [items])
@@ -109,13 +118,51 @@ export function WorkOrdersPanel({
     () => new Map((equipmentList ?? []).map((one) => [one.equipmentId, one.equipmentCode ?? one.equipmentName])),
     [equipmentList],
   )
-  const boms = useBomsQuery(projectId).data ?? []
+  const bomsQuery = useBomsQuery(projectId)
+  const boms = bomsQuery.data ?? []
+  const bomsLoaded = bomsQuery.isSuccess
   const bomById = new Map(boms.map((bom) => [bom.bomId, bom]))
   // Retired revisions can no longer be chosen; draft / pending ones can, but must be approved before the order is.
   const bomChoices = boms.filter((bom) => bom.targetItemId === form.targetItemId && bom.bomStatus !== 'retired')
   const chosenBom = form.bomId ? bomById.get(form.bomId) : undefined
   // What usable stock could make with the chosen BOM, so a quantity beyond it shows before approving.
   const canMake = useBomBuildableQuery(projectId, form.bomId || null).data
+
+  if (makeItemId && makeItemId !== madeFrom && bomsLoaded) {
+    const made = items.find((item) => item.itemId === makeItemId)
+    if (made) {
+      setMadeFrom(makeItemId)
+      setEditing(null)
+      setForm({
+        ...EMPTY_FORM,
+        workOrderTitle: `${made.itemCode} for open work orders`,
+        targetItemId: made.itemId,
+        bomId: approvedRevision(boms, made.itemId)?.bomId ?? '',
+        targetQuantity: searchParams.get('quantity') ?? '',
+      })
+      setMadeFor('Filled in from open work order needs: what stock and open orders leave short. Check it, then create.')
+    }
+  }
+
+  const makeable = useMemo(
+    () => new Set(boms.filter((bom) => bom.bomStatus === 'approved').map((bom) => bom.targetItemId)),
+    [boms],
+  )
+
+  /** A short sub-assembly as a new work order, done before the order it is for starts (docs/domain/multi-level-bom.md). */
+  function makeSubAssembly(order: WorkOrderDto, material: { itemId: string; itemCode: string }, quantity: number) {
+    setEditing(null)
+    saveMutation.reset()
+    setForm({
+      ...EMPTY_FORM,
+      workOrderTitle: `${material.itemCode} for ${order.workOrderNumber}`,
+      targetItemId: material.itemId,
+      bomId: approvedRevision(boms, material.itemId)?.bomId ?? '',
+      targetQuantity: String(quantity),
+      plannedEndAt: toLocalInput(order.plannedStartAt),
+    })
+    setMadeFor(`Filled in from ${order.workOrderNumber}'s readiness to make what it is short of before it starts. Check it, then create.`)
+  }
 
   function selectTargetItem(targetItemId: string) {
     setForm((f) => ({ ...f, targetItemId, bomId: approvedRevision(boms, targetItemId)?.bomId ?? '' }))
@@ -124,6 +171,7 @@ export function WorkOrdersPanel({
   function resetForm() {
     setEditing(null)
     setForm(EMPTY_FORM)
+    setMadeFor(null)
     saveMutation.reset()
   }
 
@@ -313,7 +361,10 @@ export function WorkOrdersPanel({
                     <tr style={{ borderBottom: '1px solid var(--border)' }}>
                       <td colSpan={6} style={{ ...cell, background: 'var(--accent-bg)' }}>
                         <WorkOrderEquipmentPicker order={order} projectId={projectId} />
-                        <WorkOrderReadiness workOrderId={order.workOrderId} />
+                        {order.equipmentId && <WorkOrderPlanSuggestion order={order} projectId={projectId} />}
+                        <WorkOrderReadiness workOrderId={order.workOrderId} makeable={makeable}
+                          planned={plannedSupply(orders, order.workOrderId)}
+                          onMake={(material, quantity) => makeSubAssembly(order, material, quantity)} />
                         <WorkOrderAllocations order={order} projectId={projectId} />
                       </td>
                     </tr>
@@ -333,6 +384,11 @@ export function WorkOrdersPanel({
 
       <section style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 18 }}>
         <h3 style={{ marginTop: 0 }}>{editing ? `Edit ${editing.workOrderNumber}` : 'New Work Order'}</h3>
+        {madeFor && !editing && (
+          <p role="note" className="inspector-hint" style={{ marginTop: 0 }}>
+            {madeFor}
+          </p>
+        )}
         <form onSubmit={(e) => void handleSubmit(e)} style={{ display: 'grid', gap: 10 }}>
           <label style={{ display: 'grid', gap: 4 }}>
             <span>Title *</span>

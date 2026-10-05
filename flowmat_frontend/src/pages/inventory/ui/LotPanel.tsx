@@ -1,7 +1,11 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { useCloseLotMutation, useCreateLotMutation, useLotTraceQuery, useLotsQuery } from '../../../entities/inventory/api/useLots'
 import { useInventoriesQuery } from '../../../entities/inventory/api/useInventoriesQuery'
+import { useInspectionStandardsQuery } from '../../../entities/quality/api/useInspectionStandards'
+import { useQualityInspectionsQuery } from '../../../entities/quality/api/useQuality'
+import { receiptCheckCounts, receiptCheckText } from '../../../entities/quality/model/standardModel'
 import { QualitySection } from '../../../entities/quality/ui/QualitySection'
+import { ReceiptChecklist } from '../../../entities/quality/ui/ReceiptChecklist'
 import type { ItemDto, LotDto, LotStatus } from '../../../shared/types/api'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
@@ -29,7 +33,22 @@ export function LotPanel({ projectId, items }: { projectId: string; items: ItemD
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selected = lots.find((lot) => lot.lotId === selectedId) ?? null
   const [filter, setFilter] = useState<LotFilter>(EMPTY_LOT_FILTER)
-  const shown = filterLots(lots, filter, (itemId) => itemLabel.get(itemId) ?? itemId)
+  // Receipt checks are worked out only while the filter asks for them, since that reads every inspection of the project.
+  const [receipt, setReceipt] = useState<'any' | 'missing' | 'failed'>('any')
+  const checking = receipt !== 'any'
+  const standardsQuery = useInspectionStandardsQuery(projectId, checking)
+  const inspectionsQuery = useQualityInspectionsQuery(projectId, {}, checking)
+  const receiptCounts = useMemo(
+    () => (checking && standardsQuery.data && inspectionsQuery.data
+      ? receiptCheckCounts(lots, standardsQuery.data, inspectionsQuery.data)
+      : null),
+    [checking, lots, standardsQuery.data, inspectionsQuery.data],
+  )
+  const shown = filterLots(lots, filter, (itemId) => itemLabel.get(itemId) ?? itemId).filter((lot) => {
+    if (!receiptCounts) return true
+    const counts = receiptCounts.get(lot.lotId)
+    return receipt === 'missing' ? (counts?.missing ?? 0) > 0 : (counts?.failed ?? 0) > 0
+  })
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 24, alignItems: 'start' }}>
@@ -63,10 +82,19 @@ export function LotPanel({ projectId, items }: { projectId: string; items: ItemD
               <option value="soon">expires within {EXPIRES_SOON_DAYS} days</option>
               <option value="none">no expiry date</option>
             </select>
+            <select value={receipt} onChange={(e) => setReceipt(e.target.value as typeof receipt)} aria-label="Receipt checks">
+              <option value="any">any receipt checks</option>
+              <option value="missing">required receipt check missing</option>
+              <option value="failed">receipt check failed</option>
+            </select>
+            {checking && !receiptCounts && <span className="inspector-hint">Checking receipt inspections...</span>}
             {shown.length !== lots.length && (
               <span className="inspector-hint">
                 {shown.length} of {lots.length}{' '}
-                <button type="button" style={{ fontSize: 11 }} onClick={() => setFilter(EMPTY_LOT_FILTER)}>Clear</button>
+                <button type="button" style={{ fontSize: 11 }} onClick={() => {
+                  setFilter(EMPTY_LOT_FILTER)
+                  setReceipt('any')
+                }}>Clear</button>
               </span>
             )}
             <button
@@ -89,7 +117,7 @@ export function LotPanel({ projectId, items }: { projectId: string; items: ItemD
           </div>
         )}
         {lots.length > 0 && (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <table aria-label="LOTs" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left' }}>
                 <th style={cell}>LOT</th>
@@ -111,7 +139,14 @@ export function LotPanel({ projectId, items }: { projectId: string; items: ItemD
                     background: lot.lotId === selectedId ? 'var(--accent-bg)' : undefined,
                   }}
                 >
-                  <td style={cell}><code>{lot.lotNo}</code></td>
+                  <td style={cell}>
+                    <code>{lot.lotNo}</code>
+                    {receiptCounts?.has(lot.lotId) && (
+                      <div style={{ fontSize: 11, color: '#c2410c' }}>
+                        {receiptCheckText(receiptCounts.get(lot.lotId) ?? { missing: 0, failed: 0 })}
+                      </div>
+                    )}
+                  </td>
                   <td style={cell}>{itemLabel.get(lot.itemId) ?? lot.itemId}</td>
                   <td style={{ ...cell, textAlign: 'right' }}>{formatQty(lot.quantityOnHand)}</td>
                   <td style={{ ...cell, textAlign: 'right' }}>{formatQty(lot.quantityReserved)}</td>
@@ -281,6 +316,7 @@ function LotDetail({
 
       <section aria-label="LOT quality" style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
         <h4 style={{ margin: '0 0 4px' }}>Quality</h4>
+        <ReceiptChecklist projectId={projectId} lotId={lot.lotId} itemId={lot.itemId} />
         <QualitySection
           projectId={projectId}
           filter={{ lotId: lot.lotId }}

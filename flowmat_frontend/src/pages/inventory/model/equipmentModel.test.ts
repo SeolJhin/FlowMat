@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { EquipmentDetailsDto, EquipmentDto } from '../../../shared/types/api'
-import { EMPTY_DETAILS_FORM, detailsForm, detailsPayload, equipmentCsv, filterEquipment, makerModel, perHour } from './equipmentModel'
+import {
+  EMPTY_DETAILS_FORM, detailsForm, detailsPayload, equipmentCsv, filterEquipment, makerModel, perHour, statusChangeText,
+} from './equipmentModel'
 
 const details: EquipmentDetailsDto = {
   manufacturer: 'Acme', modelName: 'M-200', serialNo: null, capacityPerHour: 120.5, powerKwh: 0, waterLiter: null, location: 'Line 1',
@@ -65,5 +67,13 @@ describe('equipmentCsv', () => {
       '\ufeffcode,name,type,status,manufacturer,model,serial_no,location,capacity_per_hour,power_kwh,water_liter\r\n'
         + 'MX-1,"Mixer, big",machine,active,Acme,M-200,,Line 1,120.5,0,\r\n',
     )
+  })
+})
+
+describe('statusChangeText', () => {
+  it('names the change and its note, or the first status', () => {
+    expect(statusChangeText({ previousStatus: 'active', equipmentStatus: 'maintenance', note: 'Bearing replaced' }))
+      .toBe('active → maintenance · Bearing replaced')
+    expect(statusChangeText({ previousStatus: null, equipmentStatus: 'active', note: null })).toBe('added as active')
   })
 })

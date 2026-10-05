@@ -104,7 +104,7 @@ export function InspectionStandardsPanel({ projectId, items }: { projectId: stri
           )}
         </div>
         <form onSubmit={submit} aria-label={editing ? 'Edit standard' : 'Add standard'}
-          style={{ display: 'grid', gap: 8, alignContent: 'start', fontSize: 13 }}>
+          style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, alignContent: 'start', fontSize: 13 }}>
           <h4 style={{ margin: 0 }}>{editing ? `Edit ${editing.inspectionType}` : 'Add standard'}</h4>
           <label style={{ display: 'grid', gap: 4 }}>Item
             <select value={form.itemId} disabled={Boolean(editing)} onChange={(event) => setForm({ ...form, itemId: event.target.value })}>

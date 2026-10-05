@@ -19,8 +19,8 @@ import java.util.stream.StreamSupport;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
 import org.myweb.flowmat.domain.bom.application.BomService;
-import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.inventory.api.dto.request.InventoryTransferRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.request.PickListRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.request.WarehouseTaskCreateRequest;
@@ -33,10 +33,11 @@ import org.myweb.flowmat.domain.inventory.domain.enums.LotStatus;
 import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
 import org.myweb.flowmat.domain.inventory.repository.WarehouseTaskRepository;
-import org.myweb.flowmat.domain.production.domain.entity.WorkOrder;
-import org.myweb.flowmat.domain.production.domain.enums.WorkOrderStatus;
-import org.myweb.flowmat.domain.production.repository.WorkOrderRepository;
+import org.myweb.flowmat.domain.production.application.publicapi.WorkOrderQuery;
+import org.myweb.flowmat.domain.production.application.publicapi.WorkOrderView;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.project.application.publicapi.ProjectMemberQuery;
+import org.myweb.flowmat.domain.project.domain.entity.Project;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
@@ -60,24 +61,27 @@ public class WarehouseTaskService {
 
     private final WarehouseTaskRepository taskRepository;
     private final InventoryRepository inventoryRepository;
-    private final ItemRepository itemRepository;
+    private final CatalogQuery catalogQuery;
     private final LotMasterRepository lotMasterRepository;
-    private final WorkOrderRepository workOrderRepository;
+    private final WorkOrderQuery workOrderQuery;
     private final BomService bomService;
     private final StorageLocationService storageLocationService;
     private final InventoryTransferService inventoryTransferService;
     private final ProjectAccessService projectAccessService;
+    private final ProjectMemberQuery projectMemberQuery;
     private final IdGenerator idGenerator;
 
-    /** Newest first; one status and one work order only when asked. */
-    public List<WarehouseTaskResponse> list(String projectId, String status, String workOrderId) {
+    /** Newest first; one status, one work order and one assignee only when asked. */
+    public List<WarehouseTaskResponse> list(String projectId, String status, String workOrderId, String assignedTo) {
         String project = required(projectId, "projectId");
         projectAccessService.requireProjectReadAccess(project);
         String statusFilter = trimToNull(status);
         String orderFilter = trimToNull(workOrderId);
+        String assigneeFilter = trimToNull(assignedTo);
         return responses(taskRepository.findAllByProjectIdOrderByCreatedAtDesc(project).stream()
             .filter(task -> statusFilter == null || statusFilter.equals(task.getStatus()))
             .filter(task -> orderFilter == null || orderFilter.equals(task.getWorkOrderId()))
+            .filter(task -> assigneeFilter == null || assigneeFilter.equals(task.getAssignedTo()))
             .toList());
     }
 
@@ -89,7 +93,7 @@ public class WarehouseTaskService {
         if (!type.equals("putaway") && !type.equals("pick")) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "taskType must be putaway or pick.");
         }
-        taskRepository.lockKey("warehouse-task|" + projectId);
+        taskRepository.lockProject(projectId);
         Inventory row = inventoryRepository.findByInventoryIdAndDeletedYn(required(request.inventoryId(), "inventoryId"), NOT_DELETED)
             .filter(found -> projectId.equals(found.getProjectId()))
             .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "The stock record was not found in this project."));
@@ -111,27 +115,26 @@ public class WarehouseTaskService {
     public PickListResponse pickList(PickListRequest request) {
         String projectId = required(request.projectId(), "projectId");
         projectAccessService.requireProjectWriteAccess(projectId);
-        taskRepository.lockKey("warehouse-task|" + projectId);
+        taskRepository.lockProject(projectId);
         String staging = destination(projectId, request.stagingLocation());
-        WorkOrder order = null;
+        WorkOrderView order = null;
         Map<String, BigDecimal> needs = new LinkedHashMap<>();
         List<PickListRequest.Line> lines = request.lines() == null ? List.of() : request.lines();
         if (trimToNull(request.workOrderId()) != null) {
             if (!lines.isEmpty()) {
                 throw new BusinessException(ErrorCode.BAD_REQUEST, "Give a work order or lines to pick, not both.");
             }
-            order = workOrderRepository.findByWorkOrderIdAndDeletedYn(request.workOrderId().trim(), NOT_DELETED)
-                .filter(found -> projectId.equals(found.getProjectId()))
+            order = workOrderQuery.findProjectWorkOrder(projectId, request.workOrderId().trim())
                 .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "The work order was not found in this project."));
-            if (!WorkOrderStatus.fromCode(order.getWorkOrderStatus()).acceptsRuns()) {
-                throw new BusinessException(ErrorCode.CONFLICT, "Work order " + order.getWorkOrderNumber() + " is "
-                    + order.getWorkOrderStatus() + "; pick for an approved or started order.");
+            if (!order.acceptsRuns()) {
+                throw new BusinessException(ErrorCode.CONFLICT, "Work order " + order.workOrderNumber() + " is "
+                    + order.workOrderStatus() + "; pick for an approved or started order.");
             }
-            if (order.getBomId() == null || order.getTargetQuantity() == null) {
-                throw new BusinessException(ErrorCode.BAD_REQUEST, "Work order " + order.getWorkOrderNumber() + " has no BOM and quantity to pick for.");
+            if (order.bomId() == null || order.targetQuantity() == null) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Work order " + order.workOrderNumber() + " has no BOM and quantity to pick for.");
             }
-            BigDecimal quantity = request.quantity() != null ? request.quantity() : order.getTargetQuantity();
-            BomRequirementResponse requirement = bomService.requirementsForRun(order.getBomId(), projectId, order.getTargetItemId(), quantity);
+            BigDecimal quantity = request.quantity() != null ? request.quantity() : order.targetQuantity();
+            BomRequirementResponse requirement = bomService.requirementsForRun(order.bomId(), projectId, order.targetItemId(), quantity);
             for (BomRequirementResponse.Line line : requirement.lines()) {
                 needs.merge(line.childItemId(), line.requiredItemQuantity(), BigDecimal::add);
             }
@@ -145,30 +148,35 @@ public class WarehouseTaskService {
         }
 
         Map<String, BigDecimal> plannedByRecord = plannedByRecord(projectId);
-        List<WarehouseTask> openPicks = taskRepository.findAllByProjectIdAndStatus(projectId, OPEN).stream()
+        Map<String, BigDecimal> plannedToStaging = taskRepository.findAllByProjectIdAndStatus(projectId, OPEN).stream()
             .filter(task -> "pick".equals(task.getTaskType()) && staging.equalsIgnoreCase(task.getToLocation()))
-            .toList();
+            .collect(Collectors.toMap(WarehouseTask::getInventoryId, WarehouseTask::getQuantity, BigDecimal::add));
         String note = trimToNull(request.note());
         List<WarehouseTask> created = new ArrayList<>();
         List<PickListResponse.Line> summary = new ArrayList<>();
         LocalDate today = LocalDate.now();
         for (Map.Entry<String, BigDecimal> need : needs.entrySet()) {
-            Item item = itemRepository.findByItemIdAndDeletedYn(need.getKey(), NOT_DELETED)
-                .filter(found -> projectId.equals(found.getProjectId()))
+            CatalogItemView item = catalogQuery.findProjectItem(projectId, need.getKey())
                 .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "An item to pick was not found in this project."));
             // Locked in id order, so a movement that would drain a record this plan counts on waits for it.
-            List<Inventory> rows = inventoryRepository.findAllById(inventoryRepository.lockItemStock(projectId, item.getItemId()));
-            BigDecimal atStaging = rows.stream()
+            List<Inventory> rows = inventoryRepository.findAllById(inventoryRepository.lockItemStock(projectId, item.itemId()));
+            List<Inventory> usableRows = usableStock(rows, today);
+            BigDecimal atStaging = usableRows.stream()
                 .filter(row -> staging.equalsIgnoreCase(Objects.toString(trimToNull(row.getLocation()), "")))
-                .filter(row -> AVAILABLE.equals(row.getInventoryStatus()))
                 .map(Inventory::getAvailableQuantity).filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal alreadyPlanned = openPicks.stream().filter(task -> item.getItemId().equals(task.getItemId()))
-                .map(WarehouseTask::getQuantity).reduce(BigDecimal.ZERO, BigDecimal::add);
+            // A queued task covers only what its source can still move, without counting staged stock twice.
+            BigDecimal alreadyPlanned = usableRows.stream()
+                .filter(row -> !staging.equalsIgnoreCase(Objects.toString(trimToNull(row.getLocation()), "")))
+                .map(row -> plannedToStaging.getOrDefault(row.getInventoryId(), BigDecimal.ZERO).min(row.getAvailableQuantity()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
             BigDecimal remaining = need.getValue().subtract(atStaging).subtract(alreadyPlanned);
             BigDecimal plannedNow = BigDecimal.ZERO;
-            for (Inventory row : candidates(rows, staging, today)) {
+            for (Inventory row : usableRows) {
                 if (remaining.signum() <= 0) {
                     break;
+                }
+                if (staging.equalsIgnoreCase(Objects.toString(trimToNull(row.getLocation()), ""))) {
+                    continue;
                 }
                 BigDecimal free = row.getAvailableQuantity().subtract(plannedByRecord.getOrDefault(row.getInventoryId(), BigDecimal.ZERO));
                 if (free.signum() <= 0) {
@@ -176,21 +184,65 @@ public class WarehouseTaskService {
                 }
                 BigDecimal piece = free.min(remaining);
                 created.add(taskRepository.saveAndFlush(task(projectId, "pick", row, piece, staging,
-                    order == null ? null : order.getWorkOrderId(), note)));
+                    order == null ? null : order.workOrderId(), note)));
                 plannedByRecord.merge(row.getInventoryId(), piece, BigDecimal::add);
                 plannedNow = plannedNow.add(piece);
                 remaining = remaining.subtract(piece);
             }
-            summary.add(new PickListResponse.Line(item.getItemId(), item.getItemCode(), need.getValue(), atStaging, alreadyPlanned,
+            summary.add(new PickListResponse.Line(item.itemId(), item.itemCode(), need.getValue(), atStaging, alreadyPlanned,
                 plannedNow, remaining.max(BigDecimal.ZERO)));
         }
         return new PickListResponse(responses(created), summary);
     }
 
-    /** Does the task: an ordinary transfer of its quantity to its place, which it then points to. */
+    /**
+     * Does the task: an ordinary transfer of its quantity to its place, which it then points to. With a smaller
+     * {@code quantity} only that much moves now (docs/domain/warehouse-task.md W6): the moved part becomes a task of its
+     * own, done, noting which task it is part of, and this task stays open with the rest. The answer is the task that got
+     * done.
+     */
     @Transactional
-    public WarehouseTaskResponse complete(String taskId) {
+    public WarehouseTaskResponse complete(String taskId, BigDecimal quantity, String expectedToLocation) {
         WarehouseTask task = lockOpen(taskId);
+        // W12: verify the actual scanned code after the same project lock used by location renames.
+        if (expectedToLocation != null && !required(expectedToLocation, "expectedToLocation").equalsIgnoreCase(task.getToLocation())) {
+            throw new BusinessException(ErrorCode.CONFLICT, "expectedToLocation does not match task " + task.getTaskNo()
+                + " destination " + task.getToLocation() + ". Scan its destination again.");
+        }
+        if (quantity == null || quantity.compareTo(task.getQuantity()) == 0) {
+            return responses(List.of(finish(task))).get(0);
+        }
+        if (quantity.signum() <= 0 || quantity.compareTo(task.getQuantity()) > 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Move more than 0 and at most " + plain(task.getQuantity())
+                + " for task " + task.getTaskNo() + ".");
+        }
+        // lockOpen already took the project's planning turn before the task row (W5).
+        WarehouseTask part = new WarehouseTask();
+        part.setTaskId(idGenerator.generate());
+        part.setProjectId(task.getProjectId());
+        part.setTaskNo(nextTaskNo(task.getProjectId()));
+        part.setTaskType(task.getTaskType());
+        part.setStatus(OPEN);
+        part.setInventoryId(task.getInventoryId());
+        part.setItemId(task.getItemId());
+        part.setLotId(task.getLotId());
+        part.setQuantity(quantity);
+        part.setFromLocation(task.getFromLocation());
+        part.setToLocation(task.getToLocation());
+        part.setWorkOrderId(task.getWorkOrderId());
+        part.setAssignedTo(task.getAssignedTo());
+        String note = "Part of " + task.getTaskNo() + (task.getNote() == null ? "" : ": " + task.getNote());
+        part.setNote(note.length() > 500 ? note.substring(0, 500) : note);
+        part.setCreatedBy(projectAccessService.requireCurrentUserId());
+        part.setCreatedAt(OffsetDateTime.now());
+        WarehouseTask done = finish(part);
+        task.setQuantity(task.getQuantity().subtract(quantity));
+        taskRepository.saveAndFlush(task);
+        return responses(List.of(done)).get(0);
+    }
+
+    /** An ordinary transfer of the task's quantity to its place; the task is then done and points to it. */
+    private WarehouseTask finish(WarehouseTask task) {
         String transferId = inventoryTransferService.transfer(new InventoryTransferRequest(
             task.getInventoryId(), task.getToLocation(), task.getQuantity(), "warehouse-task:" + task.getTaskId(),
             "Task " + task.getTaskNo())).transferId();
@@ -198,6 +250,21 @@ public class WarehouseTaskService {
         task.setTransferId(transferId);
         task.setFinishedBy(projectAccessService.requireCurrentUserId());
         task.setFinishedAt(OffsetDateTime.now());
+        return taskRepository.saveAndFlush(task);
+    }
+
+    /** Who should do an open task (W7): the project owner or an active member; blank leaves it to no one. */
+    @Transactional
+    public WarehouseTaskResponse assign(String taskId, String assignedTo) {
+        WarehouseTask task = lockOpen(taskId);
+        String userId = trimToNull(assignedTo);
+        if (userId != null) {
+            Project project = projectAccessService.requireProjectReadAccess(task.getProjectId());
+            if (!userId.equals(project.getOwnerId()) && !projectMemberQuery.isActiveMember(task.getProjectId(), userId)) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, userId + " is not a member of this project.");
+            }
+        }
+        task.setAssignedTo(userId);
         return responses(List.of(taskRepository.saveAndFlush(task))).get(0);
     }
 
@@ -216,14 +283,13 @@ public class WarehouseTaskService {
     }
 
     /**
-     * Records to pick from, best first: usable (available status, stock free, LOT open and not expired), not already at
-     * the staging place; LOTs expiring first, then the oldest record.
+     * Usable material, whether staged or still to pick: available stock in open, unexpired LOTs.
+     * Both readiness and source selection use this rule; LOTs expiring first, then the oldest record.
      */
-    private List<Inventory> candidates(List<Inventory> rows, String staging, LocalDate today) {
+    private List<Inventory> usableStock(List<Inventory> rows, LocalDate today) {
         Map<String, LotMaster> lots = lotMasterRepository.findAllById(rows.stream().map(Inventory::getLotId).filter(Objects::nonNull).distinct().toList())
             .stream().collect(Collectors.toMap(LotMaster::getLotId, Function.identity()));
         return rows.stream()
-            .filter(row -> !staging.equalsIgnoreCase(Objects.toString(trimToNull(row.getLocation()), "")))
             .filter(row -> AVAILABLE.equals(row.getInventoryStatus()))
             .filter(row -> row.getAvailableQuantity() != null && row.getAvailableQuantity().signum() > 0)
             .filter(row -> {
@@ -242,7 +308,7 @@ public class WarehouseTaskService {
         WarehouseTask task = new WarehouseTask();
         task.setTaskId(idGenerator.generate());
         task.setProjectId(projectId);
-        task.setTaskNo(String.format(Locale.ROOT, "WT-%04d", taskRepository.countByProjectId(projectId) + 1));
+        task.setTaskNo(nextTaskNo(projectId));
         task.setTaskType(type);
         task.setStatus(OPEN);
         task.setInventoryId(row.getInventoryId());
@@ -256,6 +322,11 @@ public class WarehouseTaskService {
         task.setCreatedBy(projectAccessService.requireCurrentUserId());
         task.setCreatedAt(OffsetDateTime.now());
         return task;
+    }
+
+    /** Numbers are per project and never reused; callers hold the project's task lock. */
+    private String nextTaskNo(String projectId) {
+        return String.format(Locale.ROOT, "WT-%04d", taskRepository.countByProjectId(projectId) + 1);
     }
 
     /** A place is needed; with a location list it must be an active listed place, spelled as listed. */
@@ -276,7 +347,13 @@ public class WarehouseTaskService {
     }
 
     private WarehouseTask lockOpen(String taskId) {
-        WarehouseTask task = taskRepository.findForUpdate(required(taskId, "taskId"))
+        String id = required(taskId, "taskId");
+        String projectId = taskRepository.findProjectIdByTaskId(id)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        projectAccessService.requireProjectWriteAccess(projectId);
+        // Same first lock as planning and location changes; never wait for it while holding the task row.
+        taskRepository.lockProject(projectId);
+        WarehouseTask task = taskRepository.findForUpdate(id)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         projectAccessService.requireProjectWriteAccess(task.getProjectId());
         if (!OPEN.equals(task.getStatus())) {
@@ -286,20 +363,21 @@ public class WarehouseTaskService {
     }
 
     private List<WarehouseTaskResponse> responses(List<WarehouseTask> tasks) {
-        Map<String, Item> items = byId(itemRepository.findAllById(distinct(tasks.stream().map(WarehouseTask::getItemId))), Item::getItemId);
+        Map<String, CatalogItemView> items = catalogQuery.findItems(distinct(tasks.stream().map(WarehouseTask::getItemId)));
         Map<String, LotMaster> lots = byId(lotMasterRepository.findAllById(distinct(tasks.stream().map(WarehouseTask::getLotId))), LotMaster::getLotId);
-        Map<String, WorkOrder> orders = byId(workOrderRepository.findAllById(distinct(tasks.stream().map(WarehouseTask::getWorkOrderId))),
-            WorkOrder::getWorkOrderId);
+        Map<String, WorkOrderView> orders = workOrderQuery.findWorkOrders(distinct(tasks.stream().map(WarehouseTask::getWorkOrderId)));
         return tasks.stream().map(task -> {
-            Item item = items.get(task.getItemId());
+            CatalogItemView item = items.get(task.getItemId());
             LotMaster lot = lots.get(task.getLotId());
-            WorkOrder order = orders.get(task.getWorkOrderId());
+            // A putaway has no work order, and the map may be one that refuses a null key.
+            WorkOrderView order = task.getWorkOrderId() == null ? null : orders.get(task.getWorkOrderId());
             return new WarehouseTaskResponse(
                 task.getTaskId(), task.getProjectId(), task.getTaskNo(), task.getTaskType(), task.getStatus(), task.getInventoryId(),
-                task.getItemId(), item == null ? null : item.getItemCode(), item == null ? null : item.getItemName(),
+                task.getItemId(), item == null ? null : item.itemCode(), item == null ? null : item.itemName(),
                 task.getLotId(), lot == null ? null : lot.getLotNo(), task.getQuantity(), task.getFromLocation(), task.getToLocation(),
-                task.getWorkOrderId(), order == null ? null : order.getWorkOrderNumber(), task.getNote(), task.getCreatedBy(),
-                task.getCreatedAt(), task.getFinishedBy(), task.getFinishedAt(), task.getTransferId(), task.getCancelReason());
+                task.getWorkOrderId(), order == null ? null : order.workOrderNumber(), task.getNote(), task.getCreatedBy(),
+                task.getCreatedAt(), task.getFinishedBy(), task.getFinishedAt(), task.getTransferId(), task.getCancelReason(),
+                task.getAssignedTo());
         }).toList();
     }
 

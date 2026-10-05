@@ -9,5 +9,12 @@ public interface RunInstructionCheckRepository extends JpaRepository<RunInstruct
 
     List<RunInstructionCheck> findAllByProductionRunId(String productionRunId);
 
-    Optional<RunInstructionCheck> findByProductionRunIdAndStepId(String productionRunId, String stepId);
+    /** Confirmations still standing. */
+    List<RunInstructionCheck> findAllByProductionRunIdAndUndoneAtIsNull(String productionRunId);
+
+    /** A step's standing confirmation; undone ones are history. */
+    Optional<RunInstructionCheck> findByProductionRunIdAndStepIdAndUndoneAtIsNull(String productionRunId, String stepId);
+
+    /** Undone confirmations, the earliest undo first (docs/domain/work-instruction.md R6). */
+    List<RunInstructionCheck> findAllByProductionRunIdAndUndoneAtIsNotNullOrderByUndoneAtAsc(String productionRunId);
 }

@@ -1,23 +1,37 @@
 import { describe, expect, it } from 'vitest'
-import type { EquipmentDowntimeDto, EquipmentScheduleDto } from '../../../entities/catalog/api/useEquipment'
+import type { EquipmentDayDto, EquipmentDowntimeDto, EquipmentScheduleDto, EquipmentShiftDto } from '../../../entities/catalog/api/useEquipment'
 import type { EquipmentDto } from '../../../shared/types/api'
 import {
   DEFAULT_CALENDAR_FORM,
+  EMPTY_DAY_FORM,
+  MAX_SHIFTS,
   availabilitySummary,
   calendarForm,
   calendarPayload,
+  dayLabel,
   dayList,
+  copyableDays,
+  dayCount,
+  dayPayload,
+  rangeDates,
+  daySummary,
   downtimePayload,
   equipmentChoices,
   equipmentLabel,
+  nextDayShift,
+  nextShift,
   nextWeek,
   shiftSummary,
   splitDowntimes,
   toggleDay,
 } from './equipmentScheduleModel'
 
+function shift(shiftStart: string, shiftEnd: string, workDays: number[], shiftHours: number): EquipmentShiftDto {
+  return { shiftId: `s-${shiftStart}`, shiftStart, shiftEnd, workDays, shiftHours }
+}
+
 function calendar(shiftStart: string, shiftEnd: string, workDays: number[], shiftHours: number): EquipmentScheduleDto['calendar'] {
-  return { shiftStart, shiftEnd, workDays, shiftHours, updatedBy: 'u', updatedAt: null }
+  return { shifts: [shift(shiftStart, shiftEnd, workDays, shiftHours)], weeklyHours: shiftHours * workDays.length, updatedBy: 'u', updatedAt: null }
 }
 
 function downtime(downtimeId: string, startsAt: string, endsAt: string): EquipmentDowntimeDto {
@@ -46,19 +60,92 @@ describe('dayList and shiftSummary', () => {
     expect(shiftSummary(calendar('22:00', '06:00', [1], 8))).toBe('22:00–06:00 (ends next day) · Mon · 8 h a shift')
     expect(shiftSummary(calendar('00:00', '00:00', [6, 7], 24))).toBe('All day · Sat, Sun · 24 h a shift')
   })
+
+  it('joins several shifts and ends with the week total', () => {
+    const twoShifts = { shifts: [shift('06:00', '14:00', [1, 2, 3, 4, 5], 8), shift('14:00', '22:00', [1, 2, 3, 4, 5], 8)],
+      weeklyHours: 80, updatedBy: 'u', updatedAt: null }
+    expect(shiftSummary(twoShifts))
+      .toBe('06:00–14:00 · Mon–Fri · 8 h a shift; 14:00–22:00 · Mon–Fri · 8 h a shift · 80 h a week')
+    expect(shiftSummary({ ...twoShifts, shifts: [] })).toBe('No calendar: available around the clock.')
+  })
 })
 
 describe('calendar form', () => {
   it('starts from the saved calendar or a weekday shift, and checks what is sent', () => {
-    const schedule = { equipmentId: 'e', timeZone: 'Asia/Seoul', calendar: calendar('08:30:00', '17:30', [1, 3], 9), downtimes: [] }
-    expect(calendarForm(schedule)).toEqual({ shiftStart: '08:30', shiftEnd: '17:30', workDays: [1, 3] })
+    const schedule = { equipmentId: 'e', timeZone: 'Asia/Seoul', calendar: calendar('08:30:00', '17:30', [1, 3], 9), downtimes: [], days: [] }
+    expect(calendarForm(schedule)).toEqual({ shifts: [{ shiftStart: '08:30', shiftEnd: '17:30', workDays: [1, 3] }] })
     expect(calendarForm(undefined)).toEqual(DEFAULT_CALENDAR_FORM)
     expect(toggleDay([1, 3], 2)).toEqual([1, 2, 3])
     expect(toggleDay([1, 2, 3], 2)).toEqual([1, 3])
-    expect(calendarPayload({ shiftStart: '08:00', shiftEnd: '17:00', workDays: [3, 1, 3] }))
-      .toEqual({ input: { shiftStart: '08:00', shiftEnd: '17:00', workDays: [1, 3] }, error: null })
-    expect(calendarPayload({ shiftStart: '', shiftEnd: '17:00', workDays: [1] }).error).toBe('Enter when the shift starts and ends.')
-    expect(calendarPayload({ shiftStart: '08:00', shiftEnd: '17:00', workDays: [] }).error).toBe('Choose at least one work day.')
+    expect(calendarPayload({ shifts: [{ shiftStart: '08:00', shiftEnd: '17:00', workDays: [3, 1, 3] }] }))
+      .toEqual({ input: { shifts: [{ shiftStart: '08:00', shiftEnd: '17:00', workDays: [1, 3] }] }, error: null })
+    expect(calendarPayload({ shifts: [{ shiftStart: '', shiftEnd: '17:00', workDays: [1] }] }).error)
+      .toBe('Enter when the shift starts and ends.')
+    expect(calendarPayload({ shifts: [{ shiftStart: '08:00', shiftEnd: '17:00', workDays: [] }] }).error)
+      .toBe('Choose at least one work day.')
+  })
+
+  it('adds the next shift after the last one and numbers problems when there are several', () => {
+    const day = { shiftStart: '06:00', shiftEnd: '14:00', workDays: [1, 2, 3, 4, 5] }
+    expect(nextShift({ shifts: [day] })).toEqual({ shiftStart: '14:00', shiftEnd: '22:00', workDays: [1, 2, 3, 4, 5] })
+    expect(nextShift({ shifts: [{ ...day, shiftEnd: '22:00' }] })).toEqual({ shiftStart: '22:00', shiftEnd: '06:00', workDays: [1, 2, 3, 4, 5] })
+    expect(calendarPayload({ shifts: [day, { shiftStart: '14:00', shiftEnd: '22:00', workDays: [] }] }).error)
+      .toBe('Shift 2: Choose at least one work day.')
+    expect(calendarPayload({ shifts: [] }).error).toBe('Add at least one shift, or remove the calendar.')
+    expect(calendarPayload({ shifts: Array.from({ length: MAX_SHIFTS + 1 }, () => day) }).error)
+      .toBe(`A calendar can have at most ${MAX_SHIFTS} shifts.`)
+  })
+})
+
+describe('a day of its own', () => {
+  it('sends a closed day or its shifts, and checks the date and times', () => {
+    expect(dayPayload({ ...EMPTY_DAY_FORM, date: '2030-01-09', closed: true, note: ' Stock take ' }))
+      .toEqual({ date: '2030-01-09', input: { shifts: [], reason: 'Stock take' }, error: null })
+    expect(dayPayload({ ...EMPTY_DAY_FORM, date: '2030-01-08', shifts: [{ shiftStart: '06:00', shiftEnd: '14:00' }] }))
+      .toEqual({ date: '2030-01-08', input: { shifts: [{ shiftStart: '06:00', shiftEnd: '14:00' }], reason: null }, error: null })
+    expect(dayPayload(EMPTY_DAY_FORM).error).toBe('Choose the day.')
+    expect(dayPayload({ ...EMPTY_DAY_FORM, date: '2030-01-08', shifts: [] }).error).toBe('Add a shift, or mark the day closed.')
+    expect(dayPayload({ ...EMPTY_DAY_FORM, date: '2030-01-08', shifts: [{ shiftStart: '06:00', shiftEnd: '14:00' }, { shiftStart: '', shiftEnd: '18:00' }] }).error)
+      .toBe('Shift 2: Enter when the shift starts and ends.')
+    expect(nextDayShift({ ...EMPTY_DAY_FORM, shifts: [{ shiftStart: '06:00', shiftEnd: '14:00' }] })).toEqual({ shiftStart: '14:00', shiftEnd: '18:00' })
+  })
+
+  it('changes a range of days the same way, and counts the days a copy takes along', () => {
+    expect(dayPayload({ ...EMPTY_DAY_FORM, date: '2030-01-14', through: '2030-01-16', closed: true, note: 'Line move' }))
+      .toEqual({ date: '2030-01-14', input: { shifts: [], reason: 'Line move', throughDate: '2030-01-16' }, error: null })
+    expect(dayPayload({ ...EMPTY_DAY_FORM, date: '2030-01-14', through: '2030-01-14', closed: true }).input)
+      .toEqual({ shifts: [], reason: null })
+    expect(dayPayload({ ...EMPTY_DAY_FORM, date: '2030-01-14', through: '2030-01-13', closed: true }).error)
+      .toBe('The last day must not be before the first.')
+    // 2030-01-01 through 2030-03-03 is 62 days; one more is too many.
+    expect(dayPayload({ ...EMPTY_DAY_FORM, date: '2030-01-01', through: '2030-03-03', closed: true }).error).toBeNull()
+    expect(dayPayload({ ...EMPTY_DAY_FORM, date: '2030-01-01', through: '2030-03-04', closed: true }).error)
+      .toBe('A range can cover at most 62 days.')
+    expect(dayCount({ ...EMPTY_DAY_FORM, date: '2030-01-14', through: '2030-01-16' })).toBe(3)
+    expect(dayCount({ ...EMPTY_DAY_FORM, date: '2030-01-14' })).toBe(1)
+    expect(dayCount({ ...EMPTY_DAY_FORM, date: '2030-01-14', through: '2030-01-10' })).toBe(1)
+    expect(copyableDays([{ date: '2029-12-31' }, { date: '2030-01-01' }, { date: '2030-01-09' }], '2030-01-01')).toBe(2)
+
+    // Only some days of the week in a range: 2030-01-14 is a Monday.
+    const weekly = { ...EMPTY_DAY_FORM, date: '2030-01-14', through: '2030-01-27', closed: true, weekDays: [5, 1, 3] }
+    expect(dayCount(weekly)).toBe(6)
+    expect(rangeDates(weekly).slice(0, 3)).toEqual(['2030-01-14', '2030-01-16', '2030-01-18'])
+    expect(dayPayload(weekly).input).toEqual({ shifts: [], reason: null, throughDate: '2030-01-27', weekDays: [1, 3, 5] })
+    expect(dayPayload({ ...weekly, weekDays: [1, 2, 3, 4, 5, 6, 7] }).input).toEqual({ shifts: [], reason: null, throughDate: '2030-01-27' })
+    expect(dayPayload({ ...weekly, weekDays: [] }).error).toBe('Choose at least one day of the week.')
+    expect(dayPayload({ ...weekly, through: '2030-01-15', weekDays: [3] }).error).toBe('None of the dates fall on the chosen days of the week.')
+  })
+
+  it('names the weekday and sums up the day', () => {
+    expect(dayLabel('2030-01-09')).toBe('Wed 2030-01-09')
+    expect(dayLabel('2030-01-13')).toBe('Sun 2030-01-13')
+    const day = (patch: Partial<EquipmentDayDto>): EquipmentDayDto => ({
+      date: '2030-01-08', shifts: [], closed: true, hours: 0, reason: null, updatedBy: 'u', updatedAt: null, ...patch,
+    })
+    expect(daySummary(day({}))).toBe('Closed')
+    expect(daySummary(day({ closed: false, hours: 12, shifts: [
+      { shiftStart: '06:00', shiftEnd: '14:00', shiftHours: 8 }, { shiftStart: '22:00', shiftEnd: '02:00', shiftHours: 4 },
+    ] }))).toBe('06:00–14:00, 22:00–02:00 (ends next day) · 12 h')
   })
 })
 

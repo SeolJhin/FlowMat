@@ -1,8 +1,10 @@
 import { useWorkOrderReadinessQuery } from '../../../entities/production/api/useWorkOrderReadiness'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
-import type { ReadinessCheckStatus } from '../../../shared/types/api'
-import { orderedChecks, readinessHeadline } from '../model/readinessModel'
+import type { ReadinessCheckStatus, WorkOrderReadinessDto } from '../../../shared/types/api'
+import { orderedChecks, readinessHeadline, subAssemblyToMake } from '../model/readinessModel'
+
+type Material = WorkOrderReadinessDto['materials'][number]
 
 const MARK: Record<ReadinessCheckStatus, { symbol: string; color: string; label: string }> = {
   fail: { symbol: '✕', color: '#b91c1c', label: 'problem' },
@@ -14,11 +16,38 @@ const cell = { padding: '4px 6px' } as const
 
 /**
  * Whether a work order can run now: status, workflow, BOM and the materials for what is still to produce
- * (docs/domain/work-order-readiness.md). Checking reserves nothing; stock can change before the run starts.
+ * (docs/domain/work-order-readiness.md). Checking reserves nothing; stock can change before the run starts. A short
+ * material with its own approved BOM (a sub-assembly, docs/domain/multi-level-bom.md) offers a work order for what open
+ * orders do not already make.
  */
-export function WorkOrderReadiness({ workOrderId }: { workOrderId: string }) {
+export function WorkOrderReadiness({ workOrderId, makeable, planned, onMake }: {
+  workOrderId: string
+  /** Items with their own approved BOM. */
+  makeable?: Set<string>
+  /** What other open work orders will still make of each item. */
+  planned?: Map<string, number>
+  onMake?: (material: Material, quantity: number) => void
+}) {
   const query = useWorkOrderReadinessQuery(workOrderId, true)
   const readiness = query.data
+  const making = Boolean(makeable && onMake)
+
+  function makeCell(material: Material) {
+    if (!makeable?.has(material.itemId)) return '-'
+    if (material.shortageQuantity <= 0) return 'own BOM'
+    const already = planned?.get(material.itemId) ?? 0
+    const quantity = subAssemblyToMake(material.shortageQuantity, already)
+    if (quantity <= 0) return <span className="inspector-hint">open work orders make {formatQty(already)}</span>
+    return (
+      <>
+        <button type="button" style={{ fontSize: 11 }} aria-label={`Make ${material.itemCode} with a work order`}
+          onClick={() => onMake?.(material, quantity)}>
+          Make {formatQty(quantity)}
+        </button>
+        {already > 0 && <span className="inspector-hint"> ({formatQty(already)} already planned)</span>}
+      </>
+    )
+  }
 
   if (query.isLoading) return <p className="inspector-hint">Checking...</p>
   if (query.isError) {
@@ -53,6 +82,7 @@ export function WorkOrderReadiness({ workOrderId }: { workOrderId: string }) {
               <th style={{ ...cell, textAlign: 'right' }}>Available</th>
               <th style={{ ...cell, textAlign: 'right' }}>Short</th>
               <th style={cell}>LOTs</th>
+              {making && <th style={cell}>Sub-assembly</th>}
             </tr>
           </thead>
           <tbody>
@@ -68,6 +98,7 @@ export function WorkOrderReadiness({ workOrderId }: { workOrderId: string }) {
                   {material.shortageQuantity > 0 ? formatQty(material.shortageQuantity) : '-'}
                 </td>
                 <td style={cell}>{material.lotTracked ? `${material.usableLots} usable` : '-'}</td>
+                {making && <td style={cell}>{makeCell(material)}</td>}
               </tr>
             ))}
           </tbody>

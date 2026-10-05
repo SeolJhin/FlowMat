@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { InventoryDto } from '../../../shared/types/api'
-import { buildCountLines, countDifference, countDue, countIntervalDays, filterCountRows, lastCountedLabel } from './countModel'
+import { buildCountLines, countDifference, countDue, countIntervalDays, filterCountRows, lastCountedLabel, snapshotCountEntries } from './countModel'
 
 function row(id: string, quantity: number, patch: Partial<InventoryDto> = {}): InventoryDto {
   return {
@@ -80,5 +80,55 @@ describe('countIntervalDays', () => {
     const now = new Date(2026, 7, 1)
     expect(countDue(row, now, countIntervalDays('A'))).toBe(true)
     expect(countDue(row, now, countIntervalDays('B'))).toBe(false)
+  })
+})
+
+describe('stock count after inventory refresh', () => {
+  it('keeps the quantity seen at the first input after a background refresh', () => {
+    expect(buildCountLines({ a: '8' }, [row('a', 12)], { a: 10 })).toEqual({
+      ok: true, lines: [{ inventoryId: 'a', countedQuantity: 8, expectedQuantity: 10 }],
+    })
+  })
+
+  it('keeps a zero baseline', () => {
+    expect(buildCountLines({ a: '2' }, [row('a', 3)], { a: 0 })).toEqual({
+      ok: true, lines: [{ inventoryId: 'a', countedQuantity: 2, expectedQuantity: 0 }],
+    })
+  })
+
+  it('refuses to silently drop a disappeared counted record', () => {
+    expect(buildCountLines({ a: '8', b: '4' }, [row('b', 5)], { a: 10, b: 5 })).toMatchObject({
+      ok: false, error: expect.stringContaining('no longer available'),
+    })
+  })
+})
+describe('snapshotCountEntries', () => {
+  it('keeps the first quantity while editing and does not mutate earlier drafts', () => {
+    const empty = { entries: {}, expectedQuantities: {} }
+    const first = snapshotCountEntries(empty, { a: '8' }, [row('a', 10)])
+    const edited = snapshotCountEntries(first, { a: '9' }, [row('a', 12)])
+    expect(edited).toEqual({ entries: { a: '9' }, expectedQuantities: { a: 10 } })
+    expect(first).toEqual({ entries: { a: '8' }, expectedQuantities: { a: 10 } })
+    expect(empty).toEqual({ entries: {}, expectedQuantities: {} })
+  })
+
+  it('clears the quantity snapshot with the entry and captures a new one after recounting', () => {
+    const first = snapshotCountEntries({ entries: {}, expectedQuantities: {} }, { a: '2' }, [row('a', 0)])
+    const cleared = snapshotCountEntries(first, { a: ' ' }, [row('a', 3)])
+    expect(cleared).toEqual({ entries: {}, expectedQuantities: {} })
+    const counted = snapshotCountEntries(cleared, { a: '2' }, [row('a', 3)])
+    expect(counted.expectedQuantities).toEqual({ a: 3 })
+  })
+
+  it('merges counted sheet entries while retaining existing snapshots and ignoring unknown rows', () => {
+    const draft = { entries: { a: '8' }, expectedQuantities: { a: 10 } }
+    const loaded = snapshotCountEntries(draft, { a: '9', b: '4', unknown: '1' }, [row('a', 12), row('b', 5)])
+    expect(loaded).toEqual({ entries: { a: '9', b: '4' }, expectedQuantities: { a: 10, b: 5 } })
+    expect(buildCountLines(loaded.entries, [row('a', 12), row('b', 5)], loaded.expectedQuantities)).toEqual({
+      ok: true, lines: [
+        { inventoryId: 'a', countedQuantity: 9, expectedQuantity: 10 },
+        { inventoryId: 'b', countedQuantity: 4, expectedQuantity: 5 },
+      ],
+    })
   })
 })

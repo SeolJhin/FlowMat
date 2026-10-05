@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useStockAnalysisQuery } from '../../../entities/inventory/api/useStockAnalysis'
+import { useStorageLocationsQuery } from '../../../entities/inventory/api/useStorageLocations'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import {
@@ -26,7 +27,10 @@ export function StockAnalysisPanel({ projectId }: { projectId: string }) {
   const [days, setDays] = useState(30)
   const [sort, setSort] = useState<AnalysisSort>('idle')
   const [minIdle, setMinIdle] = useState(0)
-  const analysisQuery = useStockAnalysisQuery(projectId, days)
+  // One listed place and the places inside it, or everywhere (docs/domain/stock-analysis.md A5).
+  const [place, setPlace] = useState('')
+  const places = useStorageLocationsQuery(projectId).data ?? []
+  const analysisQuery = useStockAnalysisQuery(projectId, days, true, place || null)
   const lines = analysisQuery.data?.lines ?? []
   const shown = sortAnalysis(filterIdle(lines, minIdle), sort)
   const totals = analysisTotals(lines, Math.max(minIdle, 30))
@@ -64,7 +68,23 @@ export function StockAnalysisPanel({ projectId }: { projectId: string }) {
             ))}
           </select>
         </label>
-        <span className="inspector-hint">Use counts issues and production inputs; transfers and adjustments are not use.</span>
+        {places.length > 0 && (
+          <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+            <span>Place</span>
+            <select aria-label="Place" value={place} onChange={(e) => setPlace(e.target.value)}>
+              <option value="">all places</option>
+              {places.map((one) => (
+                <option key={one.locationId} value={one.locationCode}>
+                  {one.path}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <span className="inspector-hint">
+          Use counts issues and production inputs; transfers and adjustments are not use.
+          {place && ` Only stock at ${place} and the places inside it.`}
+        </span>
       </div>
 
       {analysisQuery.isError && (

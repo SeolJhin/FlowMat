@@ -36,7 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class FlowRunService {
 
-    private static final Set<String> RUN_TYPES = Set.of("actual", "simulation", "test", "dry_run");
+    static final Set<String> RUN_TYPES = Set.of("actual", "simulation", "test", "dry_run");
 
     private final FlowRunRepository flowRunRepository;
     private final FlowRunStepRepository stepRepository;

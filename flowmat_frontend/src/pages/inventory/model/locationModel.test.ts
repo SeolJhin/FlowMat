@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest'
 import type { StorageLocationDto } from '../../../entities/inventory/api/useStorageLocations'
 import {
   EMPTY_LOCATION_FORM,
+  codesWithin,
   createPayload,
   filterLocations,
   locationForm,
   parentOptions,
   placesInside,
   stockPlaceCodes,
+  stockText,
+  stockWithin,
   unlistedPlaces,
   updatePayload,
 } from './locationModel'
@@ -55,6 +58,34 @@ describe('stockPlaceCodes and unlistedPlaces', () => {
   it('suggests active codes and finds places stock uses that the list lacks', () => {
     expect(stockPlaceCodes(all)).toEqual(['S1', 'WH1', 'Z1', 'B1'])
     expect(unlistedPlaces(all, ['wh1', ' Dock ', null, 'dock', 'attic', ''])).toEqual(['attic', 'Dock'])
+  })
+})
+
+describe('codesWithin', () => {
+  it('takes the place and every place inside it, as lower-case codes', () => {
+    expect([...codesWithin([site, warehouse, zone, bin], 'wh1')].sort()).toEqual(['b1', 'wh1', 'z1'])
+    expect([...codesWithin([site, warehouse, zone, bin], 'b1')]).toEqual(['b1'])
+  })
+})
+
+describe('stockWithin', () => {
+  it('counts the stock of every place inside, matching codes ignoring case', () => {
+    const stock = [
+      { itemId: 'flour', quantity: 5, reservedQuantity: 0, location: 'b1' },
+      { itemId: 'sugar', quantity: 0, reservedQuantity: 2, location: 'Z1' },
+      { itemId: 'flour', quantity: 3, reservedQuantity: 0, location: 'Z1' },
+      { itemId: 'salt', quantity: 0, reservedQuantity: 0, location: 'B1' },
+      { itemId: 'salt', quantity: 4, reservedQuantity: 0, location: 'elsewhere' },
+      { itemId: 'salt', quantity: 4, reservedQuantity: 0, location: null },
+    ]
+    const held = stockWithin([site, warehouse, zone, bin], stock)
+    expect(held.get('b1')).toEqual({ records: 1, items: 1 })
+    expect(held.get('z1')).toEqual({ records: 3, items: 2 })
+    expect(held.get('wh1')).toEqual({ records: 3, items: 2 })
+    expect(held.get('s1')).toEqual({ records: 3, items: 2 })
+    expect(stockText(held.get('b1')!)).toBe('1 record, 1 item')
+    expect(stockText(held.get('s1')!)).toBe('3 records, 2 items')
+    expect(stockText({ records: 0, items: 0 })).toBe('empty')
   })
 })
 

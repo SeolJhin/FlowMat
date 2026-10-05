@@ -18,6 +18,16 @@ describe('rowsFromCsv', () => {
     expect(result).toEqual({ ok: true, rows: [{ itemCode: 'FLR-1', itemName: 'Flour', unitCost: '1.5' }], ignored: ['colour'] })
   })
 
+  it.each([
+    ['item_code,unit_cost,cost', 'SUG-1,50,5', 'unit_cost'],
+    ['item_code,barcode,EAN', 'SUG-1,123,456', 'barcode'],
+    ['Code,item_code,item_name', 'SUG-1,FLR-1,Flour', 'Code'],
+  ])('refuses ambiguous item columns %s instead of overriding a value', (header, row, column) => {
+    expect(rowsFromCsv(`${header}\n${row}\n`)).toEqual({
+      ok: false, error: `Use only one ${column} column, including aliases.`,
+    })
+  })
+
   it('needs an item_code column and at least one item', () => {
     expect(rowsFromCsv('')).toEqual({ ok: false, error: 'The file is empty.' })
     expect(rowsFromCsv('name\nFlour')).toMatchObject({ ok: false })

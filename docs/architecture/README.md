@@ -1,54 +1,31 @@
-# FlowMat Enterprise Architecture
+# 아키텍처
 
-이 디렉터리는 FlowMat의 기업용 공정/자원 관리 아키텍처에 대한 현재 기준 문서입니다.
+> **현행 문서** · 최종 확인 2026-10-02 · 이 폴더의 문서는 모두 현행이다. 결정이 바뀌면 같은 변경에서 고친다.
 
-## 목적
-
-FlowMat은 ERP, MES, SCM, WMS, BPM 제품을 각각 복제하는 프로젝트가 아닙니다.
-기존의 `workflow`, `production`, `inventory`, `catalog`, `bom`, `rule` 도메인을 유지하면서
-각 시스템에서 검증된 개념을 FlowMat의 범용 공정 모델에 필요한 만큼만 흡수합니다.
-
-특히 다음 원칙을 지킵니다.
-
-1. **기존 도메인 우선**: `erp/`, `mes/`, `scm/`, `wms/` 같은 거대한 신규 패키지를 만들지 않습니다.
-2. **Definition과 Execution 분리**: 설계도와 실행 기록을 같은 모델로 취급하지 않습니다.
-3. **Resource Flow 명시**: 품목/자원은 공정을 따라 이동하며, 이동은 이력으로 남습니다.
-4. **Domain Core와 Extension 분리**: 제조 특화 기능은 범용 그래프/실행 코어를 오염시키지 않습니다.
-5. **계약 우선**: 스키마/API/불변식을 문서와 계약으로 먼저 확정한 후 구현합니다.
-6. **기존 계약 존중**: 재고·BOM·LOT의 세부 정책은 `docs/domain/inventory-bom-lot-contract.md`가 우선합니다.
+FlowMat은 업종이 아니라 흐름을 모델링하고 실행한다. 업종 개념은 Core가 아니라 도메인 확장으로 둔다.
 
 ## 문서
 
-- [enterprise-domain-map.md](./enterprise-domain-map.md)
-  - ERP / MES / SCM / WMS / Workflow 개념을 현재 FlowMat 도메인에 매핑합니다.
-- [execution-model.md](./execution-model.md)
-  - 공정 정의, 작업지시, 실행, 자원 흐름, 이력의 관계를 정의합니다.
-- [domain-roadmap.md](./domain-roadmap.md)
-  - 현재 코드 기준으로 무엇을 추가하고 무엇을 보류할지 단계별로 정리합니다.
-- [../benchmarking/enterprise-system-references.md](../benchmarking/enterprise-system-references.md)
-  - 외부 오픈소스에서 어떤 패턴을 참고할지 정리합니다.
+| 문서 | 내용 | 언제 읽나 |
+|---|---|---|
+| [decision-handoff.md](decision-handoff.md) | 확정된 결정, 아직 정하면 안 되는 것, 다음 작업 순서와 진행 상황 | 아키텍처에 닿는 작업을 시작하기 전 |
+| [adr/](adr/README.md) | ADR-001 Organization/Project 경계, ADR-002 모듈 의존 규칙, ADR-003 Resource·Port 계약과 실행 Core, ADR-004 Flow Run 실행 정책(Proposed) | 해당 결정의 근거·보류 항목·재검토 조건이 필요할 때 |
+| [domain-map.md](domain-map.md) | bounded context별 책임·엔티티·공개 API, 기업 시스템 개념 대응, 의존 규칙 | 새 기능을 어디에 둘지 정할 때 |
+| [execution-model.md](execution-model.md) | 정의 → 발행 revision → 실행, 상태, Flow Run, 시뮬레이션, 재고 부수효과 | 실행·계획 기능을 만들거나 바꿀 때 |
 
-## 기존 문서와의 우선순위
+## 우선순위
 
-충돌할 경우 다음 순서를 사용합니다.
+충돌하면 다음 순서를 따른다.
 
-1. 실제 DB migration 및 실행 코드
-2. 도메인별 확정 계약 문서
-3. 최신 감사 문서
-4. 이 디렉터리의 장기 아키텍처 문서
-5. 과거 backlog / relay / legacy 문서
+1. 실제 DB migration과 코드
+2. `docs/domain/`의 계약·설계 문서
+3. `docs/status/CURRENT_CAPABILITIES.md`
+4. 이 폴더(그 안에서는 ADR과 `decision-handoff.md`가 우선)
+5. `docs/reference/`(동결된 근거·조사)
+6. `docs/archive/`(레거시)
 
-현재 확인된 주요 문서:
+## 근거와 이전 판
 
-- `docs/domain/inventory-bom-lot-contract.md`
-- `docs/flowmat-audit-2026-09-24.md`
-- `docs/editor/current-state.md`
-- `docs/editor/flowmat_architecture_improvement_plan.md`
-
-## 현재 canonical 애플리케이션
-
-- Backend: `flowmat_backend`
-- Frontend: `flowmat_frontend`
-- `legacy`는 참고용이며 신규 구현 대상이 아닙니다.
-
-새 기능은 특별한 이유가 없는 한 canonical 애플리케이션에만 추가합니다.
+- 결정의 논의 원문(2026-10, 동결): [reference/architecture/](../reference/architecture/FlowMat_Architecture_refactoring_Handoff.md)
+- 외부 시스템 참고 목록: [reference/benchmarks/enterprise-system-references.md](../reference/benchmarks/enterprise-system-references.md)
+- 2026-09 판 도메인 지도·실행 모델·로드맵(레거시): [archive/2026-09-architecture/](../archive/2026-09-architecture/domain-roadmap.md)

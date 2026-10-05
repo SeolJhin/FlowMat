@@ -10,21 +10,44 @@ import type { EquipmentDto } from '../../../shared/types/api'
 import {
   DAYS,
   DOWNTIME_TYPES,
+  EMPTY_DAY_FORM,
   EMPTY_DOWNTIME_FORM,
+  ALL_WEEK_DAYS,
+  MAX_RANGE_DAYS,
+  MAX_SHIFTS,
   availabilitySummary,
   calendarForm,
   calendarPayload,
+  copyableDays,
+  dayCount,
+  dayLabel,
+  dayPayload,
+  daySummary,
   downtimePayload,
+  equipmentLabel,
   formatHours,
+  nextDayShift,
+  nextShift,
   nextWeek,
   shiftSummary,
   splitDowntimes,
   toggleDay,
   type CalendarForm,
+  type DayForm,
+  type ShiftForm,
 } from '../model/equipmentScheduleModel'
 import { EquipmentChangeovers } from './EquipmentChangeovers'
+import { dateInputValue } from '../model/equipmentLoadModel'
 
 const cell = { padding: '4px 6px' } as const
+
+function withShift(form: CalendarForm, index: number, change: Partial<ShiftForm>): CalendarForm {
+  return { shifts: form.shifts.map((shift, one) => (one === index ? { ...shift, ...change } : shift)) }
+}
+
+function withDayShift(form: DayForm, index: number, change: Partial<DayForm['shifts'][number]>): DayForm {
+  return { ...form, shifts: form.shifts.map((shift, one) => (one === index ? { ...shift, ...change } : shift)) }
+}
 
 function when(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
@@ -34,16 +57,29 @@ function when(iso: string): string {
  * One equipment's shift and downtime (docs/domain/equipment-schedule.md). Work order readiness uses them to check whether
  * the equipment has the time an order needs in its planned window.
  */
-export function EquipmentSchedulePanel({ equipment, onClose }: { equipment: EquipmentDto; onClose: () => void }) {
+export function EquipmentSchedulePanel({ equipment, others = [], onClose }: {
+  equipment: EquipmentDto
+  /** The project's other equipment, to copy day changes to. */
+  others?: EquipmentDto[]
+  onClose: () => void
+}) {
   const scheduleQuery = useEquipmentScheduleQuery(equipment.equipmentId)
   const week = useMemo(() => nextWeek(new Date()), [])
   const availabilityQuery = useEquipmentAvailabilityQuery(equipment.equipmentId, week.from, week.to)
-  const { setCalendar, clearCalendar, addDowntime, removeDowntime } = useEquipmentScheduleMutations(equipment.equipmentId)
+  const { setCalendar, clearCalendar, setDay, clearDay, clearDays, copyDays, addDowntime, removeDowntime } =
+    useEquipmentScheduleMutations(equipment.equipmentId)
   // null: not edited, so the form follows the saved calendar.
   const [editedCalendar, setEditedCalendar] = useState<CalendarForm | null>(null)
   const [downtime, setDowntime] = useState(EMPTY_DOWNTIME_FORM)
   const [calendarError, setCalendarError] = useState<string | null>(null)
   const [downtimeError, setDowntimeError] = useState<string | null>(null)
+  const [dayForm, setDayForm] = useState(EMPTY_DAY_FORM)
+  const [dayError, setDayError] = useState<string | null>(null)
+  const [copyTo, setCopyTo] = useState('')
+  // A range of dates going back to the calendar at once (D6).
+  const [clearFrom, setClearFrom] = useState('')
+  const [clearThrough, setClearThrough] = useState('')
+  const [copied, setCopied] = useState<string | null>(null)
   const schedule = scheduleQuery.data
   const form = editedCalendar ?? calendarForm(schedule)
   const name = equipment.equipmentCode ?? equipment.equipmentName
@@ -52,6 +88,29 @@ export function EquipmentSchedulePanel({ equipment, onClose }: { equipment: Equi
     ?? (setCalendar.isError ? errorMessage(setCalendar.error) : null)
     ?? (clearCalendar.isError ? errorMessage(clearCalendar.error) : null)
   const downtimeProblem = downtimeError ?? (addDowntime.isError ? errorMessage(addDowntime.error) : null)
+  const dayProblem = dayError
+    ?? (setDay.isError ? errorMessage(setDay.error) : null)
+    ?? (clearDay.isError ? errorMessage(clearDay.error) : null)
+  const today = dateInputValue(new Date())
+  const upcoming = copyableDays(schedule?.days ?? [], today)
+  const days = dayCount(dayForm)
+
+  function copy(event: FormEvent) {
+    event.preventDefault()
+    const target = others.find((one) => one.equipmentId === copyTo)
+    if (!target) return
+    setCopied(null)
+    copyDays.mutate({ toEquipmentId: target.equipmentId, fromDate: today }, {
+      onSuccess: () => setCopied(`Copied ${upcoming} day change${upcoming === 1 ? '' : 's'} to ${target.equipmentCode ?? target.equipmentName}.`),
+    })
+  }
+
+  function saveDay(event: FormEvent) {
+    event.preventDefault()
+    const payload = dayPayload(dayForm)
+    setDayError(payload.error)
+    if (payload.input) setDay.mutate({ date: payload.date, input: payload.input }, { onSuccess: () => setDayForm(EMPTY_DAY_FORM) })
+  }
 
   function saveCalendar(event: FormEvent) {
     event.preventDefault()
@@ -83,25 +142,115 @@ export function EquipmentSchedulePanel({ equipment, onClose }: { equipment: Equi
         </div>
 
         <form aria-label="Calendar" onSubmit={saveCalendar} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end' }}>
-          <label>Shift start<input type="time" value={form.shiftStart} required
-            onChange={(event) => setEditedCalendar({ ...form, shiftStart: event.target.value })} /></label>
-          <label>Shift end<input type="time" value={form.shiftEnd} required
-            onChange={(event) => setEditedCalendar({ ...form, shiftEnd: event.target.value })} /></label>
-          <fieldset style={{ display: 'flex', gap: 6, border: '1px solid var(--border)', padding: '2px 6px' }}>
-            <legend>Work days</legend>
-            {DAYS.map(([day, label]) => <label key={day} style={{ whiteSpace: 'nowrap' }}>
-              <input type="checkbox" checked={form.workDays.includes(day)}
-                onChange={() => setEditedCalendar({ ...form, workDays: toggleDay(form.workDays, day) })} />{label}
-            </label>)}
-          </fieldset>
+          {form.shifts.map((shift, index) => {
+            // The first shift keeps the plain labels; later ones are numbered.
+            const name = index === 0 ? 'Shift' : `Shift ${index + 1}`
+            return <div key={index} role="group" aria-label={name}
+              style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end', flexBasis: '100%' }}>
+              <label>{name} start<input type="time" value={shift.shiftStart} required
+                onChange={(event) => setEditedCalendar(withShift(form, index, { shiftStart: event.target.value }))} /></label>
+              <label>{name} end<input type="time" value={shift.shiftEnd} required
+                onChange={(event) => setEditedCalendar(withShift(form, index, { shiftEnd: event.target.value }))} /></label>
+              <fieldset style={{ display: 'flex', gap: 6, border: '1px solid var(--border)', padding: '2px 6px' }}>
+                <legend>{index === 0 ? 'Work days' : `${name} days`}</legend>
+                {DAYS.map(([day, label]) => <label key={day} style={{ whiteSpace: 'nowrap' }}>
+                  <input type="checkbox" checked={shift.workDays.includes(day)}
+                    onChange={() => setEditedCalendar(withShift(form, index, { workDays: toggleDay(shift.workDays, day) }))} />{label}
+                </label>)}
+              </fieldset>
+              {form.shifts.length > 1 && <button type="button"
+                onClick={() => setEditedCalendar({ shifts: form.shifts.filter((_, one) => one !== index) })}>Remove {name.toLowerCase()}</button>}
+            </div>
+          })}
+          <button type="button" disabled={form.shifts.length >= MAX_SHIFTS}
+            onClick={() => setEditedCalendar({ shifts: [...form.shifts, nextShift(form)] })}>Add shift</button>
           <button type="submit" disabled={setCalendar.isPending}>{setCalendar.isPending ? 'Saving...' : 'Save calendar'}</button>
           {schedule.calendar && <button type="button" disabled={clearCalendar.isPending}
             onClick={() => clearCalendar.mutate(undefined, { onSuccess: () => setEditedCalendar(null) })}>Remove calendar</button>}
           <span className="inspector-hint" style={{ flexBasis: '100%' }}>
             Times are in {schedule.timeZone}. A shift that ends at or before its start runs past midnight; the same time is all day.
+            Shifts may touch (06:00–14:00 and 14:00–22:00) but not overlap; up to {MAX_SHIFTS} shifts.
           </span>
           {calendarProblem && <p role="alert" style={{ flexBasis: '100%', margin: 0 }}>{calendarProblem}</p>}
         </form>
+
+        {schedule.calendar && <>
+          <form aria-label="Change a day" onSubmit={saveDay} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end' }}>
+            <label>Day<input type="date" value={dayForm.date} required
+              onChange={(event) => setDayForm({ ...dayForm, date: event.target.value })} /></label>
+            <label>Through<input type="date" value={dayForm.through} min={dayForm.date || undefined}
+              onChange={(event) => setDayForm({ ...dayForm, through: event.target.value })} /></label>
+            {dayForm.through && dayForm.through !== dayForm.date && (
+              <span role="group" aria-label="Days of the week" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                {DAYS.map(([number, label]) => (
+                  <label key={number} style={{ whiteSpace: 'nowrap' }}><input type="checkbox"
+                    checked={(dayForm.weekDays ?? ALL_WEEK_DAYS).includes(number)}
+                    onChange={() => setDayForm({ ...dayForm, weekDays: toggleDay([...(dayForm.weekDays ?? ALL_WEEK_DAYS)], number) })} />
+                    {label}</label>
+                ))}
+              </span>
+            )}
+            <label style={{ whiteSpace: 'nowrap' }}><input type="checkbox" checked={dayForm.closed}
+              onChange={(event) => setDayForm({ ...dayForm, closed: event.target.checked })} />Closed all day</label>
+            {!dayForm.closed && dayForm.shifts.map((shift, index) => {
+              const number = index === 0 ? '' : ` ${index + 1}`
+              return <span key={index} role="group" aria-label={`Day shift${number}`} style={{ display: 'flex', gap: 6, alignItems: 'end' }}>
+                <label>From{number}<input type="time" value={shift.shiftStart} required
+                  onChange={(event) => setDayForm(withDayShift(dayForm, index, { shiftStart: event.target.value }))} /></label>
+                <label>Until{number}<input type="time" value={shift.shiftEnd} required
+                  onChange={(event) => setDayForm(withDayShift(dayForm, index, { shiftEnd: event.target.value }))} /></label>
+                {dayForm.shifts.length > 1 && <button type="button"
+                  onClick={() => setDayForm({ ...dayForm, shifts: dayForm.shifts.filter((_, one) => one !== index) })}>
+                  Remove day shift{number || ' 1'}</button>}
+              </span>
+            })}
+            {!dayForm.closed && <button type="button" disabled={dayForm.shifts.length >= MAX_SHIFTS}
+              onClick={() => setDayForm({ ...dayForm, shifts: [...dayForm.shifts, nextDayShift(dayForm)] })}>Add day shift</button>}
+            <label>Note<input value={dayForm.note} maxLength={200}
+              onChange={(event) => setDayForm({ ...dayForm, note: event.target.value })} /></label>
+            <button type="submit" disabled={setDay.isPending}>
+              {setDay.isPending ? 'Saving...' : days > 1 ? `Save ${days} days` : 'Save day'}</button>
+            <span className="inspector-hint" style={{ flexBasis: '100%' }}>
+              A day's own shifts replace the calendar's for that date, on a project holiday too: close it, shorten it or work a day off.
+              Give a last day (Through) to change every date up to it the same way, up to {MAX_RANGE_DAYS} days; untick days of
+              the week to leave them out.
+            </span>
+            {dayProblem && <p role="alert" style={{ flexBasis: '100%', margin: 0 }}>{dayProblem}</p>}
+          </form>
+          {schedule.days.length > 0 && <table aria-label="Day changes" style={{ borderCollapse: 'collapse', width: '100%', textAlign: 'left' }}>
+            <thead><tr><th style={cell}>Day</th><th style={cell}>Shifts</th><th style={cell}>Note</th><th style={cell}>Actions</th></tr></thead>
+            <tbody>{schedule.days.map((day) => <tr key={day.date}
+              style={{ borderTop: '1px solid var(--border)', opacity: day.date < today ? 0.6 : 1 }}>
+              <td style={cell}>{dayLabel(day.date)}</td><td style={cell}>{daySummary(day)}</td><td style={cell}>{day.reason ?? '—'}</td>
+              <td style={cell}><button type="button" disabled={clearDay.isPending} onClick={() => clearDay.mutate(day.date)}>Remove</button></td>
+            </tr>)}</tbody>
+          </table>}
+          {schedule.days.length > 1 && <form aria-label="Clear days" onSubmit={(event) => {
+            event.preventDefault()
+            if (!clearFrom || !clearThrough || clearThrough < clearFrom) return
+            clearDays.mutate({ from: clearFrom, through: clearThrough }, { onSuccess: () => { setClearFrom(''); setClearThrough('') } })
+          }} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end' }}>
+            <label>Back to the calendar from<input type="date" value={clearFrom} required
+              onChange={(event) => setClearFrom(event.target.value)} /></label>
+            <label>through<input type="date" value={clearThrough} required min={clearFrom || undefined}
+              onChange={(event) => setClearThrough(event.target.value)} /></label>
+            <button type="submit" disabled={clearDays.isPending || !clearFrom || !clearThrough || clearThrough < clearFrom}>
+              Clear these days</button>
+            {clearDays.isError && <p role="alert" style={{ flexBasis: '100%', margin: 0 }}>{errorMessage(clearDays.error)}</p>}
+          </form>}
+          {schedule.days.length > 0 && others.length > 0 && <form aria-label="Copy day changes" onSubmit={copy}
+            style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end' }}>
+            <label>Copy to<select aria-label="Copy to" value={copyTo} onChange={(event) => setCopyTo(event.target.value)}>
+              <option value="">Choose equipment</option>
+              {others.map((one) => <option key={one.equipmentId} value={one.equipmentId}>{equipmentLabel(one)}</option>)}
+            </select></label>
+            <button type="submit" disabled={!copyTo || upcoming === 0 || copyDays.isPending}>
+              {copyDays.isPending ? 'Copying...' : `Copy ${upcoming} day change${upcoming === 1 ? '' : 's'}`}</button>
+            <span className="inspector-hint">From today on; the same dates on the other equipment are replaced, its other dates stay.</span>
+            {copied && <p role="status" style={{ flexBasis: '100%', margin: 0 }}>{copied}</p>}
+            {copyDays.isError && <p role="alert" style={{ flexBasis: '100%', margin: 0 }}>{errorMessage(copyDays.error)}</p>}
+          </form>}
+        </>}
 
         <form aria-label="Add downtime" onSubmit={saveDowntime} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end' }}>
           <label>Type<select value={downtime.downtimeType}

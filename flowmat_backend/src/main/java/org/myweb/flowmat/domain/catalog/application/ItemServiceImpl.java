@@ -12,7 +12,7 @@ import org.myweb.flowmat.domain.catalog.api.dto.response.ItemResponse;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
-import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
+import org.myweb.flowmat.domain.inventory.application.publicapi.StockQuery;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
@@ -32,7 +32,8 @@ public class ItemServiceImpl implements ItemService {
     private final IdGenerator idGenerator;
     private final ProjectAccessService projectAccessService;
     private final UnitMasterRepository unitMasterRepository;
-    private final InventoryRepository inventoryRepository;
+    private final StockQuery stockQuery;
+    private final ItemCostHistoryService itemCostHistoryService;
     /** Other domains that still rely on an item; see {@link ItemUsageCheck}. */
     private final List<ItemUsageCheck> itemUsageChecks;
 
@@ -91,7 +92,9 @@ public class ItemServiceImpl implements ItemService {
             applyPurchaseUnit(item, request.purchaseUnit(), request.purchaseUnitQty());
         }
         item.setDeletedYn(NOT_DELETED);
-        return toResponse(itemRepository.save(item));
+        Item saved = itemRepository.save(item);
+        itemCostHistoryService.record(saved, null, saved.getUnitCost());
+        return toResponse(saved);
     }
 
     @Override
@@ -139,7 +142,7 @@ public class ItemServiceImpl implements ItemService {
         }
         if (request.lotManageYn() != null && !yn(request.lotManageYn()).equals(item.getLotManageYn())) {
             // Existing stock rows were created under the old rule; switching would leave them inconsistent.
-            if (inventoryRepository.existsByItemIdAndDeletedYn(item.getItemId(), NOT_DELETED)) {
+            if (stockQuery.hasStockRecords(item.getItemId())) {
                 throw new BusinessException(ErrorCode.CONFLICT,
                     "LOT tracking can only change while the item has no stock records.");
             }
@@ -151,6 +154,7 @@ public class ItemServiceImpl implements ItemService {
         if (request.leadTimeDays() != null) {
             item.setLeadTimeDays(requireNonNegative(request.leadTimeDays(), "Lead time"));
         }
+        BigDecimal costBefore = item.getUnitCost();
         if (request.unitCost() != null) {
             item.setUnitCost(requireNonNegative(request.unitCost(), "Unit cost"));
         }
@@ -160,7 +164,9 @@ public class ItemServiceImpl implements ItemService {
         if (request.purchaseUnit() != null || request.purchaseUnitQty() != null) {
             applyPurchaseUnit(item, request.purchaseUnit(), request.purchaseUnitQty());
         }
-        return toResponse(itemRepository.save(item));
+        Item saved = itemRepository.save(item);
+        itemCostHistoryService.record(saved, costBefore, saved.getUnitCost());
+        return toResponse(saved);
     }
 
     @Override

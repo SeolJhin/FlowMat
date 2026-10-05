@@ -6,11 +6,10 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
-import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.production.api.dto.request.WorkInstructionRequest;
 import org.myweb.flowmat.domain.production.api.dto.request.WorkInstructionStepRequest;
 import org.myweb.flowmat.domain.production.api.dto.response.WorkInstructionResponse;
@@ -41,7 +40,7 @@ public class WorkInstructionService {
 
     private final WorkInstructionRepository instructionRepository;
     private final WorkInstructionStepRepository stepRepository;
-    private final ItemRepository itemRepository;
+    private final CatalogQuery catalogQuery;
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
 
@@ -64,16 +63,15 @@ public class WorkInstructionService {
         }
         String projectId = request.projectId().trim();
         projectAccessService.requireProjectWriteAccess(projectId);
-        Item item = itemRepository.findByItemIdAndDeletedYn(request.itemId() == null ? "" : request.itemId().trim(), NOT_DELETED)
-            .filter(found -> projectId.equals(found.getProjectId()))
+        CatalogItemView item = catalogQuery.findProjectItem(projectId, request.itemId() == null ? "" : request.itemId().trim())
             .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "itemId is not an item of this project."));
-        List<WorkInstruction> revisions = instructionRepository.findAllByItemIdAndDeletedYnOrderByRevisionNoDesc(item.getItemId(), NOT_DELETED);
+        List<WorkInstruction> revisions = instructionRepository.findAllByItemIdAndDeletedYnOrderByRevisionNoDesc(item.itemId(), NOT_DELETED);
         requireNoDraft(revisions);
         WorkInstruction instruction = new WorkInstruction();
         instruction.setInstructionId(idGenerator.generate());
         instruction.setProjectId(projectId);
-        instruction.setItemId(item.getItemId());
-        instruction.setRevisionNo(nextRevision(item.getItemId(), revisions));
+        instruction.setItemId(item.itemId());
+        instruction.setRevisionNo(nextRevision(item.itemId(), revisions));
         instruction.setStatus(DRAFT);
         applyText(instruction, request);
         instruction.setCreatedBy(projectAccessService.requireCurrentUserId());
@@ -106,6 +104,12 @@ public class WorkInstructionService {
         if (label != null && label.length() > 100) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "valueLabel can be at most 100 characters.");
         }
+        if (!recordsValue && (request.valueMin() != null || request.valueMax() != null)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Limits need a step that records a value.");
+        }
+        if (request.valueMin() != null && request.valueMax() != null && request.valueMin().compareTo(request.valueMax()) > 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "valueMin must not be above valueMax.");
+        }
         List<WorkInstructionStep> steps = stepRepository.findAllByInstructionIdOrderByStepNoAsc(instruction.getInstructionId());
         WorkInstructionStep step = new WorkInstructionStep();
         step.setStepId(idGenerator.generate());
@@ -115,6 +119,8 @@ public class WorkInstructionService {
         step.setRequiredYn(Boolean.FALSE.equals(request.required()) ? "N" : "Y");
         step.setRecordsValueYn(recordsValue ? "Y" : "N");
         step.setValueLabel(label);
+        step.setValueMin(request.valueMin());
+        step.setValueMax(request.valueMax());
         stepRepository.save(step);
         touch(instruction);
         return response(instruction);
@@ -194,6 +200,8 @@ public class WorkInstructionService {
             step.setRequiredYn(sourceStep.getRequiredYn());
             step.setRecordsValueYn(sourceStep.getRecordsValueYn());
             step.setValueLabel(sourceStep.getValueLabel());
+            step.setValueMin(sourceStep.getValueMin());
+            step.setValueMax(sourceStep.getValueMax());
             stepRepository.save(step);
         }
         return response(copy);
@@ -224,18 +232,18 @@ public class WorkInstructionService {
         Map<String, List<WorkInstructionStep>> steps = stepRepository.findAllByInstructionIdInOrderByStepNoAsc(
                 instructions.stream().map(WorkInstruction::getInstructionId).toList()).stream()
             .collect(Collectors.groupingBy(WorkInstructionStep::getInstructionId));
-        Map<String, Item> items = itemRepository.findAllById(instructions.stream().map(WorkInstruction::getItemId).distinct().toList())
-            .stream().collect(Collectors.toMap(Item::getItemId, Function.identity()));
+        Map<String, CatalogItemView> items = catalogQuery.findItems(instructions.stream().map(WorkInstruction::getItemId).distinct().toList());
         return instructions.stream()
             .map(instruction -> {
-                Item item = items.get(instruction.getItemId());
+                CatalogItemView item = items.get(instruction.getItemId());
                 List<WorkInstructionResponse.Step> stepResponses = steps.getOrDefault(instruction.getInstructionId(), List.of()).stream()
                     .sorted(Comparator.comparing(WorkInstructionStep::getStepNo))
                     .map(step -> new WorkInstructionResponse.Step(step.getStepId(), step.getStepNo(), step.getStepText(),
-                        "Y".equals(step.getRequiredYn()), "Y".equals(step.getRecordsValueYn()), step.getValueLabel()))
+                        "Y".equals(step.getRequiredYn()), "Y".equals(step.getRecordsValueYn()), step.getValueLabel(),
+                        step.getValueMin(), step.getValueMax()))
                     .toList();
                 return new WorkInstructionResponse(instruction.getInstructionId(), instruction.getProjectId(), instruction.getItemId(),
-                    item == null ? null : item.getItemCode(), item == null ? null : item.getItemName(), instruction.getRevisionNo(),
+                    item == null ? null : item.itemCode(), item == null ? null : item.itemName(), instruction.getRevisionNo(),
                     instruction.getStatus(), instruction.getTitle(), instruction.getBody(), instruction.getDocumentUrl(),
                     instruction.getReleasedBy(), instruction.getReleasedAt(), instruction.getUpdatedAt(), stepResponses,
                     "Y".equals(instruction.getBlocksFinishYn()));

@@ -2,9 +2,12 @@ import type {
   DowntimeType,
   EquipmentAvailabilityDto,
   EquipmentCalendarInput,
+  EquipmentDayDto,
+  EquipmentDayInput,
   EquipmentDowntimeDto,
   EquipmentDowntimeInput,
   EquipmentScheduleDto,
+  EquipmentShiftDto,
 } from '../../../entities/catalog/api/useEquipment'
 import type { EquipmentDto } from '../../../shared/types/api'
 
@@ -15,13 +18,22 @@ export const DAYS: readonly (readonly [number, string])[] = [
 
 export const DOWNTIME_TYPES: DowntimeType[] = ['maintenance', 'breakdown', 'other']
 
-export interface CalendarForm {
+export interface ShiftForm {
   shiftStart: string
   shiftEnd: string
   workDays: number[]
 }
 
-export const DEFAULT_CALENDAR_FORM: CalendarForm = { shiftStart: '09:00', shiftEnd: '18:00', workDays: [1, 2, 3, 4, 5] }
+export interface CalendarForm {
+  shifts: ShiftForm[]
+}
+
+/** The server takes at most this many shifts per equipment. */
+export const MAX_SHIFTS = 6
+
+export const DEFAULT_SHIFT: ShiftForm = { shiftStart: '09:00', shiftEnd: '18:00', workDays: [1, 2, 3, 4, 5] }
+
+export const DEFAULT_CALENDAR_FORM: CalendarForm = { shifts: [DEFAULT_SHIFT] }
 
 export interface DowntimeForm {
   downtimeType: DowntimeType
@@ -33,24 +45,167 @@ export interface DowntimeForm {
 
 export const EMPTY_DOWNTIME_FORM: DowntimeForm = { downtimeType: 'maintenance', startsAt: '', endsAt: '', reason: '' }
 
-/** The saved calendar as a form, or a weekday day shift to start from. */
+/** The saved shifts as a form, or a weekday day shift to start from. */
 export function calendarForm(schedule: EquipmentScheduleDto | undefined): CalendarForm {
-  const calendar = schedule?.calendar
-  return calendar
-    ? { shiftStart: calendar.shiftStart.slice(0, 5), shiftEnd: calendar.shiftEnd.slice(0, 5), workDays: [...calendar.workDays] }
+  const shifts = schedule?.calendar?.shifts ?? []
+  return shifts.length > 0
+    ? { shifts: shifts.map((shift) => ({
+      shiftStart: shift.shiftStart.slice(0, 5), shiftEnd: shift.shiftEnd.slice(0, 5), workDays: [...shift.workDays],
+    })) }
     : DEFAULT_CALENDAR_FORM
+}
+
+/** "14:00" + 8 h = "22:00", wrapping past midnight. */
+function addHours(time: string, hours: number): string {
+  const [hour, minute] = time.split(':').map(Number)
+  const total = ((hour * 60 + minute + hours * 60) % 1440 + 1440) % 1440
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
+/** A shift to add: it starts when the last one ends and runs eight hours on the same days. */
+export function nextShift(form: CalendarForm): ShiftForm {
+  const last = form.shifts[form.shifts.length - 1] ?? DEFAULT_SHIFT
+  const start = /^\d{2}:\d{2}$/.test(last.shiftEnd) ? last.shiftEnd : DEFAULT_SHIFT.shiftStart
+  return { shiftStart: start, shiftEnd: addHours(start, 8), workDays: [...last.workDays] }
+}
+
+/** A date's change being written: closed, or its own shifts. */
+export interface DayForm {
+  /** YYYY-MM-DD */
+  date: string
+  /** The last day of a range changed the same way (D6); blank for one day. */
+  through: string
+  /** In a range, only these days of the week (ISO, 1 = Monday); every day when left out. */
+  weekDays?: number[]
+  closed: boolean
+  shifts: { shiftStart: string; shiftEnd: string }[]
+  note: string
+}
+
+export const EMPTY_DAY_FORM: DayForm = { date: '', through: '', closed: false, shifts: [{ shiftStart: '09:00', shiftEnd: '13:00' }], note: '' }
+
+/** Dates one change can cover (D6). */
+export const MAX_RANGE_DAYS = 62
+
+export const ALL_WEEK_DAYS: readonly number[] = [1, 2, 3, 4, 5, 6, 7]
+
+function daysBetween(first: string, last: string): number {
+  const utc = (date: string) => {
+    const [year, month, day] = date.split('-').map(Number)
+    return Date.UTC(year, month - 1, day)
+  }
+  return Math.round((utc(last) - utc(first)) / 86_400_000)
+}
+
+/** The dates from the form's first day through its last on the chosen days of the week; empty without a valid range. */
+export function rangeDates(form: DayForm): string[] {
+  const dated = /^\d{4}-\d{2}-\d{2}$/
+  if (!dated.test(form.date) || !dated.test(form.through) || form.through < form.date) return []
+  const [year, month, day] = form.date.split('-').map(Number)
+  const chosen = form.weekDays ?? ALL_WEEK_DAYS
+  const dates: string[] = []
+  for (let offset = 0; offset <= Math.min(daysBetween(form.date, form.through), MAX_RANGE_DAYS); offset++) {
+    const at = new Date(Date.UTC(year, month - 1, day + offset))
+    if (chosen.includes(((at.getUTCDay() + 6) % 7) + 1)) dates.push(at.toISOString().slice(0, 10))
+  }
+  return dates
+}
+
+/** How many dates the form changes: 1, or the range's dates on the chosen days of the week. */
+export function dayCount(form: DayForm): number {
+  const dated = /^\d{4}-\d{2}-\d{2}$/
+  if (!dated.test(form.date) || !dated.test(form.through) || form.through < form.date) return 1
+  return rangeDates(form).length
+}
+
+/** Day changes from today on: what a copy to other equipment takes along (D7). */
+export function copyableDays(days: { date: string }[], today: string): number {
+  return days.filter((day) => day.date >= today).length
+}
+
+/** Another of a day's shifts: from when the last one ends, four hours. */
+export function nextDayShift(form: DayForm): DayForm['shifts'][number] {
+  const last = form.shifts[form.shifts.length - 1]
+  const start = last && /^\d{2}:\d{2}$/.test(last.shiftEnd) ? last.shiftEnd : '09:00'
+  return { shiftStart: start, shiftEnd: addHours(start, 4) }
+}
+
+/** Checks a day's change before it is sent; overlaps between its shifts are left to the server. */
+export function dayPayload(
+  form: DayForm,
+): { date: string; input: EquipmentDayInput; error: null } | { date: null; input: null; error: string } {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(form.date)) return { date: null, input: null, error: 'Choose the day.' }
+  if (form.through) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(form.through)) return { date: null, input: null, error: 'Enter the last day as a date.' }
+    if (form.through < form.date) return { date: null, input: null, error: 'The last day must not be before the first.' }
+    if (daysBetween(form.date, form.through) >= MAX_RANGE_DAYS) {
+      return { date: null, input: null, error: `A range can cover at most ${MAX_RANGE_DAYS} days.` }
+    }
+  }
+  const ranged = Boolean(form.through) && form.through !== form.date
+  const weekDays = form.weekDays ?? ALL_WEEK_DAYS
+  if (ranged && weekDays.length === 0) return { date: null, input: null, error: 'Choose at least one day of the week.' }
+  if (ranged && rangeDates(form).length === 0) {
+    return { date: null, input: null, error: 'None of the dates fall on the chosen days of the week.' }
+  }
+  const range = ranged
+    ? { throughDate: form.through, ...(weekDays.length < 7 ? { weekDays: [...weekDays].sort((a, b) => a - b) } : {}) }
+    : {}
+  const reason = form.note.trim() || null
+  if (form.closed) return { date: form.date, input: { shifts: [], reason, ...range }, error: null }
+  if (form.shifts.length === 0) return { date: null, input: null, error: 'Add a shift, or mark the day closed.' }
+  if (form.shifts.length > MAX_SHIFTS) return { date: null, input: null, error: `A day can have at most ${MAX_SHIFTS} shifts.` }
+  const time = /^\d{2}:\d{2}$/
+  for (const [index, shift] of form.shifts.entries()) {
+    if (!time.test(shift.shiftStart) || !time.test(shift.shiftEnd)) {
+      const prefix = form.shifts.length === 1 ? '' : `Shift ${index + 1}: `
+      return { date: null, input: null, error: `${prefix}Enter when the shift starts and ends.` }
+    }
+  }
+  return {
+    date: form.date,
+    input: { shifts: form.shifts.map(({ shiftStart, shiftEnd }) => ({ shiftStart, shiftEnd })), reason, ...range },
+    error: null,
+  }
+}
+
+/** "Wed 2030-01-09" for a YYYY-MM-DD date. */
+export function dayLabel(date: string): string {
+  const [year, month, day] = date.split('-').map(Number)
+  const iso = ((new Date(year, month - 1, day).getDay() + 6) % 7) + 1
+  return `${DAYS.find(([number]) => number === iso)?.[1] ?? ''} ${date}`
+}
+
+/** "Closed", or "06:00–14:00, 14:00–18:00 · 12 h". */
+export function daySummary(day: EquipmentDayDto): string {
+  if (day.closed) return 'Closed'
+  const times = day.shifts.map((shift) => {
+    const start = shift.shiftStart.slice(0, 5)
+    const end = shift.shiftEnd.slice(0, 5)
+    return start === end ? 'All day' : `${start}–${end}${end < start ? ' (ends next day)' : ''}`
+  })
+  return `${times.join(', ')} · ${formatHours(day.hours)}`
 }
 
 export function toggleDay(days: number[], day: number): number[] {
   return days.includes(day) ? days.filter((one) => one !== day) : [...days, day].sort((a, b) => a - b)
 }
 
+/** Checks each shift; overlaps between shifts are left to the server, which names the day. */
 export function calendarPayload(form: CalendarForm): { input: EquipmentCalendarInput; error: null } | { input: null; error: string } {
+  if (form.shifts.length === 0) return { input: null, error: 'Add at least one shift, or remove the calendar.' }
+  if (form.shifts.length > MAX_SHIFTS) return { input: null, error: `A calendar can have at most ${MAX_SHIFTS} shifts.` }
   const time = /^\d{2}:\d{2}$/
-  if (!time.test(form.shiftStart) || !time.test(form.shiftEnd)) return { input: null, error: 'Enter when the shift starts and ends.' }
-  if (form.workDays.length === 0) return { input: null, error: 'Choose at least one work day.' }
-  const workDays = [...new Set(form.workDays)].sort((a, b) => a - b)
-  return { input: { shiftStart: form.shiftStart, shiftEnd: form.shiftEnd, workDays }, error: null }
+  const shifts: EquipmentCalendarInput['shifts'] = []
+  for (const [index, shift] of form.shifts.entries()) {
+    const prefix = form.shifts.length === 1 ? '' : `Shift ${index + 1}: `
+    if (!time.test(shift.shiftStart) || !time.test(shift.shiftEnd)) {
+      return { input: null, error: `${prefix}Enter when the shift starts and ends.` }
+    }
+    if (shift.workDays.length === 0) return { input: null, error: `${prefix}Choose at least one work day.` }
+    shifts.push({ shiftStart: shift.shiftStart, shiftEnd: shift.shiftEnd, workDays: [...new Set(shift.workDays)].sort((a, b) => a - b) })
+  }
+  return { input: { shifts }, error: null }
 }
 
 /** "Mon–Fri", "Mon, Wed, Fri", "Mon–Wed, Sat" or "Every day"; three or more days in a row become a range. */
@@ -73,13 +228,21 @@ export function formatHours(hours: number): string {
   return `${Number(hours.toFixed(2))} h`
 }
 
-/** One line for the calendar, e.g. "09:00–17:00 · Mon–Fri · 8 h a shift". */
-export function shiftSummary(calendar: EquipmentScheduleDto['calendar']): string {
-  if (!calendar) return 'No calendar: available around the clock.'
-  const start = calendar.shiftStart.slice(0, 5)
-  const end = calendar.shiftEnd.slice(0, 5)
+function oneShift(shift: EquipmentShiftDto): string {
+  const start = shift.shiftStart.slice(0, 5)
+  const end = shift.shiftEnd.slice(0, 5)
   const times = start === end ? 'All day' : `${start}–${end}${end < start ? ' (ends next day)' : ''}`
-  return `${times} · ${dayList(calendar.workDays)} · ${formatHours(calendar.shiftHours)} a shift`
+  return `${times} · ${dayList(shift.workDays)} · ${formatHours(shift.shiftHours)} a shift`
+}
+
+/**
+ * One line for the calendar, e.g. "09:00–17:00 · Mon–Fri · 8 h a shift"; several shifts are joined with "; " and end
+ * with the week's total, e.g. "… ; 14:00–22:00 · Mon–Fri · 8 h a shift · 80 h a week".
+ */
+export function shiftSummary(calendar: EquipmentScheduleDto['calendar']): string {
+  if (!calendar || calendar.shifts.length === 0) return 'No calendar: available around the clock.'
+  const shifts = calendar.shifts.map(oneShift).join('; ')
+  return calendar.shifts.length === 1 ? shifts : `${shifts} · ${formatHours(calendar.weeklyHours)} a week`
 }
 
 export function downtimePayload(form: DowntimeForm): { input: EquipmentDowntimeInput; error: null } | { input: null; error: string } {

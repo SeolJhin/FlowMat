@@ -26,6 +26,8 @@ public record WarehouseTaskResponse(
     String finishedBy,
     OffsetDateTime finishedAt,
     String transferId,
-    String cancelReason
+    String cancelReason,
+    /** Who should do the task (W7); null while no one is named. */
+    String assignedTo
 ) {
 }

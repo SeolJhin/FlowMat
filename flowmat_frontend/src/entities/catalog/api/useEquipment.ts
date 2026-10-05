@@ -17,23 +17,63 @@ export interface EquipmentDowntimeDto {
   createdAt: string | null
 }
 
-/** One equipment's shift and downtime. Without a calendar the equipment is available around the clock. */
+export interface EquipmentShiftDto {
+  shiftId: string
+  /** "09:00"; a shift that ends at or before its start runs past midnight, equal times are all day. */
+  shiftStart: string
+  shiftEnd: string
+  /** ISO days the shift starts on, 1 = Monday. */
+  workDays: number[]
+  shiftHours: number
+}
+
+/** A date's own shifts in place of the calendar's (docs/domain/equipment-schedule.md "날짜별 교대"). */
+export interface EquipmentDayDto {
+  /** YYYY-MM-DD */
+  date: string
+  shifts: { shiftStart: string; shiftEnd: string; shiftHours: number }[]
+  /** No shifts: the equipment does not work that day. */
+  closed: boolean
+  hours: number
+  reason: string | null
+  updatedBy: string | null
+  updatedAt: string | null
+}
+
+/** One equipment's shifts and downtime. Without a calendar the equipment is available around the clock. */
 export interface EquipmentScheduleDto {
   equipmentId: string
   /** The zone shift times are read in. */
   timeZone: string
   calendar: {
-    /** "09:00"; a shift that ends at or before its start runs past midnight, equal times are all day. */
-    shiftStart: string
-    shiftEnd: string
-    /** ISO days the shift starts on, 1 = Monday. */
-    workDays: number[]
-    shiftHours: number
+    /** Earliest start first; they never overlap. */
+    shifts: EquipmentShiftDto[]
+    /** All shifts on all their days, before holidays and downtime. */
+    weeklyHours: number
     updatedBy: string | null
     updatedAt: string | null
   } | null
   /** Newest first. */
   downtimes: EquipmentDowntimeDto[]
+  /** Dates whose shifts differ from the calendar's, earliest first. */
+  days: EquipmentDayDto[]
+}
+
+/** The shifts that start on one date; none closes the day. */
+export interface EquipmentDayInput {
+  shifts: { shiftStart: string; shiftEnd: string }[]
+  reason: string | null
+  /** The last date of a range given the same shifts (D6); none for one date. */
+  throughDate?: string
+  /** Only the range's dates on these days of the week (ISO, 1 = Monday); all of them when left out. */
+  weekDays?: number[]
+}
+
+/** An equipment's own dates onto another equipment of the project (D7); without dates the range is open. */
+export interface EquipmentDayCopyInput {
+  toEquipmentId: string
+  fromDate?: string
+  throughDate?: string
 }
 
 /** Working time in [from, to): shifts in the window less the downtime inside them. */
@@ -61,10 +101,9 @@ export interface HolidayDto {
   createdBy: string | null
 }
 
+/** Replaces all of the equipment's shifts (at most six; the server refuses overlaps). */
 export interface EquipmentCalendarInput {
-  shiftStart: string
-  shiftEnd: string
-  workDays: number[]
+  shifts: { shiftStart: string; shiftEnd: string; workDays: number[] }[]
 }
 
 export interface EquipmentDowntimeInput {
@@ -166,6 +205,34 @@ export function useEquipmentScheduleMutations(equipmentId: string) {
       mutationFn: async (input: EquipmentDowntimeInput) =>
         unwrapApiResponse(await httpClient.post<ApiEnvelope<EquipmentScheduleDto>>(`${base}/downtimes`, input)),
       onSuccess,
+    }),
+    setDay: useMutation({
+      mutationFn: async ({ date, input }: { date: string; input: EquipmentDayInput }) =>
+        unwrapApiResponse(await httpClient.put<ApiEnvelope<EquipmentScheduleDto>>(`${base}/days/${encodeURIComponent(date)}`, input)),
+      onSuccess,
+    }),
+    clearDay: useMutation({
+      mutationFn: async (date: string) =>
+        unwrapApiResponse(await httpClient.delete<ApiEnvelope<EquipmentScheduleDto>>(`${base}/days/${encodeURIComponent(date)}`)),
+      onSuccess,
+    }),
+    /** Every date of its own from {@code from} through {@code through} back to the calendar (D6). */
+    clearDays: useMutation({
+      mutationFn: async ({ from, through }: { from: string; through: string }) =>
+        unwrapApiResponse(await httpClient.delete<ApiEnvelope<EquipmentScheduleDto>>(
+          `${base}/days/${encodeURIComponent(from)}?through=${encodeURIComponent(through)}`,
+        )),
+      onSuccess,
+    }),
+    copyDays: useMutation({
+      mutationFn: async (input: EquipmentDayCopyInput) =>
+        unwrapApiResponse(await httpClient.post<ApiEnvelope<EquipmentScheduleDto>>(`${base}/days/copy`, input)),
+      // The answer is the other equipment's schedule.
+      onSuccess: (schedule: EquipmentScheduleDto) => {
+        queryClient.setQueryData(scheduleKey(schedule.equipmentId), schedule)
+        void queryClient.invalidateQueries({ queryKey: [...scheduleKey(schedule.equipmentId), 'availability'] })
+        void queryClient.invalidateQueries({ queryKey: ['work-order-readiness'] })
+      },
     }),
     removeDowntime: useMutation({
       mutationFn: async (downtimeId: string) =>

@@ -9,8 +9,8 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
-import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessIoCreateRequest;
 import org.myweb.flowmat.domain.workflow.api.dto.request.ProcessIoUpdateRequest;
@@ -50,7 +50,7 @@ public class ProcessIoServiceImpl implements ProcessIoService {
     private final ProcessConnectionServiceImpl connectionService;
     private final ProcessRepository processRepository;
     private final GraphSyncService graphSyncService;
-    private final ItemRepository itemRepository;
+    private final CatalogQuery catalogQuery;
     private final IdGenerator idGenerator;
     private final ProjectAccessService projectAccessService;
     private final EntityManager entityManager;
@@ -78,13 +78,12 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         WorkflowText.requireStorable(request.colorScheme(), "colorScheme");
         WorkflowText.requireStorable(request.validationRule(), "validationRule");
         lockWorkflowForProcess(process);
-        Item item = findActiveItem(request.itemId());
-        validateSameProject(process.getProjectId(), item.getProjectId());
 
         ProcessIo processIo = new ProcessIo();
         processIo.setProcessIoId(idGenerator.generate());
         processIo.setProcessId(process.getProcessId());
-        processIo.setItemId(item.getItemId());
+        // The item is an optional binding (ADR-003): data, file and API ports have none.
+        processIo.setItemId(hasText(request.itemId()) ? projectItemId(process, request.itemId()) : null);
         processIo.setIoName(trimToNull(request.ioName()));
         processIo.setDirection(normalizeDirection(request.direction()));
         processIo.setIoType(defaultIfBlank(request.ioType(), "material"));
@@ -128,11 +127,14 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         lockWorkflowForPort(processIo);
         List<String> contractBefore = contractFields(processIo);
 
-        if (hasText(request.itemId())) {
-            Item item = findActiveItem(request.itemId());
+        if (Boolean.TRUE.equals(request.clearItem()) && hasText(request.itemId())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "itemId cannot be supplied with clearItem.");
+        }
+        if (Boolean.TRUE.equals(request.clearItem())) {
+            processIo.setItemId(null);
+        } else if (hasText(request.itemId())) {
             Process process = projectAccessService.requireProcessWriteAccess(processIo.getProcessId());
-            validateSameProject(process.getProjectId(), item.getProjectId());
-            processIo.setItemId(item.getItemId());
+            processIo.setItemId(projectItemId(process, request.itemId()));
         }
         if (request.ioName() != null) {
             processIo.setIoName(trimToNull(request.ioName()));
@@ -214,9 +216,12 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         graphSyncService.broadcast(Type.PORT_DELETED, workflowId, processIoId);
     }
 
-    private Item findActiveItem(String itemId) {
-        return itemRepository.findByItemIdAndDeletedYn(itemId, NOT_DELETED)
+    /** The id of an active item of the process's project: 404 when there is no such item, 400 when it is another project's. */
+    private String projectItemId(Process process, String itemId) {
+        CatalogItemView item = catalogQuery.findActiveItem(itemId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        validateSameProject(process.getProjectId(), item.projectId());
+        return item.itemId();
     }
 
     private static String writeSchema(com.fasterxml.jackson.databind.JsonNode schema) {

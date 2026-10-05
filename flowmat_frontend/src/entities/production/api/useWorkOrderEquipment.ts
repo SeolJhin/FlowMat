@@ -17,6 +17,7 @@ export function useAssignWorkOrderEquipmentMutation(projectId: string) {
     onSuccess: (order) => {
       void queryClient.invalidateQueries({ queryKey: ['work-orders', projectId] })
       void queryClient.invalidateQueries({ queryKey: ['work-order-readiness', order.workOrderId] })
+      void queryClient.invalidateQueries({ queryKey: ['work-order-plan', order.workOrderId] })
     },
   })
 }

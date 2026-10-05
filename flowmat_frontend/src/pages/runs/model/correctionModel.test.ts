@@ -141,6 +141,24 @@ describe('LOTs offered in a run record form', () => {
     ])
   })
 
+  it('offers stock already picked to the order first, and prefers it among the LOTs expiring first', () => {
+    const at = (id: string, lotId: string, location: string) =>
+      ({ inventoryId: id, lotId, inventoryStatus: 'available', location }) as unknown as InventoryDto
+    const stock = [at('shelf-soon', 'L1', 'A-1'), at('staged-late', 'L2', 'line-1'), at('staged-soon', 'L1', 'LINE-1 ')]
+    expect(inputLotOptions(stock, lots, 'input', new Set(['line-1']))
+      .map((option) => [option.inventory.inventoryId, option.staged, option.useFirst])).toEqual([
+      ['staged-soon', true, true],
+      ['staged-late', true, false],
+      ['shelf-soon', false, false],
+    ])
+    // Without a staging place nothing moves, and the first-expiring record in list order is to use first.
+    expect(inputLotOptions(stock, lots, 'input').map((option) => [option.inventory.inventoryId, option.useFirst])).toEqual([
+      ['shelf-soon', true],
+      ['staged-soon', false],
+      ['staged-late', false],
+    ])
+  })
+
   it('marks nothing when there is no choice or no expiry date, and keeps outputs as they are', () => {
     expect(inputLotOptions([inv('soon', 'L1')], lots, 'input')[0].useFirst).toBe(false)
     expect(inputLotOptions([inv('a', null), inv('b', null)], lots, 'input').some((option) => option.useFirst)).toBe(false)

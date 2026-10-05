@@ -66,14 +66,14 @@ export interface RunQualityChecklistDto {
 
 export const inspectionStandardsKey = (projectId: string) => ['inspection-standards', projectId] as const
 
-export function useInspectionStandardsQuery(projectId: string) {
+export function useInspectionStandardsQuery(projectId: string, enabled = true) {
   return useQuery<InspectionStandardDto[]>({
     queryKey: inspectionStandardsKey(projectId),
     queryFn: async () =>
       unwrapApiResponse(
         await httpClient.get<ApiEnvelope<InspectionStandardDto[]>>(`/inspection-standards?projectId=${encodeURIComponent(projectId)}`),
       ),
-    enabled: Boolean(projectId),
+    enabled: Boolean(projectId) && enabled,
   })
 }
 

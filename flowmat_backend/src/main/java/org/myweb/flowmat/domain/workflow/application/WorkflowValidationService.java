@@ -8,11 +8,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
-import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowValidationIssue;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowValidationResponse;
 import org.myweb.flowmat.domain.workflow.domain.contract.PortSchema;
+import org.myweb.flowmat.domain.workflow.domain.contract.ResourceTypes;
 import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessConnection;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
@@ -35,7 +36,7 @@ public class WorkflowValidationService {
     private final ProcessIoRepository ports;
     private final ProcessConnectionRepository connections;
     private final ProcessConnectionServiceImpl connectionService;
-    private final UnitMasterRepository units;
+    private final CatalogQuery catalog;
 
     public WorkflowValidationResponse validate(String workflowId) {
         access.requireWorkflowReadAccess(workflowId);
@@ -81,6 +82,10 @@ public class WorkflowValidationService {
             if (unknownUnit(port.getUnit())) {
                 issues.add(issue("warning", "UNIT_UNKNOWN", port.getProcessId(), port.getProcessIoId(), null,
                     "Port unit '" + port.getUnit() + "' is not in unit_master."));
+            }
+            if (!ResourceTypes.isStandard(port.getResourceType())) {
+                issues.add(issue("warning", "RESOURCE_TYPE_UNKNOWN", port.getProcessId(), port.getProcessIoId(), null,
+                    "Port resourceType '" + port.getResourceType() + "' is not a standard resource type."));
             }
         }
 
@@ -154,7 +159,7 @@ public class WorkflowValidationService {
     }
 
     private boolean unknownUnit(String unit) {
-        return text(unit) && units.findByUnitCodeIgnoreCase(unit).isEmpty();
+        return text(unit) && !catalog.isKnownUnitCode(unit);
     }
 
     private static boolean hasCycle(Set<String> processIds, List<ProcessConnection> connections) {

@@ -6,6 +6,7 @@ import java.util.List;
 import org.myweb.flowmat.domain.catalog.api.dto.request.EquipmentCreateRequest;
 import org.myweb.flowmat.domain.catalog.api.dto.request.EquipmentUpdateRequest;
 import org.myweb.flowmat.domain.catalog.api.dto.response.EquipmentResponse;
+import org.myweb.flowmat.domain.catalog.api.dto.response.EquipmentStatusChangeResponse;
 import org.myweb.flowmat.domain.catalog.application.EquipmentService;
 import org.myweb.flowmat.global.response.ApiResponse;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -33,6 +34,12 @@ public class EquipmentController {
     @GetMapping("/{equipmentId}")
     public ApiResponse<EquipmentResponse> get(@PathVariable String equipmentId) {
         return ApiResponse.ok(equipmentService.getEquipment(equipmentId));
+    }
+
+    /** Its status changes, newest first (docs/domain/equipment.md "상태 이력"). */
+    @GetMapping("/{equipmentId}/status-history")
+    public ApiResponse<List<EquipmentStatusChangeResponse>> statusHistory(@PathVariable String equipmentId) {
+        return ApiResponse.ok(equipmentService.statusHistory(equipmentId));
     }
 
     @PostMapping

@@ -15,14 +15,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 import lombok.RequiredArgsConstructor;
-import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.domain.entity.UnitMaster;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
-import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.inventory.api.dto.response.StockMovementAnalysisResponse;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
@@ -56,11 +55,11 @@ public class StockMovementAnalysisService {
     private final InventoryTransactionRepository transactionRepository;
     private final InventoryRepository inventoryRepository;
     private final LotMasterRepository lotMasterRepository;
-    private final ItemRepository itemRepository;
-    private final UnitMasterRepository unitMasterRepository;
+    private final CatalogQuery catalogQuery;
+    private final StorageLocationService storageLocationService;
     private final ProjectAccessService projectAccessService;
 
-    public StockMovementAnalysisResponse analyse(String projectId, Integer days) {
+    public StockMovementAnalysisResponse analyse(String projectId, Integer days, String location) {
         projectAccessService.requireProjectReadAccess(projectId);
         int window = days == null ? DEFAULT_DAYS : days;
         if (window < 1 || window > MAX_DAYS) {
@@ -68,13 +67,20 @@ public class StockMovementAnalysisService {
         }
         OffsetDateTime now = OffsetDateTime.now();
         OffsetDateTime from = now.minusDays(window);
+        // One listed place and the places inside it, or the whole project (A5).
+        StorageLocationService.Within place = location == null || location.isBlank()
+            ? null : storageLocationService.within(projectId, location);
+        Set<String> codes = place == null ? null : place.codes();
 
         // One row per item from the database; reversed movements are already left out there.
         Map<String, BigDecimal> consumed = new HashMap<>();
         Map<String, OffsetDateTime> lastConsumed = new HashMap<>();
         Map<String, OffsetDateTime> lastReceived = new HashMap<>();
         Map<String, OffsetDateTime> firstReceived = new HashMap<>();
-        for (ItemMovementTotals totals : transactionRepository.findItemMovementTotals(projectId, from)) {
+        List<ItemMovementTotals> movements = codes == null
+            ? transactionRepository.findItemMovementTotals(projectId, from)
+            : transactionRepository.findItemMovementTotalsAt(projectId, from, codes);
+        for (ItemMovementTotals totals : movements) {
             String itemId = totals.getItemId();
             if (totals.getConsumed() != null && totals.getConsumed().signum() != 0) {
                 consumed.put(itemId, totals.getConsumed());
@@ -85,7 +91,9 @@ public class StockMovementAnalysisService {
         }
 
         // On hand counts every record; usable leaves out what cannot be used, as the reorder list does.
-        List<Inventory> rows = inventoryRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(projectId, NOT_DELETED);
+        List<Inventory> rows = inventoryRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(projectId, NOT_DELETED).stream()
+            .filter(row -> codes == null || row.getLocation() != null && codes.contains(StorageLocationService.key(row.getLocation())))
+            .toList();
         Map<String, LotMaster> lots = StreamSupport.stream(lotMasterRepository.findAllById(
                 rows.stream().map(Inventory::getLotId).filter(Objects::nonNull).collect(Collectors.toSet())).spliterator(), false)
             .collect(Collectors.toMap(LotMaster::getLotId, Function.identity()));
@@ -102,25 +110,22 @@ public class StockMovementAnalysisService {
             }
         }
 
-        List<Item> items = itemRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(projectId, NOT_DELETED).stream()
-            .filter(item -> positive(onHand.get(item.getItemId())) || positive(consumed.get(item.getItemId())))
-            .sorted(Comparator.comparing(Item::getItemCode, Comparator.nullsLast(Comparator.naturalOrder())))
+        List<CatalogItemView> items = catalogQuery.findProjectItems(projectId).stream()
+            .filter(item -> positive(onHand.get(item.itemId())) || positive(consumed.get(item.itemId())))
+            .sorted(Comparator.comparing(CatalogItemView::itemCode, Comparator.nullsLast(Comparator.naturalOrder())))
             .toList();
-        Map<String, String> units = StreamSupport.stream(unitMasterRepository.findAllById(
-                items.stream().map(Item::getUnitId).filter(Objects::nonNull).collect(Collectors.toSet())).spliterator(), false)
-            .collect(Collectors.toMap(UnitMaster::getUnitId, UnitMaster::getUnitCode, (first, second) -> first));
         BigDecimal windowDays = BigDecimal.valueOf(window);
         Map<String, BigDecimal> usedValue = new HashMap<>();
-        for (Item item : items) {
+        for (CatalogItemView item : items) {
             BigDecimal unitCost = unitCostOf(item);
             if (unitCost != null) {
-                usedValue.put(item.getItemId(), scale(consumed.getOrDefault(item.getItemId(), BigDecimal.ZERO).multiply(unitCost)));
+                usedValue.put(item.itemId(), scale(consumed.getOrDefault(item.itemId(), BigDecimal.ZERO).multiply(unitCost)));
             }
         }
         Map<String, String> classes = abcClasses(usedValue);
 
         List<StockMovementAnalysisResponse.Line> lines = items.stream().map(item -> {
-            String itemId = item.getItemId();
+            String itemId = item.itemId();
             BigDecimal held = scale(onHand.getOrDefault(itemId, BigDecimal.ZERO));
             BigDecimal free = scale(usable.getOrDefault(itemId, BigDecimal.ZERO));
             BigDecimal used = scale(consumed.getOrDefault(itemId, BigDecimal.ZERO));
@@ -129,16 +134,16 @@ public class StockMovementAnalysisService {
             BigDecimal cover = used.signum() > 0
                 ? free.max(BigDecimal.ZERO).multiply(windowDays).divide(used, 1, RoundingMode.HALF_UP)
                 : null;
-            Integer leadTime = item.getLeadTimeDays();
+            Integer leadTime = item.leadTimeDays();
             boolean belowLeadTime = cover != null && leadTime != null && leadTime > 0
                 && cover.compareTo(BigDecimal.valueOf(leadTime)) < 0;
             OffsetDateTime idleSince = lastConsumed.getOrDefault(itemId, firstReceived.get(itemId));
             BigDecimal unitCost = unitCostOf(item);
             return new StockMovementAnalysisResponse.Line(
                 itemId,
-                item.getItemCode(),
-                item.getItemName(),
-                units.get(item.getUnitId()),
+                item.itemCode(),
+                item.itemName(),
+                item.unitCode(),
                 held,
                 free,
                 unitCost == null ? null : scale(held.multiply(unitCost)),
@@ -154,7 +159,7 @@ public class StockMovementAnalysisService {
                 classes.get(itemId)
             );
         }).toList();
-        return new StockMovementAnalysisResponse(window, from, lines);
+        return new StockMovementAnalysisResponse(window, from, place == null ? null : place.code(), lines);
     }
 
     /**
@@ -181,8 +186,8 @@ public class StockMovementAnalysisService {
         return classes;
     }
 
-    private static BigDecimal unitCostOf(Item item) {
-        return item.getUnitCost() != null && item.getUnitCost().signum() > 0 ? item.getUnitCost() : null;
+    private static BigDecimal unitCostOf(CatalogItemView item) {
+        return item.unitCost() != null && item.unitCost().signum() > 0 ? item.unitCost() : null;
     }
 
     /** Reads a timestamptz as the driver returned it. */

@@ -10,7 +10,10 @@ import { useCancelRunItemMutation } from '../../../entities/production/api/useCa
 import { useFinishProductionRunMutation } from '../../../entities/production/api/useFinishProductionRunMutation'
 import { useInventoriesQuery } from '../../../entities/inventory/api/useInventoriesQuery'
 import { useLotsQuery } from '../../../entities/inventory/api/useLots'
+import { useWarehouseTasksQuery } from '../../../entities/inventory/api/useWarehouseTasks'
 import { useUnitsQuery } from '../../../entities/catalog/api/useUnitsQuery'
+import { useRunQualityChecklistQuery } from '../../../entities/quality/api/useInspectionStandards'
+import { finishQualityWarning } from '../../../entities/quality/model/standardModel'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import type { BomOutputDto, ProductionRunItemDto } from '../../../shared/types/api'
 import { cancelSummary, recordedAgainstPlan, remainingOfPlan } from '../model/runPlan'
@@ -19,9 +22,12 @@ import { RunCorrectionsPanel } from './RunCorrectionsPanel'
 import { RunQualityPanel } from './RunQualityPanel'
 import { RunCostPanel } from './RunCostPanel'
 import { RunExpectedOutputs } from './RunExpectedOutputs'
+import { useBomRequirementsQuery } from '../../../entities/bom/api/useBoms'
+import { finishByProductNote, finishOutput } from '../../inventory/model/bomLineTypeModel'
 import { ChecklistFinishNote, RunInstructionChecklist } from './RunInstructionChecklist'
 import { RunStatusBadge, formatQty, isRunOpen } from './runDisplay'
 import { ItemScanInput } from '../../inventory/ui/ItemScanInput'
+import { stagingPlacesFor } from '../../inventory/model/warehouseTaskModel'
 
 const cell = { padding: '8px 6px' } as const
 
@@ -84,12 +90,17 @@ export function RunDetailRoute() {
   const [allocation, setAllocation] = useState<string | null>(null)
   const cancelMutation = useCancelRunItemMutation(runId, projectId)
   const finishMutation = useFinishProductionRunMutation()
+  // The same query the run's quality checklist uses, so finishing can warn about checks not done.
+  const qualityWarning = finishQualityWarning(useRunQualityChecklistQuery(projectId, runId).data)
 
   const [itemForm, setItemForm] = useState(EMPTY_ITEM_FORM)
   const [actualOutputQty, setActualOutputQty] = useState('')
 
   const run = runQuery.data
   const revisionsQuery = useWorkflowRevisionsQuery(run?.workflowId ?? '')
+  // Done picks are only read for a run with a work order; their places are offered first as inputs.
+  const doneTasks = useWarehouseTasksQuery(run?.workOrderId ? projectId : '', 'done').data
+  const stagedAt = useMemo(() => stagingPlacesFor(doneTasks ?? [], run?.workOrderId ?? null), [doneTasks, run?.workOrderId])
   const workflowRevision = revisionsQuery.data?.find(
     (revision) => revision.workflowRevisionId === run?.workflowRevisionId,
   )
@@ -128,6 +139,13 @@ export function RunDetailRoute() {
     return { input: sum('input'), output: sum('output') }
   }, [runItems])
 
+  // The query behind "Also comes out": finishing says which by-products and waste are not recorded yet.
+  const expectedOutputs = useBomRequirementsQuery(run?.bomId ?? null, Number(run?.plannedOutputQty ?? 0)).data?.outputs
+  const byProductNote = run && expectedOutputs
+    ? finishByProductNote(expectedOutputs, runItems, (itemId) => itemLabel.get(itemId) ?? itemId, Number(run.plannedOutputQty),
+      finishOutput(actualOutputQty, run.targetItemId, runItems, Number(run.plannedOutputQty)))
+    : null
+
   async function handleRecord(e: FormEvent) {
     e.preventDefault()
     try {
@@ -148,7 +166,8 @@ export function RunDetailRoute() {
 
   function handleFinish(e: FormEvent) {
     e.preventDefault()
-    if (!window.confirm('Finish this run? Items can no longer be recorded afterwards.')) return
+    const question = 'Finish this run? Items can no longer be recorded afterwards.'
+    if (!window.confirm([question, qualityWarning, byProductNote].filter(Boolean).join('\n\n'))) return
     finishMutation.mutate({
       productionRunId: runId,
       actualOutputQty: actualOutputQty === '' ? undefined : Number(actualOutputQty),
@@ -305,9 +324,10 @@ export function RunDetailRoute() {
                 runItems={runItems}
                 items={itemsQuery.data ?? []}
                 open={isRunOpen(run.runStatus)}
+                madeQty={run.runStatus.toLowerCase() === 'finished' ? Number(run.actualOutputQty ?? 0) : null}
                 onRecord={fillFromOutput}
               />
-              <RunInstructionChecklist runId={runId} />
+              <RunInstructionChecklist projectId={projectId} runId={runId} />
             </section>
 
             <div style={{ display: 'grid', gap: 16 }}>
@@ -396,13 +416,14 @@ export function RunDetailRoute() {
                           required={lotTracked}
                         >
                           <option value="" disabled={lotTracked}>{lotTracked ? 'Select LOT' : "Don't adjust stock"}</option>
-                          {inputLotOptions(inventoriesForItem, lots, itemForm.direction).map(({ inventory: inv, expiryDate, expired, disabled, useFirst }) => (
+                          {inputLotOptions(inventoriesForItem, lots, itemForm.direction, stagedAt).map(({ inventory: inv, expiryDate, expired, disabled, useFirst, staged }) => (
                             <option key={inv.inventoryId} value={inv.inventoryId} disabled={disabled}>
                               {inventoryLabel.get(inv.inventoryId)} (available {formatQty(inv.availableQuantity)})
                               {expiryDate ? ` · expires ${expiryDate}` : ''}
                               {expired ? ' — expired' : ''}
                               {inv.inventoryStatus === 'quarantined' ? ' — quarantined' : ''}
                               {useFirst ? ' · use first' : ''}
+                              {staged ? ' · picked for this order' : ''}
                             </option>
                           ))}
                         </select>
@@ -484,6 +505,16 @@ export function RunDetailRoute() {
                         />
                       </label>
                       <ChecklistFinishNote runId={runId} />
+                      {qualityWarning && (
+                        <p role="note" aria-label="Quality before finishing" style={{ color: '#b45309', fontSize: 12, margin: 0 }}>
+                          {qualityWarning}
+                        </p>
+                      )}
+                      {byProductNote && (
+                        <p role="note" aria-label="By-products before finishing" style={{ color: '#b45309', fontSize: 12, margin: 0 }}>
+                          {byProductNote}
+                        </p>
+                      )}
                       <button type="submit" disabled={finishMutation.isPending}>
                         {finishMutation.isPending ? 'Finishing...' : 'Finish'}
                       </button>

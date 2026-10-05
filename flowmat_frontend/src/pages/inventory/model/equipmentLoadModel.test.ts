@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { EquipmentLoadOrderDto, EquipmentLoadRowDto } from '../../../entities/production/api/useEquipmentLoad'
 import {
+  changeoverPlanText,
   dateInputValue,
+  dayLabels,
   loadLabel,
   loadTone,
   orderLine,
   parseDateInput,
   shiftWeeks,
+  timelineBars,
   weekRange,
   weekStart,
 } from './equipmentLoadModel'
@@ -42,6 +45,42 @@ describe('weeks', () => {
   })
 })
 
+describe('timeline', () => {
+  const at = (day: number, hour: number) => new Date(2030, 0, day, hour).toISOString()
+  const week = { from: at(7, 0), to: at(14, 0) }
+
+  it('names the seven days from the Monday', () => {
+    expect(dayLabels(new Date(2030, 0, 7))).toEqual(['Mon 01-07', 'Tue 01-08', 'Wed 01-09', 'Thu 01-10', 'Fri 01-11', 'Sat 01-12', 'Sun 01-13'])
+  })
+
+  it('clips planned windows to the week, stacks overlaps and marks planned orders that overlap', () => {
+    const { bars, lanes } = timelineBars([
+      order({ workOrderId: 'b', workOrderNumber: 'WO-2', plannedStartAt: at(7, 9), plannedEndAt: at(11, 17) }),
+      order({ workOrderId: 'a', workOrderNumber: 'WO-1', plannedStartAt: at(7, 9), plannedEndAt: at(8, 17) }),
+      order({ workOrderId: 'c', workOrderNumber: 'WO-3', workOrderStatus: 'draft', plannedStartAt: at(9, 9), plannedEndAt: at(9, 17) }),
+      order({ workOrderId: 'd', workOrderNumber: 'WO-4', workOrderStatus: 'in_progress', plannedStartAt: at(5, 9), plannedEndAt: at(7, 6) }),
+      order({ workOrderId: 'e', workOrderNumber: 'WO-5', plannedStartAt: at(14, 9), plannedEndAt: at(15, 9) }),
+    ], week.from, week.to)
+    expect(lanes).toBe(2)
+    expect(bars.map((bar) => [bar.workOrderNumber, bar.lane, bar.draft, bar.clash])).toEqual([
+      ['WO-4', 0, false, false],
+      ['WO-1', 0, false, true],
+      ['WO-2', 1, false, true],
+      ['WO-3', 0, true, false],
+    ])
+    const [carried, first] = bars
+    expect(carried.left).toBe(0)
+    expect(carried.width).toBeCloseTo((6 / 168) * 100)
+    expect(first.left).toBeCloseTo((9 / 168) * 100)
+    expect(first.width).toBeCloseTo((32 / 168) * 100)
+    expect(first.title).toBe('WO-1 · RED · 10 h · Mon 01-07 09:00 → Tue 01-08 17:00')
+  })
+
+  it('keeps one lane when there is nothing to show', () => {
+    expect(timelineBars([], week.from, week.to)).toEqual({ bars: [], lanes: 1 })
+  })
+})
+
 describe('load display', () => {
   it('tells an overloaded, busy, normal and idle equipment apart', () => {
     expect(loadTone(row({ overloaded: true, loadPercent: 113.8 }))).toBe('over')
@@ -58,5 +97,15 @@ describe('load display', () => {
     expect(orderLine(order({ neededHours: 31, hoursInWindow: 15.5, changeoverMinutes: 60 })))
       .toBe('WO-1 · RED · 15.5 of 31 h · incl. 60 min changeover')
     expect(orderLine(order({ neededHours: null, hoursInWindow: null }))).toBe('WO-1 · RED · hours unknown')
+  })
+})
+
+describe('changeoverPlanText', () => {
+  it('adds up the planned changeovers and names an order with fewer', () => {
+    expect(changeoverPlanText({ plannedMinutes: 180, suggestedMinutes: 60, suggestedOrder: ['WO-2', 'WO-1', 'WO-3'] }))
+      .toBe('Changeovers 3 h as planned · 1 h as WO-2, WO-1, WO-3')
+    expect(changeoverPlanText({ plannedMinutes: 45, suggestedMinutes: null, suggestedOrder: null })).toBe('Changeovers 45 min as planned')
+    expect(changeoverPlanText({ plannedMinutes: 30, suggestedMinutes: 0, suggestedOrder: ['WO-2', 'WO-1'] }))
+      .toBe('Changeovers 30 min as planned · 0 min as WO-2, WO-1')
   })
 })

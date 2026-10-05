@@ -33,7 +33,22 @@ public record EquipmentLoadResponse(
         int unplannedOrders,
         /** Orders in the window whose hours cannot be worked out (no target quantity or no capacity per hour). */
         int unmeasuredOrders,
-        List<Order> orders
+        List<Order> orders,
+        /** The window's changeovers and an order with fewer; null without two orders with items or any changeover time. */
+        ChangeoverPlan changeovers
+    ) {
+    }
+
+    /**
+     * The changeovers of the window's open orders with a target item, in planned order, and an order of the same orders
+     * that changes over less when there is one (docs/domain/equipment-load.md "전환 순서 제안"). Running orders stay first.
+     */
+    public record ChangeoverPlan(
+        int plannedMinutes,
+        /** Null when no order changes over less than the plan. */
+        Integer suggestedMinutes,
+        /** Work order numbers in the suggested order; null with no suggestion. */
+        List<String> suggestedOrder
     ) {
     }
 

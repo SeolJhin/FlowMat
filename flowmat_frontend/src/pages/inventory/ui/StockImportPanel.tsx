@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useStockImportMutation } from '../../../entities/inventory/api/useStockImportMutation'
-import { errorMessage } from '../../../shared/lib/errorMessage'
+import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import type { StockImportResultDto, StockImportRowDto } from '../../../shared/types/api'
 import { STOCK_CSV_TEMPLATE, stockRowsFromCsv } from '../model/stockImportModel'
 
@@ -15,29 +15,56 @@ export function StockImportPanel({ projectId }: { projectId: string }) {
   const importMutation = useStockImportMutation(projectId)
   const [rows, setRows] = useState<StockImportRowDto[] | null>(null)
   const [note, setNote] = useState('')
+  const [checking, setChecking] = useState(false)
+  const [receiving, setReceiving] = useState(false)
+  const [unconfirmed, setUnconfirmed] = useState(false)
+  const selectionGeneration = useRef(0)
   const [check, setCheck] = useState<StockImportResultDto | null>(null)
   const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null)
 
   async function choose(file: File | undefined) {
+    if (receiving) return
+    const generation = ++selectionGeneration.current
     setRows(null)
     setCheck(null)
     setMessage(null)
+    setChecking(Boolean(file))
+    setUnconfirmed(false)
     if (!file) return
-    const parsed = stockRowsFromCsv(await file.text())
-    if (!parsed.ok) {
-      setMessage({ error: true, text: parsed.error })
-      return
-    }
-    setRows(parsed.rows)
     try {
-      setCheck(await importMutation.mutateAsync({ rows: parsed.rows, dryRun: true }))
-    } catch (error) {
-      setMessage({ error: true, text: errorMessage(error, 'The file could not be checked.') })
+      let text: string
+      try {
+        text = await file.text()
+      } catch {
+        if (generation === selectionGeneration.current) {
+          setMessage({ error: true, text: 'The stock file could not be read. Choose the file again.' })
+        }
+        return
+      }
+      if (generation !== selectionGeneration.current) return
+      const parsed = stockRowsFromCsv(text)
+      if (!parsed.ok) {
+        setMessage({ error: true, text: parsed.error })
+        return
+      }
+      setRows(parsed.rows)
+      try {
+        const result = await importMutation.mutateAsync({ rows: parsed.rows, dryRun: true })
+        if (generation === selectionGeneration.current) setCheck(result)
+      } catch (error) {
+        if (generation === selectionGeneration.current) {
+          setMessage({ error: true, text: errorMessage(error, 'The file could not be checked.') })
+        }
+      }
+    } finally {
+      if (generation === selectionGeneration.current) setChecking(false)
     }
   }
 
   async function receive() {
-    if (!rows) return
+    if (!rows || !check || check.errors > 0 || checking || receiving || unconfirmed) return
+    setReceiving(true)
+    setMessage(null)
     try {
       const result = await importMutation.mutateAsync({ rows, dryRun: false, note: note.trim() || undefined })
       if (result.applied) {
@@ -52,7 +79,11 @@ export function StockImportPanel({ projectId }: { projectId: string }) {
         setCheck(result)
       }
     } catch (error) {
-      setMessage({ error: true, text: errorMessage(error, 'The stock could not be received.') })
+      const status = errorStatus(error)
+      setUnconfirmed(status === null || status >= 500)
+      setMessage({ error: true, text: errorMessage(error, 'The receipt could not be confirmed.') })
+    } finally {
+      setReceiving(false)
     }
   }
 
@@ -68,7 +99,7 @@ export function StockImportPanel({ projectId }: { projectId: string }) {
   const lines = check ? check.created + check.received : 0
 
   return (
-    <details aria-label="Receive stock from a spreadsheet" style={{ marginBottom: 12, fontSize: 13 }}>
+    <details aria-busy={checking || receiving} aria-label="Receive stock from a spreadsheet" style={{ marginBottom: 12, fontSize: 13 }}>
       <summary style={{ cursor: 'pointer' }}>Receive stock from a spreadsheet</summary>
       <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
         <p className="inspector-hint" style={{ margin: 0 }}>
@@ -79,12 +110,22 @@ export function StockImportPanel({ projectId }: { projectId: string }) {
           </button>
         </p>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <input type="file" accept=".csv,text/csv" aria-label="Import stock file" onChange={(e) => void choose(e.target.files?.[0])} />
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="note, e.g. opening balance" aria-label="Import note" />
+          <input type="file" accept=".csv,text/csv" aria-label="Import stock file" disabled={receiving || unconfirmed} onChange={(e) => {
+            const file = e.target.files?.[0]
+            void choose(file)
+            e.target.value = ''
+          }} />
+          <input value={note} disabled={receiving || unconfirmed} onChange={(e) => setNote(e.target.value)} placeholder="note, e.g. opening balance" aria-label="Import note" />
         </div>
+        {checking && <p role="status" style={{ margin: 0 }}>Reading and checking stock file...</p>}
         {message && (
           <p role={message.error ? 'alert' : 'status'} style={{ margin: 0, color: message.error ? '#dc2626' : '#047857' }}>
             {message.text}
+          </p>
+        )}
+        {unconfirmed && (
+          <p role="status" style={{ margin: 0 }}>
+            The receipt result is unconfirmed. Check stock history before cancelling or receiving this file again; another submission can receive it twice.
           </p>
         )}
         {rows && check && (
@@ -111,14 +152,17 @@ export function StockImportPanel({ projectId }: { projectId: string }) {
               </tbody>
             </table>
             <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-              <button type="button" disabled={check.errors > 0 || importMutation.isPending} onClick={() => void receive()}>
+              <button type="button" disabled={check.errors > 0 || checking || receiving || unconfirmed} onClick={() => void receive()}>
                 Receive {lines} line{lines === 1 ? '' : 's'}
               </button>
-              <button type="button" style={{ background: 'transparent' }} onClick={() => void choose(undefined)}>
-                Cancel
-              </button>
+
             </div>
           </div>
+        )}
+        {(checking || rows) && (
+          <button type="button" disabled={receiving} style={{ background: 'transparent', justifySelf: 'start' }} onClick={() => void choose(undefined)}>
+            Cancel
+          </button>
         )}
       </div>
     </details>

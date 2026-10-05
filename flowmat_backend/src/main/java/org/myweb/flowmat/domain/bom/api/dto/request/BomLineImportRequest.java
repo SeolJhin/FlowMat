@@ -14,7 +14,8 @@ public record BomLineImportRequest(boolean dryRun, boolean replace, List<Row> ro
     /**
      * @param itemCode the material's item code
      * @param unit a unit code such as "g"
+     * @param lineType material (blank), by_product or waste (docs/domain/bom-by-products.md)
      */
-    public record Row(String itemCode, String quantity, String unit, String note) {
+    public record Row(String itemCode, String quantity, String unit, String note, String lineType) {
     }
 }

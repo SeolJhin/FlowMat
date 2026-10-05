@@ -182,6 +182,25 @@ public interface InventoryRepository extends JpaRepository<Inventory, String> {
         """)
     long countHeldStockAtLocation(@Param("projectId") String projectId, @Param("location") String location);
 
+    /** Live stock records at a place by its code (ignoring case and spaces around it), with or without stock. */
+    @Query("""
+        select count(i) from Inventory i
+        where i.projectId = :projectId and i.deletedYn = 'N' and lower(trim(i.location)) = lower(:location)
+        """)
+    long countRecordsAtLocation(@Param("projectId") String projectId, @Param("location") String location);
+
+    /**
+     * Moves every live stock record at a renamed place to its new code (docs/domain/storage-location.md L7). The version
+     * goes up, so an edit or movement that read a record before the rename fails instead of writing the old code back.
+     */
+    @Modifying(flushAutomatically = true)
+    @Query(value = """
+        update inventory set location = :code, version = coalesce(version, 0) + 1, updated_by = :userId, updated_at = now()
+         where project_id = :projectId and deleted_yn = 'N' and lower(trim(location)) = lower(:previous)
+        """, nativeQuery = true)
+    int renameLocation(@Param("projectId") String projectId, @Param("previous") String previous, @Param("code") String code,
+                       @Param("userId") String userId);
+
     @Query("""
         select count(distinct i.itemId) from Inventory i
         where i.projectId = :projectId and i.deletedYn = 'N' and lower(i.location) = lower(:location)

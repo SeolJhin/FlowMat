@@ -1,5 +1,9 @@
 package org.myweb.flowmat;
 
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -123,6 +127,39 @@ class WorkflowValidationIntegrationTest extends IntegrationTestSupport {
             .andExpect(jsonPath("$.data.issues[?(@.code == 'PORT_INVALID')]").isNotEmpty());
         mockMvc.perform(auth(post("/workflows/" + workflow + "/revisions"), DEMO_OWNER))
             .andExpect(status().isConflict());
+    }
+
+    @Test
+    void nonStandardResourceTypeIsOnlyAWarningAndTheWorkflowStillPublishes() throws Exception {
+        String workflow = data(post("/workflows").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"projectId\":\"" + DEMO_PROJECT + "\",\"workflowName\":\"Resource types "
+                + UUID.randomUUID() + "\"}")) .path("workflowId").asText();
+        String process = data(post("/processes").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"workflowId\":\"" + workflow + "\",\"processName\":\"Assembly\"}"))
+            .path("processId").asText();
+        // A blank resourceType takes the I/O type. Energy is a port resource; labor is an execution requirement, not
+        // something that flows through a port, so it warns even though the port editor offers it as an I/O type.
+        data(post("/process-ios").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"processId\":\"" + process + "\",\"itemId\":\"itm_demo_mix_output\",\"ioName\":\"Power\","
+                + "\"direction\":\"input\",\"ioType\":\"energy\",\"quantity\":2,\"unit\":\"kg\",\"requiredYn\":\"N\"}"));
+        String laborPort = data(post("/process-ios").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"processId\":\"" + process + "\",\"itemId\":\"itm_demo_mix_output\",\"ioName\":\"Crew\","
+                + "\"direction\":\"input\",\"ioType\":\"labor\",\"quantity\":2,\"unit\":\"kg\",\"requiredYn\":\"N\"}"))
+            .path("processIoId").asText();
+        String widgetPort = data(post("/process-ios").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"processId\":\"" + process + "\",\"itemId\":\"itm_demo_mix_output\",\"ioName\":\"Odd\","
+                + "\"direction\":\"output\",\"resourceType\":\"Widget\",\"quantity\":1,\"unit\":\"kg\"}"))
+            .path("processIoId").asText();
+
+        mockMvc.perform(auth(get("/workflows/" + workflow + "/validation"), DEMO_OWNER))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.errors").value(0))
+            .andExpect(jsonPath("$.data.issues[?(@.code == 'RESOURCE_TYPE_UNKNOWN')]", hasSize(2)))
+            .andExpect(jsonPath("$.data.issues[?(@.code == 'RESOURCE_TYPE_UNKNOWN')].ioId",
+                containsInAnyOrder(laborPort, widgetPort)))
+            .andExpect(jsonPath("$.data.issues[?(@.code == 'RESOURCE_TYPE_UNKNOWN')].severity", everyItem(is("warning"))));
+        mockMvc.perform(auth(post("/workflows/" + workflow + "/revisions"), DEMO_OWNER))
+            .andExpect(status().isOk());
     }
 
     private JsonNode data(MockHttpServletRequestBuilder request) throws Exception {

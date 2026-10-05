@@ -4,12 +4,20 @@ import type { InventoryDto, WorkOrderDto } from '../../../shared/types/api'
 import {
   EMPTY_PICK,
   EMPTY_PUTAWAY,
+  assigneeChoices,
   freeToMove,
   movableRecords,
+  partQuantity,
   pickPayload,
   pickableOrders,
   putawayPayload,
+  scannedPlaceFits,
+  scannerTasks,
+  selectedScanTask,
   shortageText,
+  stagingPlacesFor,
+  tasksFor,
+  tasksForScan,
 } from './warehouseTaskModel'
 
 function record(inventoryId: string, patch: Partial<InventoryDto> = {}): InventoryDto {
@@ -24,7 +32,7 @@ function task(inventoryId: string, quantity: number, status: WarehouseTaskDto['s
     taskId: `t-${inventoryId}-${quantity}`, projectId: 'p', taskNo: 'WT-0001', taskType: 'putaway', status, inventoryId, itemId: 'bolt',
     itemCode: 'BOLT', itemName: 'Bolt', lotId: null, lotNo: null, quantity, fromLocation: 'DOCK', toLocation: 'SHELF', workOrderId: null,
     workOrderNumber: null, note: null, createdBy: 'u', createdAt: '2026-09-27T00:00:00Z', finishedBy: null, finishedAt: null,
-    transferId: null, cancelReason: null,
+    transferId: null, cancelReason: null, assignedTo: null,
   }
 }
 
@@ -33,6 +41,32 @@ describe('freeToMove and movableRecords', () => {
     expect(freeToMove(record('r1'), [task('r1', 6), task('r1', 1, 'done'), task('r2', 3)])).toBe(4)
     const records = [record('r1'), record('r2', { inventoryStatus: 'hold' }), record('r3', { availableQuantity: 2 })]
     expect(movableRecords(records, [task('r3', 2)], () => 'BOLT').map((one) => one.inventoryId)).toEqual(['r1'])
+  })
+})
+
+describe('stagingPlacesFor', () => {
+  it('takes the places done picks of the order went to', () => {
+    const task = (taskType: 'pick' | 'putaway', status: 'open' | 'done' | 'cancelled', workOrderId: string | null, toLocation: string) =>
+      ({ taskType, status, workOrderId, toLocation }) as WarehouseTaskDto
+    const tasks = [
+      task('pick', 'done', 'wo-1', 'Line-1 '),
+      task('pick', 'done', 'wo-1', 'LINE-1'),
+      task('pick', 'open', 'wo-1', 'LINE-2'),
+      task('putaway', 'done', 'wo-1', 'SHELF'),
+      task('pick', 'done', 'wo-2', 'LINE-3'),
+    ]
+    expect([...stagingPlacesFor(tasks, 'wo-1')]).toEqual(['line-1'])
+    expect(stagingPlacesFor(tasks, null).size).toBe(0)
+  })
+})
+
+describe('partQuantity', () => {
+  it('takes more than 0 and at most the task', () => {
+    expect(partQuantity({ quantity: 6 }, '2')).toEqual({ quantity: 2, error: null })
+    expect(partQuantity({ quantity: 6 }, '6')).toEqual({ quantity: 6, error: null })
+    for (const text of ['', ' ', '0', '-1', '7', 'two']) {
+      expect(partQuantity({ quantity: 6 }, text)).toEqual({ quantity: null, error: 'Enter a quantity above 0 and at most 6.' })
+    }
   })
 })
 
@@ -72,5 +106,70 @@ describe('payloads', () => {
     const line = { itemId: 'f', itemCode: 'FLOUR', required: 10, atStaging: 0, alreadyPlanned: 0, plannedNow: 6, shortage: 4 }
     expect(shortageText([line, { ...line, itemCode: 'SALT', shortage: 0 }])).toBe('Short: FLOUR 4')
     expect(shortageText([{ ...line, shortage: 0 }])).toBe('')
+  })
+})
+
+describe('who does a task', () => {
+  it('offers me and the active members, and keeps whoever has it now', () => {
+    const members = [
+      { userId: 'lee', memberStatus: 'active' }, { userId: 'park', memberStatus: 'removed' }, { userId: 'kim', memberStatus: 'active' },
+    ]
+    expect(assigneeChoices(members, 'demo-owner', null)).toEqual(['demo-owner', 'kim', 'lee'])
+    expect(assigneeChoices(members, 'kim', 'park')).toEqual(['kim', 'lee', 'park'])
+    expect(assigneeChoices([], null, null)).toEqual([])
+  })
+
+  it('lists the tasks given to me or to no one', () => {
+    const mine = { ...task('r1', 1), assignedTo: 'kim' }
+    const theirs = { ...task('r2', 2), assignedTo: 'lee' }
+    const nobodys = task('r3', 3)
+    expect(tasksFor([mine, theirs, nobodys], 'me', 'kim')).toEqual([mine])
+    expect(tasksFor([mine, theirs, nobodys], 'nobody', 'kim')).toEqual([nobodys])
+    expect(tasksFor([mine, theirs, nobodys], 'anyone', 'kim')).toHaveLength(3)
+    expect(tasksFor([mine], 'me', null)).toEqual([])
+  })
+})
+
+describe('doing a task by scanning', () => {
+  it('finds the open tasks of the scanned item, mine first, and checks the place', () => {
+    const theirs = { ...task('r1', 1), assignedTo: 'lee' }
+    const mine = { ...task('r2', 2), assignedTo: 'kim' }
+    const done = task('r3', 3, 'done')
+    const otherItem = { ...task('r4', 4), itemId: 'nut' }
+    expect(tasksForScan([theirs, mine, done, otherItem], { itemId: 'bolt' }, 'kim')).toEqual([mine, theirs])
+    expect(tasksForScan([theirs], null, 'kim')).toEqual([])
+    expect(scannedPlaceFits(mine, ' shelf ')).toBe(true)
+    expect(scannedPlaceFits(mine, 'DOCK')).toBe(false)
+  })
+})
+
+describe('scanner view', () => {
+  it('lists my open tasks, then the ones given to nobody, and leaves out the rest', () => {
+    const free = task('r1', 1)
+    const mine = { ...task('r2', 2), assignedTo: 'kim' }
+    const theirs = { ...task('r3', 3), assignedTo: 'lee' }
+    const doneMine = { ...task('r4', 4, 'done'), assignedTo: 'kim' }
+    expect(scannerTasks([free, mine, theirs, doneMine], 'kim')).toEqual([mine, free])
+    expect(scannerTasks([free, mine], null)).toEqual([free])
+  })
+})
+
+describe('selectedScanTask', () => {
+  it('uses the latest destination and remaining quantity for the selected task id', () => {
+    const old = task('r1', 4)
+    const current = { ...old, quantity: 2, toLocation: 'NEW-LINE' }
+    expect(selectedScanTask([current], old.taskId)).toBe(current)
+    expect(selectedScanTask([current], old.taskId)?.quantity).toBe(2)
+    expect(selectedScanTask([current], old.taskId)?.toLocation).toBe('NEW-LINE')
+  })
+
+  it.each(['done', 'cancelled'] as const)('does not allow a %s task to stay selected', (status) => {
+    const closed = task('r1', 4, status)
+    expect(selectedScanTask([closed], closed.taskId)).toBeNull()
+  })
+
+  it('does not select missing tasks or a task before its item has been scanned', () => {
+    expect(selectedScanTask([], 'missing')).toBeNull()
+    expect(selectedScanTask([task('r1', 4)], null)).toBeNull()
   })
 })

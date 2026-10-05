@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
-import { newRequestId } from '../../../shared/lib/requestId'
+import { createStockCommand } from './stockCommand'
 import type { ApiEnvelope } from '../../../shared/types/api'
 
 export interface InventoryCountResultDto {
@@ -17,24 +18,24 @@ export interface InventoryCountResultDto {
   }[]
 }
 
-/**
- * Applies a stock count (docs/domain/stock-count.md): every counted record is adjusted together or not at all. The
- * requestId is made once per count so a double click cannot apply it twice.
- */
+export interface InventoryCountInput {
+  note?: string
+  lines: { inventoryId: string; countedQuantity: number; expectedQuantity: number }[]
+}
+
+/** Unacknowledged retries keep the count's key so the saved result is replayed before stale quantity validation. */
 export function useInventoryCountMutation(projectId: string) {
   const queryClient = useQueryClient()
+  const [command] = useState(() => createStockCommand<InventoryCountInput & { projectId: string }, InventoryCountResultDto>(
+    async (input) => unwrapApiResponse(
+      await httpClient.post<ApiEnvelope<InventoryCountResultDto>>('/inventory-counts', input),
+    ),
+  ))
   return useMutation({
-    mutationFn: async (input: {
-      note?: string
-      lines: { inventoryId: string; countedQuantity: number; expectedQuantity: number }[]
-    }) =>
-      unwrapApiResponse(
-        await httpClient.post<ApiEnvelope<InventoryCountResultDto>>('/inventory-counts', {
-          projectId,
-          requestId: newRequestId(),
-          ...input,
-        }),
-      ),
+    mutationFn: (input: InventoryCountInput) => command({ ...input, projectId,
+      // The same set of counted rows remains the same count when a query returns those rows in a different order.
+      lines: [...input.lines].sort((a, b) => a.inventoryId < b.inventoryId ? -1 : a.inventoryId > b.inventoryId ? 1 : 0),
+    }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['inventories', projectId] })
       void queryClient.invalidateQueries({ queryKey: ['lots', projectId] })

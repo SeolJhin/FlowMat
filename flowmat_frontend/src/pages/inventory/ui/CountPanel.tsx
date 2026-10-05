@@ -1,12 +1,14 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { useInventoriesQuery } from '../../../entities/inventory/api/useInventoriesQuery'
 import { useStockAnalysisQuery } from '../../../entities/inventory/api/useStockAnalysis'
-import { useInventoryCountMutation, type InventoryCountResultDto } from '../../../entities/inventory/api/useInventoryCount'
-import { errorMessage } from '../../../shared/lib/errorMessage'
+import { useInventoryCountMutation, type InventoryCountResultDto, type InventoryCountInput } from '../../../entities/inventory/api/useInventoryCount'
+import { useStorageLocationsQuery } from '../../../entities/inventory/api/useStorageLocations'
+import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { ItemDto } from '../../../shared/types/api'
-import { ABC_COUNT_DAYS, COUNT_DUE_DAYS, buildCountLines, countDifference, countDue, countIntervalDays, filterCountRows, lastCountedLabel } from '../model/countModel'
+import { ABC_COUNT_DAYS, COUNT_DUE_DAYS, buildCountLines, countDifference, countDue, countIntervalDays, filterCountRows, lastCountedLabel, snapshotCountEntries, type CountDraft } from '../model/countModel'
 import { countSheetCsv, entriesFromSheet } from '../model/countSheetModel'
+import { codesWithin } from '../model/locationModel'
 
 const cell = { padding: '6px 6px' } as const
 const num = { ...cell, textAlign: 'right' } as const
@@ -21,12 +23,17 @@ export function CountPanel({ projectId, items }: { projectId: string; items: Ite
   const countMutation = useInventoryCountMutation(projectId)
   const [filter, setFilter] = useState('')
   const [dueOnly, setDueOnly] = useState(false)
-  const [entries, setEntries] = useState<Record<string, string>>({})
+  // A listed place: only records there or at a place inside it (docs/domain/storage-location.md).
+  const [place, setPlace] = useState('')
+  const [draft, setDraft] = useState<CountDraft>({ entries: {}, expectedQuantities: {} })
+  const { entries, expectedQuantities } = draft
   const [note, setNote] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
   const [result, setResult] = useState<InventoryCountResultDto | null>(null)
   const [blindSheet, setBlindSheet] = useState(false)
   const [sheetMessage, setSheetMessage] = useState<string | null>(null)
+  const [loadingSheet, setLoadingSheet] = useState(false)
+  const sheetReadGeneration = useRef(0)
 
   const itemLabel = useMemo(() => {
     const labels = new Map(items.map((item) => [item.itemId, `${item.itemCode} · ${item.itemName}`]))
@@ -42,7 +49,14 @@ export function CountPanel({ projectId, items }: { projectId: string; items: Ite
   const intervalOf = (itemId: string) => countIntervalDays(abcByItem.get(itemId))
   const isDue = (row: (typeof allRows)[number]) => countDue(row, new Date(), intervalOf(row.itemId))
   const due = allRows.filter(isDue).length
-  const rows = filterCountRows(allRows, filter, itemLabel).filter((row) => !dueOnly || isDue(row))
+  const locations = useStorageLocationsQuery(projectId).data ?? []
+  const within = place ? codesWithin(locations, place) : null
+  const rows = filterCountRows(allRows, filter, itemLabel)
+    .filter((row) => !dueOnly || isDue(row))
+    .filter((row) => !within || within.has(row.location?.trim().toLowerCase() ?? ''))
+  const failureStatus = errorStatus(countMutation.error)
+  const unconfirmed = countMutation.isError && (failureStatus === null || failureStatus >= 500)
+  const inputsLocked = countMutation.isPending || unconfirmed || loadingSheet
   const typed = Object.values(entries).filter((value) => value.trim() !== '').length
 
   function downloadSheet() {
@@ -55,44 +69,79 @@ export function CountPanel({ projectId, items }: { projectId: string; items: Ite
   }
 
   async function loadSheet(file: File) {
-    const read = entriesFromSheet(await file.text(), new Set(allRows.map((row) => row.inventoryId)))
-    if (!read.ok) {
-      setSheetMessage(read.error)
-      return
+    const generation = ++sheetReadGeneration.current
+    setLoadingSheet(true)
+    setSheetMessage(null)
+    try {
+      const text = await file.text()
+      if (generation !== sheetReadGeneration.current) return
+      const read = entriesFromSheet(text, new Set(allRows.map((row) => row.inventoryId)))
+      if (!read.ok) {
+        setSheetMessage(read.error)
+        return
+      }
+      setDraft((current) => snapshotCountEntries(current, read.entries, allRows))
+      setSheetMessage(`Loaded ${read.filled} count${read.filled === 1 ? '' : 's'}${read.unknown ? `; ${read.unknown} record(s) not in the list skipped` : ''}. Check them, then apply.`)
+    } catch {
+      if (generation === sheetReadGeneration.current) {
+        setSheetMessage('The counted sheet could not be read. Choose the file again.')
+      }
+    } finally {
+      if (generation === sheetReadGeneration.current) setLoadingSheet(false)
     }
-    setEntries((current) => ({ ...current, ...read.entries }))
-    setSheetMessage(`Loaded ${read.filled} count${read.filled === 1 ? '' : 's'}${read.unknown ? `; ${read.unknown} record(s) not in the list skipped` : ''}. Check them, then apply.`)
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    const built = buildCountLines(entries, inventoriesQuery.data ?? [])
-    if (!built.ok) {
-      setFormError(built.error)
-      return
+    if (countMutation.isPending || loadingSheet) return
+    let input: InventoryCountInput
+    if (unconfirmed && countMutation.variables) {
+      // Replay the submitted operation, including rows removed since then; do not build a new partial count.
+      input = countMutation.variables
+    } else {
+      const built = buildCountLines(entries, inventoriesQuery.data ?? [], expectedQuantities)
+      if (!built.ok) {
+        setFormError(built.error)
+        return
+      }
+      input = { note: note.trim() || undefined, lines: built.lines }
     }
     setFormError(null)
     setResult(null)
     try {
-      setResult(await countMutation.mutateAsync({ note: note.trim() || undefined, lines: built.lines }))
-      setEntries({})
+      setResult(await countMutation.mutateAsync(input))
+      setDraft({ entries: {}, expectedQuantities: {} })
       setNote('')
     } catch {
-      // Shown below; nothing was changed.
+      // A lost response can follow a committed count; keep the draft so the same request can be replayed.
     }
   }
 
   return (
-    <form aria-label="Stock count" onSubmit={(e) => void handleSubmit(e)} style={{ display: 'grid', gap: 12 }}>
+    <form aria-busy={countMutation.isPending || loadingSheet} aria-label="Stock count" onSubmit={(e) => void handleSubmit(e)} style={{ display: 'grid', gap: 12 }}>
       <p className="inspector-hint" style={{ margin: 0 }}>
         Type what is physically there. Records left blank are not counted. Applying adjusts every counted record at once,
-        or none if one of them cannot be (for example it moved while you were counting).
+        or none if one of them cannot be (for example it moved while you were counting). The first quantity seen is kept until you clear the count.
       </p>
+      {unconfirmed && (
+        <p role="status" className="inspector-hint" style={{ margin: 0 }}>
+          The count result is unconfirmed. Retry Apply count with the same values before clearing or leaving this page.
+        </p>
+      )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
         <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
           <span>Filter</span>
           <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="item, LOT or location" />
         </label>
+        {locations.length > 0 && (
+          <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+            <span>Place</span>
+            <select aria-label="Place" value={place} onChange={(e) => setPlace(e.target.value)}>
+              <option value="">All places</option>
+              {locations.map((one) => <option key={one.locationId} value={one.locationId}>{one.path}</option>)}
+            </select>
+          </label>
+        )}
         <label style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 12, paddingBottom: 4 }}>
           <input type="checkbox" checked={dueOnly} onChange={(e) => setDueOnly(e.target.checked)} />
           <span
@@ -103,7 +152,7 @@ export function CountPanel({ projectId, items }: { projectId: string; items: Ite
         </label>
         <label style={{ display: 'grid', gap: 4, fontSize: 12, flex: 1, minWidth: 200 }}>
           <span>Note</span>
-          <input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="e.g. monthly count, shelf A" />
+          <input value={note} disabled={inputsLocked} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="e.g. monthly count, shelf A" />
         </label>
         <span role="group" aria-label="Count sheet" style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, paddingBottom: 4 }}>
           <button type="button" style={{ fontSize: 11 }} disabled={rows.length === 0} onClick={downloadSheet}>
@@ -117,7 +166,7 @@ export function CountPanel({ projectId, items }: { projectId: string; items: Ite
             Load counted sheet{' '}
             <input
               type="file"
-              accept=".csv,text/csv"
+              accept=".csv,text/csv" disabled={inputsLocked}
               aria-label="Load counted sheet"
               style={{ fontSize: 11, width: 180 }}
               onChange={(e) => {
@@ -128,11 +177,21 @@ export function CountPanel({ projectId, items }: { projectId: string; items: Ite
             />
           </label>
         </span>
-        <button type="submit" disabled={countMutation.isPending || typed === 0}>
+        <button type="button" disabled={countMutation.isPending || (typed === 0 && !loadingSheet)} onClick={() => {
+          sheetReadGeneration.current += 1
+          setLoadingSheet(false)
+          setDraft({ entries: {}, expectedQuantities: {} })
+          setFormError(null)
+          setResult(null)
+          setSheetMessage(null)
+          countMutation.reset()
+        }}>Clear counts</button>
+        <button type="submit" disabled={countMutation.isPending || loadingSheet || typed === 0}>
           {countMutation.isPending ? 'Applying...' : `Apply count (${typed})`}
         </button>
       </div>
 
+      {loadingSheet && <p role="status" style={{ fontSize: 12, margin: 0 }}>Reading counted sheet...</p>}
       {sheetMessage && (
         <p role="status" aria-label="Count sheet result" style={{ fontSize: 12, margin: 0 }}>
           {sheetMessage}
@@ -140,7 +199,7 @@ export function CountPanel({ projectId, items }: { projectId: string; items: Ite
       )}
       {(formError || countMutation.isError) && (
         <p role="alert" style={{ color: '#dc2626', fontSize: 12, margin: 0 }}>
-          {formError ?? errorMessage(countMutation.error, 'The count was refused; nothing changed.')}
+          {formError ?? errorMessage(countMutation.error, 'The count could not be confirmed.')}
         </p>
       )}
       {result && (
@@ -166,7 +225,7 @@ export function CountPanel({ projectId, items }: { projectId: string; items: Ite
         </thead>
         <tbody>
           {rows.map((row) => {
-            const difference = countDifference(entries[row.inventoryId], row.quantity)
+            const difference = countDifference(entries[row.inventoryId], expectedQuantities[row.inventoryId] ?? row.quantity)
             return (
               <tr key={row.inventoryId} style={{ borderBottom: '1px solid var(--border)' }}>
                 <td style={cell}>{itemLabel(row.itemId)}</td>
@@ -178,10 +237,16 @@ export function CountPanel({ projectId, items }: { projectId: string; items: Ite
                   <input
                     aria-label={`Counted ${itemLabel(row.itemId)} at ${row.location ?? 'no location'}${row.lotNo ? ` LOT ${row.lotNo}` : ''}`}
                     inputMode="decimal"
-                    value={entries[row.inventoryId] ?? ''}
-                    onChange={(e) => setEntries((current) => ({ ...current, [row.inventoryId]: e.target.value }))}
+                    value={entries[row.inventoryId] ?? ''} disabled={inputsLocked}
+                    onChange={(e) => {
+                      const text = e.target.value
+                      setDraft((current) => snapshotCountEntries(current, { [row.inventoryId]: text }, [row]))
+                    }}
                     style={{ width: 80, textAlign: 'right' }}
                   />
+                  {expectedQuantities[row.inventoryId] !== undefined && expectedQuantities[row.inventoryId] !== row.quantity && (
+                    <small style={{ display: 'block', color: '#b91c1c' }}>{unconfirmed ? 'Count result unconfirmed. Retry the same count.' : 'Stock changed. Clear this count and recount.'}</small>
+                  )}
                 </td>
                 <td
                   style={{
@@ -190,6 +255,9 @@ export function CountPanel({ projectId, items }: { projectId: string; items: Ite
                   }}
                 >
                   {difference === null ? '' : difference === 0 ? '0' : difference > 0 ? `+${formatQty(difference)}` : formatQty(difference)}
+                  {expectedQuantities[row.inventoryId] !== undefined && expectedQuantities[row.inventoryId] !== row.quantity && (
+                    <small style={{ display: 'block', color: '#b91c1c' }}>{unconfirmed ? 'Count result unconfirmed. Retry the same count.' : 'Stock changed. Clear this count and recount.'}</small>
+                  )}
                 </td>
                 <td
                   style={{ ...cell, whiteSpace: 'nowrap', opacity: row.lastCheckedAt ? 0.75 : 0.5 }}

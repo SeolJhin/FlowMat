@@ -17,15 +17,31 @@ public record RunInstructionResponse(
     List<Check> checks,
     int requiredSteps,
     int requiredDone,
-    boolean complete
+    boolean complete,
+    /** Confirmations that were undone, the earliest undo first (docs/domain/work-instruction.md R6). */
+    List<Undone> undone
 ) {
+
+    public record Undone(
+        String stepId,
+        int stepNo,
+        String value,
+        String note,
+        String checkedBy,
+        OffsetDateTime checkedAt,
+        String undoneBy,
+        OffsetDateTime undoneAt
+    ) {
+    }
 
     public record Check(
         String stepId,
         String value,
         String note,
         String checkedBy,
-        OffsetDateTime checkedAt
+        OffsetDateTime checkedAt,
+        /** The value lies outside the step's limits (R7); it is recorded all the same. */
+        boolean outOfLimits
     ) {
     }
 }

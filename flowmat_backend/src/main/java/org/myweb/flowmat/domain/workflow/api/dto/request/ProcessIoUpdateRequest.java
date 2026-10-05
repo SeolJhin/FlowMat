@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 
 public record ProcessIoUpdateRequest(
     String itemId,
+    Boolean clearItem,
     @Size(max = 100, message = "ioName must be at most 100 characters.") String ioName,
     String direction,
     @Size(max = 30, message = "ioType must be at most 30 characters.") String ioType,

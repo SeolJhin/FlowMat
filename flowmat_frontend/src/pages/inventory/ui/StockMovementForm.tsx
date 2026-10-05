@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useStockMovementMutation, useStockTransferMutation } from '../../../entities/inventory/api/useStockMovements'
-import { errorMessage } from '../../../shared/lib/errorMessage'
+import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { InventoryDto } from '../../../shared/types/api'
 import type { LotRecord } from '../model/fefoModel'
@@ -43,9 +43,11 @@ export function StockMovementForm({
   const moving = action === 'move'
   const pending = movement.isPending || transfer.isPending
   const failure = moving ? transfer : movement
+  const failureStatus = errorStatus(failure.error)
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (pending) return
     try {
       if (moving) {
         await transfer.mutateAsync({
@@ -78,12 +80,14 @@ export function StockMovementForm({
     <form
       onSubmit={(e) => void handleSubmit(e)}
       aria-label="Record stock movement"
+      aria-busy={pending}
       style={{ display: 'grid', gridTemplateColumns: '180px 90px 1fr auto', gap: 6, alignItems: 'end', margin: '0 0 12px' }}
     >
       <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
         <span>Movement</span>
         <select
           value={action}
+          disabled={pending}
           onChange={(e) => {
             setAction(e.target.value as Action)
             movement.reset()
@@ -101,6 +105,7 @@ export function StockMovementForm({
           min="0"
           step="any"
           value={quantity}
+          disabled={pending}
           onChange={(e) => {
             setQuantity(e.target.value)
             setPacks('')
@@ -113,6 +118,7 @@ export function StockMovementForm({
           <span>To location</span>
           <input
             value={toLocation}
+            disabled={pending}
             maxLength={100}
             list={LOCATION_OPTIONS_ID}
             onChange={(e) => setToLocation(e.target.value)}
@@ -123,7 +129,7 @@ export function StockMovementForm({
       ) : (
         <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
           <span>Note</span>
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. delivery 2026-09-24 / cycle count" />
+          <input disabled={pending} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. delivery 2026-09-24 / cycle count" />
         </label>
       )}
       <button type="submit" disabled={pending}>{pending ? 'Saving...' : moving ? 'Move' : 'Record'}</button>
@@ -131,7 +137,7 @@ export function StockMovementForm({
         <div role="radiogroup" aria-label="Adjustment direction" style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, fontSize: 12 }}>
           {(['increase', 'decrease'] as const).map((value) => (
             <label key={value} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              <input type="radio" name="adjustment-direction" checked={direction === value} onChange={() => setDirection(value)} />
+              <input disabled={pending} type="radio" name="adjustment-direction" checked={direction === value} onChange={() => setDirection(value)} />
               {value}
             </label>
           ))}
@@ -151,11 +157,12 @@ export function StockMovementForm({
             min="0"
             step="any"
             value={packs}
+            disabled={pending}
             style={{ width: 70 }}
             onChange={(e) => {
               setPacks(e.target.value)
               const units = e.target.value.trim() === '' ? null : fromPacks(Number(e.target.value), packQty)
-              if (units !== null) setQuantity(String(units))
+              setQuantity(units === null ? '' : String(units))
             }}
           />
           <span>
@@ -169,15 +176,20 @@ export function StockMovementForm({
           {inventory.lotNo ? ` (before this LOT ${inventory.lotNo})` : ''} and has {formatQty(earlier.inventory.availableQuantity)} available at{' '}
           {earlier.inventory.location ?? 'no location'}.{' '}
           {onUseEarlier && (
-            <button type="button" style={{ fontSize: 11 }} onClick={onUseEarlier}>
+            <button type="button" disabled={pending} style={{ fontSize: 11 }} onClick={onUseEarlier}>
               Use that LOT
             </button>
           )}
         </p>
       )}
       {failure.isError && (
-        <p style={{ gridColumn: '1 / -1', color: '#dc2626', fontSize: 12, margin: 0 }}>
+        <p role="alert" style={{ gridColumn: '1 / -1', color: '#dc2626', fontSize: 12, margin: 0 }}>
           {errorMessage(failure.error, moving ? 'The move was refused.' : 'The movement was refused.')}
+        </p>
+      )}
+      {failure.isError && (failureStatus === null || failureStatus >= 500) && (
+        <p style={{ gridColumn: '1 / -1', fontSize: 12, margin: 0 }}>
+          The result is unconfirmed. Retry with the same values before changing or leaving this history.
         </p>
       )}
     </form>

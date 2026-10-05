@@ -9,8 +9,9 @@ import java.util.List;
  * the usable stock lasts at that rate, and how long the item has sat idle. Nothing is stored.
  *
  * @param from start of the consumption window; it ends now
+ * @param location the listed place the analysis is limited to, with the places inside it (A5); null for the whole project
  */
-public record StockMovementAnalysisResponse(int days, OffsetDateTime from, List<Line> lines) {
+public record StockMovementAnalysisResponse(int days, OffsetDateTime from, String location, List<Line> lines) {
 
     /**
      * One item that has stock or was consumed in the window, quantities in the item's unit.

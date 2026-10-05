@@ -1,6 +1,7 @@
 package org.myweb.flowmat;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -86,6 +87,34 @@ class BomLineImportIntegrationTest extends IntegrationTestSupport {
         call(post("/boms/" + bomId + "/approve")).andExpect(status().isOk());
         importLines(bomId, true, false, flourLine).andExpect(status().isConflict());
         importLines(doughBom, true, false).andExpect(status().isConflict());
+    }
+
+    @Test
+    void aTypeColumnAddsByProductsAndWaste() throws Exception {
+        String tag = UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
+        String juice = item("BLI-JUICE-" + tag, "unit_kg");
+        String orange = item("BLI-ORANGE-" + tag, "unit_kg");
+        String peel = item("BLI-PEEL-" + tag, "unit_kg");
+        String pulp = item("BLI-PULP-" + tag, "unit_kg");
+        String bomId = id(call(post("/boms"), json(Map.of("projectId", DEMO_PROJECT, "targetItemId", juice, "bomName", "Juice " + tag,
+            "baseQuantity", 1, "baseUnit", "kg"))), "bomId");
+
+        importLines(bomId, true, false,
+                row("itemCode", "BLI-ORANGE-" + tag, "quantity", "2", "unit", "kg"),
+                row("itemCode", "BLI-PEEL-" + tag, "quantity", "0.5", "unit", "kg", "lineType", "by_product"),
+                row("itemCode", "BLI-PULP-" + tag, "quantity", "0.3", "unit", "kg", "lineType", "emission"))
+            .andExpect(jsonPath("$.data.errors").value(1))
+            .andExpect(jsonPath("$.data.rows[2].message").value("Type must be material, by_product or waste, not emission"));
+        importLines(bomId, false, false,
+                row("itemCode", "BLI-ORANGE-" + tag, "quantity", "2", "unit", "kg", "lineType", ""),
+                row("itemCode", "BLI-PEEL-" + tag, "quantity", "0.5", "unit", "kg", "lineType", " By_Product "),
+                row("itemCode", "BLI-PULP-" + tag, "quantity", "0.3", "unit", "kg", "lineType", "waste"))
+            .andExpect(jsonPath("$.data.applied").value(true))
+            .andExpect(jsonPath("$.data.added").value(3));
+        call(get("/boms/" + bomId))
+            .andExpect(jsonPath("$.data.lines[?(@.childItemId == '" + orange + "')].lineType").value(hasItem("material")))
+            .andExpect(jsonPath("$.data.lines[?(@.childItemId == '" + peel + "')].lineType").value(hasItem("by_product")))
+            .andExpect(jsonPath("$.data.lines[?(@.childItemId == '" + pulp + "')].lineType").value(hasItem("waste")));
     }
 
     // ---- helpers ----

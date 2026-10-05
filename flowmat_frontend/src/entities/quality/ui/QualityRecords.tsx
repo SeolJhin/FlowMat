@@ -93,6 +93,9 @@ export function DefectList({
   stock,
   onResolve,
   resolving,
+  ncrOf,
+  gathered,
+  onGather,
 }: {
   defects: DefectDto[]
   subjectOf: (record: Subject) => string
@@ -100,6 +103,11 @@ export function DefectList({
   stock: InventoryDto[]
   onResolve: (defect: DefectDto, resolution: DefectResolution) => Promise<unknown>
   resolving: boolean
+  /** The NCR number to show on a defect a nonconformity holds (docs/domain/nonconformity.md). */
+  ncrOf?: (defect: DefectDto) => string | null
+  /** Defects ticked for a new nonconformity; with {@link onGather}, open defects no NCR holds get a tick box. */
+  gathered?: string[]
+  onGather?: (defect: DefectDto) => void
 }) {
   const [resolvingId, setResolvingId] = useState<string | null>(null)
   return (
@@ -110,7 +118,10 @@ export function DefectList({
             <span>
               <strong>{item.defectType}</strong> {formatQty(item.quantity)} {item.unit ?? ''} · {item.severity}
             </span>
-            <span style={{ color: item.resolved ? '#047857' : '#b45309' }}>{item.resolved ? 'Resolved' : 'Open'}</span>
+            <span style={{ display: 'flex', gap: 8 }}>
+              {ncrOf?.(item) && <span aria-label="Nonconformity" style={{ fontWeight: 600 }}>{ncrOf(item)}</span>}
+              <span style={{ color: item.resolved ? '#047857' : '#b45309' }}>{item.resolved ? 'Resolved' : 'Open'}</span>
+            </span>
           </div>
           <div>
             {subjectOf(item)}
@@ -130,6 +141,12 @@ export function DefectList({
             <button type="button" style={{ marginTop: 6, fontSize: 11 }} onClick={() => setResolvingId(item.defectLogId)}>
               Resolve
             </button>
+          )}
+          {onGather && !item.resolved && !ncrOf?.(item) && (
+            <label style={{ display: 'inline-flex', gap: 4, marginLeft: 8, fontSize: 11 }}>
+              <input type="checkbox" checked={gathered?.includes(item.defectLogId) ?? false} onChange={() => onGather(item)} />
+              For a new NCR
+            </label>
           )}
           {!item.resolved && resolvingId === item.defectLogId && (
             <ResolveDefectForm

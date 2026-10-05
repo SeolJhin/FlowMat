@@ -91,6 +91,25 @@ class NonconformityIntegrationTest extends IntegrationTestSupport {
         call(post(path + "/actions"), "{\"actionType\":\"correction\",\"description\":\"x\"}").andExpect(status().isConflict());
         call(get("/nonconformities").param("projectId", DEMO_PROJECT).param("status", "closed"))
             .andExpect(jsonPath("$.data[?(@.nonconformityId == '" + ncrId + "')]").isNotEmpty());
+
+        // Whether the actions worked is checked once, on the closed nonconformity (N12); it stays closed either way.
+        call(get(path)).andExpect(jsonPath("$.data.verificationResult").doesNotExist());
+        call(post(path + "/verify"), "{\"result\":\"maybe\"}")
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("result must be effective or not_effective."));
+        call(post(path + "/verify"), "{\"result\":\"not_effective\",\"note\":\" \"}")
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("Say what still goes wrong when the actions did not work."));
+        call(post(path + "/verify"), "{\"result\":\"Not_Effective\",\"note\":\"Cracks again on lot 57\"}")
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.status").value("closed"))
+            .andExpect(jsonPath("$.data.verificationResult").value("not_effective"))
+            .andExpect(jsonPath("$.data.verificationNote").value("Cracks again on lot 57"))
+            .andExpect(jsonPath("$.data.verifiedBy").value(DEMO_OWNER))
+            .andExpect(jsonPath("$.data.verifiedAt").isNotEmpty());
+        call(post(path + "/verify"), "{\"result\":\"effective\"}")
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.message").value(containsString("was already checked by " + DEMO_OWNER)));
     }
 
     @Test
@@ -114,6 +133,13 @@ class NonconformityIntegrationTest extends IntegrationTestSupport {
 
         callAs("unrelated-user", get("/nonconformities").param("projectId", DEMO_PROJECT), null).andExpect(status().isForbidden());
         callAs("unrelated-user", get("/nonconformities/" + ncrId), null).andExpect(status().isForbidden());
+
+        // Only a closed nonconformity's actions are checked (N12).
+        call(post("/nonconformities/" + ncrId + "/verify"), "{\"result\":\"effective\"}")
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.message").value(containsString("is cancelled; only a closed nonconformity")));
+        callAs("unrelated-user", post("/nonconformities/" + ncrId + "/verify"), "{\"result\":\"effective\"}")
+            .andExpect(status().isForbidden());
     }
 
     private ResultActions defect(String item, String type, String severity) throws Exception {

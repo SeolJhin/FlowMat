@@ -1,4 +1,5 @@
-import { expect, test, type Route } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+import { answerAuth, mockedLogin, ok } from './support/mockApi'
 
 /**
  * Multi-level BOM screens (docs/domain/multi-level-bom.md) against a mocked API, so no BOM is written to a real database:
@@ -6,9 +7,6 @@ import { expect, test, type Route } from '@playwright/test'
  * order needs show the sub-assembly's materials "via" it. The server side is covered by MultiLevelBomIntegrationTest.
  */
 test('a sub-assembly is marked, exploded and shown in open order needs', async ({ page }) => {
-  const ok = async (route: Route, data: unknown) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data, message: null }) })
-  }
   const item = (itemId: string, itemCode: string, unitId: string, unitCost: number | null) => ({
     itemId, projectId: 'prj-e2e', itemCode, itemName: itemCode.toLowerCase(), itemType: 'material', resourceCategory: null,
     resourceType: null, unitId, itemStatus: 'active', lotManageYn: 'N', unitCost,
@@ -16,6 +14,8 @@ test('a sub-assembly is marked, exploded and shown in open order needs', async (
   const items = [
     item('cake', 'CAKE', 'unit_ea', null), item('sponge', 'SPONGE', 'unit_ea', null),
     item('flour', 'FLOUR', 'unit_kg', 2), item('egg', 'EGG', 'unit_ea', 0.5),
+    // Covered by stock, but the open order leaves it under its safety stock (docs/domain/material-requirements.md).
+    { ...item('sugar', 'SUGAR', 'unit_kg', 1), safetyStockQty: 8 },
   ]
   const line = (bomLineId: string, childItemId: string, quantity: number, unit: string) => ({
     bomLineId, childItemId, quantity, unit, scrapRate: null, optionalYn: 'N', substituteGroup: null, sortOrder: 1, note: null,
@@ -29,24 +29,27 @@ test('a sub-assembly is marked, exploded and shown in open order needs', async (
     bom('cake-bom', 'cake', 'Cake', [line('c1', 'sponge', 2, 'ea')]),
   ]
 
+  // Work orders drafted from open order needs; the list answers them afterwards.
+  const posted: unknown[] = []
+  const workOrders: unknown[] = []
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const request = route.request()
     const url = new URL(request.url())
     const { pathname } = url
     const method = request.method()
-    if (pathname === '/api/auth/csrf') return route.fulfill({
-      status: 200, headers: { 'content-type': 'application/json', 'set-cookie': 'XSRF-TOKEN=test-csrf; Path=/' },
-      body: JSON.stringify({ success: true, data: 'test-csrf', message: null }),
-    })
-    if (pathname === '/api/auth/login') return route.fulfill({
-      status: 200, headers: { 'content-type': 'application/json', 'set-cookie': 'flowmat_rt=test-refresh; HttpOnly; Path=/api/auth' },
-      body: JSON.stringify({ success: true, data: {
-        accessToken: 'eyJ.fake.access', refreshToken: null, deviceId: 'device-1', additionalInfoRequired: false,
-      }, message: null }),
-    })
-    if (pathname === '/api/auth/refresh') return ok(route, { accessToken: 'eyJ.fake.access', refreshToken: null })
-    if (pathname === '/api/users/me') return ok(route, { userId: 'demo-owner', userName: 'Demo Owner' })
-    if (pathname === '/api/users/me/permissions') return ok(route, { canManageUsers: false })
+    if (await answerAuth(route, pathname)) return
+    if (method === 'POST' && pathname === '/api/work-orders') {
+      const body = request.postDataJSON()
+      posted.push(body)
+      const order = {
+        workOrderId: `wo-${posted.length + 100}`, projectId: 'prj-e2e', workflowId: null, workOrderNumber: `WO-0${posted.length + 100}`,
+        workOrderTitle: body.workOrderTitle, workOrderStatus: 'draft', priority: 'normal', targetItemId: body.targetItemId,
+        targetQuantity: body.targetQuantity, plannedStartAt: null, plannedEndAt: null, actualStartAt: null, actualEndAt: null,
+        instruction: null, assignedTo: null, approvedBy: null, approvedAt: null, producedQuantity: 0, runCount: 0, bomId: body.bomId,
+      }
+      workOrders.push(order)
+      return ok(route, order)
+    }
     if (method !== 'GET') {
       return route.fulfill({ status: 404, contentType: 'application/json',
         body: JSON.stringify({ success: false, data: null, message: `Unmocked ${method} ${pathname}` }) })
@@ -59,6 +62,7 @@ test('a sub-assembly is marked, exploded and shown in open order needs', async (
       ])
     }
     if (pathname === '/api/boms') return ok(route, boms)
+    if (pathname === '/api/work-orders') return ok(route, workOrders)
     if (pathname === '/api/boms/cake-bom/requirements') {
       const quantity = Number(url.searchParams.get('quantity'))
       return ok(route, { bomId: 'cake-bom', bomVersion: 1, targetItemId: 'cake', productionQuantity: quantity, baseQuantity: 1,
@@ -98,15 +102,14 @@ test('a sub-assembly is marked, exploded and shown in open order needs', async (
           madeHere: false, orders: [{ workOrderId: null, workOrderTitle: null, required: 40, viaItemId: 'sponge', viaItemCode: 'SPONGE' }] },
         { itemId: 'flour', itemCode: 'FLOUR', itemName: 'flour', unit: 'kg', required: 4, usable: 0, shortage: 4, plannedSupply: 0,
           madeHere: false, orders: [{ workOrderId: null, workOrderTitle: null, required: 4, viaItemId: 'sponge', viaItemCode: 'SPONGE' }] },
+        { itemId: 'sugar', itemCode: 'SUGAR', itemName: 'sugar', unit: 'kg', required: 6, usable: 10, shortage: 0, plannedSupply: 0,
+          madeHere: false, orders: [{ workOrderId: 'wo-1', workOrderTitle: 'Cakes', required: 6 }] },
       ] })
     }
     return ok(route, [])
   })
 
-  await page.goto('/')
-  await page.locator('input').nth(0).fill('demo-owner')
-  await page.locator('input[type="password"]').fill('demo1234')
-  await page.getByRole('button', { name: 'Log in' }).click()
+  await mockedLogin(page)
   await page.goto('/projects/prj-e2e/inventory?tab=boms')
 
   await page.getByRole('row', { name: /Cake/ }).click()
@@ -125,4 +128,24 @@ test('a sub-assembly is marked, exploded and shown in open order needs', async (
   await expect(needs.getByRole('row', { name: /^SPONGE ·/ })).toContainText('made here · own BOM')
   await expect(needs.getByRole('row', { name: /^FLOUR ·/ })).toContainText('via SPONGE 4')
   await expect(needs.getByRole('row', { name: /^EGG ·/ })).toContainText('via SPONGE 40')
+  // Sugar is covered, but the 4 kg the order leaves are 4 under its safety stock of 8.
+  await expect(needs).toContainText('3 materials short · 1 left under safety stock')
+  await expect(needs.getByRole('row', { name: /^SUGAR ·/ }).getByRole('cell').nth(5)).toHaveText('44 under safety 8')
+
+  // Every short sub-assembly as a draft work order at once; once drafted it is not offered again.
+  page.once('dialog', (dialog) => void dialog.accept())
+  await needs.getByRole('button', { name: 'Draft 1 work order for short sub-assemblies' }).click()
+  await expect(needs.getByRole('status')).toContainText('Drafted WO-0101 (SPONGE 20). Approve them on Work Orders.')
+  expect(posted).toEqual([{ projectId: 'prj-e2e', workOrderTitle: 'SPONGE for open work orders', targetItemId: 'sponge',
+    targetQuantity: 20, bomId: 'sponge-bom' }])
+  await expect(needs).toContainText('Not drafted: SPONGE already has draft WO-0101')
+  await expect(needs.getByRole('button', { name: /^Draft \d+ work order/ })).toHaveCount(0)
+
+  // The short sub-assembly can be made: the link fills in a new work order for the 20 short.
+  await needs.getByRole('link', { name: 'Make SPONGE with a work order' }).click()
+  await expect(page.getByRole('note')).toContainText('Filled in from open work order needs')
+  await expect(page.getByPlaceholder('e.g. October batch — widget A')).toHaveValue('SPONGE for open work orders')
+  await expect(page.getByLabel('Target item')).toHaveValue('sponge')
+  await expect(page.getByLabel('Quantity', { exact: true })).toHaveValue('20')
+  await expect(page.getByLabel('BOM', { exact: false })).toHaveValue('sponge-bom')
 })

@@ -36,6 +36,9 @@ export interface NcrAction {
 }
 
 /** A nonconformity report with its defects and actions (docs/domain/nonconformity.md). */
+/** Whether a closed nonconformity's actions worked (docs/domain/nonconformity.md N12). */
+export type NcrVerification = 'effective' | 'not_effective'
+
 export interface NonconformityDto {
   nonconformityId: string
   projectId: string
@@ -57,6 +60,11 @@ export interface NonconformityDto {
   closedBy: string | null
   closedAt: string | null
   closureNote: string | null
+  /** Null until the closed nonconformity's actions are checked (N12). */
+  verificationResult: NcrVerification | null
+  verificationNote: string | null
+  verifiedBy: string | null
+  verifiedAt: string | null
   defects: NcrDefect[]
   actions: NcrAction[]
   openActions: number
@@ -69,6 +77,10 @@ export interface NcrCreateInput {
   /** Empty: the most severe of the defects. */
   severity: DefectSeverity | null
   defectLogIds: string[]
+  /** What it is about when no defect says so, such as a follow-up of another nonconformity. */
+  itemId?: string | null
+  lotId?: string | null
+  productionRunId?: string | null
 }
 
 export interface NcrUpdateInput {
@@ -87,6 +99,26 @@ export interface NcrActionInput {
 }
 
 export const nonconformitiesKey = (projectId: string) => ['nonconformities', projectId] as const
+
+/** A defect gathered on an open or closed nonconformity; a cancelled one lets its defects go. */
+export interface NcrDefectLinkDto {
+  defectLogId: string
+  nonconformityId: string
+  ncrNo: string
+  status: NcrStatus
+}
+
+/** Under the nonconformities key, so raising, cancelling or adding defects refreshes it too. */
+export function useNcrDefectLinksQuery(projectId: string) {
+  return useQuery<NcrDefectLinkDto[]>({
+    queryKey: [...nonconformitiesKey(projectId), 'defect-links'],
+    queryFn: async () =>
+      unwrapApiResponse(
+        await httpClient.get<ApiEnvelope<NcrDefectLinkDto[]>>(`/nonconformities/defect-links?projectId=${encodeURIComponent(projectId)}`),
+      ),
+    enabled: Boolean(projectId),
+  })
+}
 
 /** Newest first; one status only when given. */
 export function useNonconformitiesQuery(projectId: string, status: NcrStatus | null) {
@@ -121,6 +153,10 @@ export function useNonconformityMutations(projectId: string) {
       unwrapApiResponse(await httpClient.put<ApiEnvelope<NonconformityDto>>(path(id), input)),
     onSuccess,
   })
+  const addDefects = useMutation({
+    mutationFn: ({ id, defectLogIds }: { id: string; defectLogIds: string[] }) => post(`${path(id)}/defects`, { defectLogIds }),
+    onSuccess,
+  })
   const addAction = useMutation({
     mutationFn: ({ id, input }: { id: string; input: NcrActionInput }) => post(`${path(id)}/actions`, input),
     onSuccess,
@@ -138,5 +174,10 @@ export function useNonconformityMutations(projectId: string) {
     mutationFn: ({ id, note }: { id: string; note: string }) => post(`${path(id)}/cancel`, { note }),
     onSuccess,
   })
-  return { create, update, addAction, finishAction, close, cancel }
+  const verify = useMutation({
+    mutationFn: ({ id, result, note }: { id: string; result: NcrVerification; note: string | null }) =>
+      post(`${path(id)}/verify`, { result, note }),
+    onSuccess,
+  })
+  return { create, update, addDefects, addAction, finishAction, close, cancel, verify }
 }

@@ -25,15 +25,15 @@ function query(projectId: string, filter: QualityFilter, extra: Record<string, s
   return params.toString()
 }
 
-/** Inspections, newest first (docs/domain/quality-inspection.md). */
-export function useQualityInspectionsQuery(projectId: string, filter: QualityFilter) {
+/** Inspections, newest first (docs/domain/quality-inspection.md); not loaded while {@code enabled} is false. */
+export function useQualityInspectionsQuery(projectId: string, filter: QualityFilter, enabled = true) {
   return useQuery<QualityInspectionDto[]>({
     queryKey: ['quality-inspections', projectId, filter.productionRunId ?? null, filter.lotId ?? null, filter.itemId ?? null],
     queryFn: async () =>
       unwrapApiResponse(
         await httpClient.get<ApiEnvelope<QualityInspectionDto[]>>(`/quality-inspections?${query(projectId, filter)}`),
       ),
-    enabled: Boolean(projectId),
+    enabled: Boolean(projectId) && enabled,
   })
 }
 

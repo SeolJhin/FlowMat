@@ -17,7 +17,6 @@ import org.myweb.flowmat.domain.bom.domain.enums.BomStatus;
 import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
 import org.myweb.flowmat.domain.bom.repository.BomLineRepository;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
-import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 
@@ -76,13 +75,18 @@ public final class BomTree {
 
     /**
      * How much of a line's material one unit of the BOM's product takes: the line quantity in the material's unit ÷ the
-     * batch size in the product's unit, 12 decimals. Throws a 400 when a quantity cannot be converted or the batch is not
-     * above zero.
+     * batch size in the product's unit, 12 decimals. The unit ids are the material's and the product's (null when unknown).
+     * Throws a 400 when a quantity cannot be converted or the batch is not above zero.
      */
-    public static BigDecimal perProductUnit(UnitConverter converter, BomHeader header, BomLine line, Item material, Item product) {
-        BigDecimal quantity = converter.toItemUnit(line.getQuantity(), line.getUnit(), material == null ? null : material.getUnitId()).quantity();
-        BigDecimal batch = converter.toItemUnit(header.getBaseQuantity(), header.getBaseUnit(), product == null ? null : product.getUnitId())
-            .quantity();
+    public static BigDecimal perProductUnit(
+        UnitConverter converter,
+        BomHeader header,
+        BomLine line,
+        String materialUnitId,
+        String productUnitId
+    ) {
+        BigDecimal quantity = converter.toItemUnit(line.getQuantity(), line.getUnit(), materialUnitId).quantity();
+        BigDecimal batch = converter.toItemUnit(header.getBaseQuantity(), header.getBaseUnit(), productUnitId).quantity();
         if (quantity == null || batch == null || batch.signum() <= 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Base quantity must be greater than 0.");
         }

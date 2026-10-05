@@ -20,3 +20,12 @@ export function summariseItemStock(rows: InventoryDto[], itemId: string): ItemSt
     locations: new Set(mine.map((row) => row.location ?? '')).size,
   }
 }
+
+/** "2 → 3.5", with "unknown" for no cost or 0 (docs/domain/material-cost.md "단가 이력"). */
+export function costChangeText(
+  change: { previousUnitCost: number | null; unitCost: number | null },
+  format: (value: number) => string,
+): string {
+  const cost = (value: number | null) => (value === null || value === 0 ? 'unknown' : format(value))
+  return `${cost(change.previousUnitCost)} → ${cost(change.unitCost)}`
+}

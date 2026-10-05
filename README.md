@@ -2,6 +2,9 @@
 
 This project tracks materials in an ERP workflow.
 
+Project documentation starts at [`docs/README.md`](docs/README.md): current status and work board,
+architecture decisions, domain specs, and the archive of superseded documents.
+
 # Local Infra
 
 Run local Redis and PostgreSQL:

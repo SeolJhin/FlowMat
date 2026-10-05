@@ -111,7 +111,18 @@ class WorkInstructionIntegrationTest extends IntegrationTestSupport {
         check(run, "no-such-step", null).andExpect(status().isNotFound());
         check(run, shape, null).andExpect(jsonPath("$.data.requiredDone").value(2)).andExpect(jsonPath("$.data.complete").value(true));
         call(delete("/production-runs/" + run + "/instruction/steps/" + shape + "/check"))
-            .andExpect(jsonPath("$.data.complete").value(false));
+            .andExpect(jsonPath("$.data.complete").value(false))
+            .andExpect(jsonPath("$.data.undone.length()").value(1))
+            .andExpect(jsonPath("$.data.undone[0].stepId").value(shape))
+            .andExpect(jsonPath("$.data.undone[0].stepNo").value(2))
+            .andExpect(jsonPath("$.data.undone[0].checkedBy").value(DEMO_OWNER))
+            .andExpect(jsonPath("$.data.undone[0].undoneBy").value(DEMO_OWNER));
+        // An undone confirmation stays as history (R6); the step can be confirmed and undone again.
+        check(run, shape, null).andExpect(jsonPath("$.data.complete").value(true)).andExpect(jsonPath("$.data.undone.length()").value(1));
+        call(delete("/production-runs/" + run + "/instruction/steps/" + shape + "/check"))
+            .andExpect(jsonPath("$.data.undone.length()").value(2))
+            .andExpect(jsonPath("$.data.checks.length()").value(1));
+        call(delete("/production-runs/" + run + "/instruction/steps/" + shape + "/check")).andExpect(status().isNotFound());
         callAs("unrelated-user", get("/production-runs/" + run + "/instruction")).andExpect(status().isForbidden());
 
         // A new release does not change a checklist under way; a new run gets the new revision.
@@ -151,6 +162,48 @@ class WorkInstructionIntegrationTest extends IntegrationTestSupport {
         check(run, released.path("steps").get(0).path("stepId").asText(), null).andExpect(status().isOk());
         // The optional step does not hold it back.
         call(post("/production-runs/" + run + "/finish"), "{}").andExpect(status().isOk());
+    }
+
+    @Test
+    void aValueOutsideItsStepsLimitsIsRecordedAndMarked() throws Exception {
+        String bun = item("WI-BUN-" + tag());
+        String draft = draft(bun, "Buns");
+        stepWithLimits(draft, "Proof", false, 30, 40)
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("Limits need a step that records a value."));
+        stepWithLimits(draft, "Bake", true, 230, 200)
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("valueMin must not be above valueMax."));
+        String bake = data(stepWithLimits(draft, "Bake", true, 200, 230)
+                .andExpect(jsonPath("$.data.steps[0].valueMin").value(200))
+                .andExpect(jsonPath("$.data.steps[0].valueMax").value(230)))
+            .path("steps").get(0).path("stepId").asText();
+        call(post("/work-instructions/" + draft + "/release")).andExpect(status().isOk());
+        // A new revision keeps the limits.
+        call(post("/work-instructions/" + draft + "/revise")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.steps[0].valueMax").value(230));
+
+        String run = run(bun);
+        check(run, bake, "hot")
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("Step 1 records Oven °C as a number, such as 200."));
+        check(run, bake, "250")
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.checks[0].outOfLimits").value(true))
+            .andExpect(jsonPath("$.data.complete").value(true));
+        call(delete("/production-runs/" + run + "/instruction/steps/" + bake + "/check")).andExpect(status().isOk());
+        check(run, bake, "215").andExpect(jsonPath("$.data.checks[0].outOfLimits").value(false));
+        call(post("/production-runs/" + run + "/finish"), "{}").andExpect(status().isOk());
+    }
+
+    private ResultActions stepWithLimits(String instructionId, String text, boolean recordsValue, int min, int max) throws Exception {
+        Map<String, Object> body = new HashMap<>();
+        body.put("text", text);
+        body.put("recordsValue", recordsValue);
+        body.put("valueLabel", recordsValue ? "Oven °C" : null);
+        body.put("valueMin", min);
+        body.put("valueMax", max);
+        return call(post("/work-instructions/" + instructionId + "/steps"), json(body));
     }
 
     private String draft(String itemId, String title) throws Exception {

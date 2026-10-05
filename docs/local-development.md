@@ -1,8 +1,10 @@
 # FlowMat 로컬 실행
 
+> **현행 문서** · 최종 확인 2026-10-02 · 실행·테스트 방법이 바뀌면 같은 변경에서 고친다. 코드 주석(`application.yml`)이 이 경로를 가리킨다.
+
 ## 준비
 
-Java 21, Node 22, Docker Desktop을 사용한다. V2·V4·V5는 원본 파일 복원으로 해결한 이력이 있다. 기존 dev DB에는 별도로 [V26 체크섬 불일치](handoff/reports/flyway-v21-notice.md)가 기록돼 있다. DB마다 적용 이력을 확인하고, `repair`나 기존 마이그레이션 수정을 임의로 실행하지 않는다.
+Java 21, Node 22, Docker Desktop을 사용한다. V2·V4·V5는 원본 파일 복원으로 해결한 이력이 있다. 기존 dev DB에는 별도로 V26 체크섬 불일치가 기록돼 있다(경위: [보관된 2026-09-24 공지](archive/2026-09-handoff/reports/flyway-v21-notice.md) "V26 checksum 불일치"). DB마다 적용 이력을 확인하고, `repair`나 기존 마이그레이션 수정을 임의로 실행하지 않는다.
 
 `flowmat_backend/.env.example`을 `flowmat_backend/.env`로 복사하고 `POSTGRES_PASSWORD`, `DB_PASSWORD`를 같은 로컬 비밀번호로 바꾼다. `JWT_SECRET`도 32자 이상의 별도 로컬 값으로 바꾼다. `.env`는 Git에 넣지 않는다. 새 DB를 만들 때만 아래 Compose 절차를 사용한다. 기존 5432/6379 서비스가 있다면 포트 충돌부터 확인한다.
 
@@ -49,6 +51,18 @@ npm run dev
 ```
 
 브라우저 주소는 `http://localhost:5173`이다. 변경 검증은 `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`로 한다.
+
+## 테스트
+
+| 대상 | 명령 | 주의 |
+|---|---|---|
+| 백엔드 전체 | `flowmat_backend`에서 `.\gradlew.bat test` | 통합 테스트가 Testcontainers로 PostgreSQL을 띄우므로 Docker가 켜져 있어야 한다. `ModuleBoundaryTest`(ArchUnit)도 여기서 돈다 |
+| 백엔드 CI와 같은 순서 | `.\gradlew.bat test`, `.\gradlew.bat jacocoTestCoverageVerification`, `.\gradlew.bat build -x test` | GitHub Actions `backend.yml`과 같다 |
+| 프런트 단위 | `flowmat_frontend`에서 `npm test` | Vitest |
+| 브라우저 E2E(가짜 API) | `npm run test:e2e` | 실 API가 필요한 spec 4개는 건너뛴다 |
+| 브라우저 E2E(실 API) | 백엔드·Vite를 띄운 뒤 `REAL_API_E2E=1 BASE_URL=http://localhost:5173 npx playwright test` | 한 worker로 돈다. 로그인 제한(계정당 10분 8회, IP당 12회)에 걸리면 429가 나므로, 전체를 돌릴 때는 백엔드를 `AUTH_LOGIN_ACCOUNT_LIMIT`·`AUTH_LOGIN_IP_LIMIT`를 크게 준 환경변수로 띄운다 |
+
+`archunit_store/`(ArchUnit 동결 목록)는 손으로 고치거나 지우지 않는다. 지우면 테스트가 실패한다([ADR-002](architecture/adr/ADR-002-module-dependency.md)).
 
 ## 자주 나는 오류
 

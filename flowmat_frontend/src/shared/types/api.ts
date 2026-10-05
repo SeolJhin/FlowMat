@@ -359,6 +359,8 @@ export interface StockAnalysisDto {
   days: number
   /** Start of the consumption window; it ends now. */
   from: string
+  /** The listed place the analysis is limited to, with the places inside it; null for the whole project. */
+  location?: string | null
   lines: StockAnalysisLineDto[]
 }
 
@@ -456,6 +458,8 @@ export interface BomLineImportRowDto {
   quantity?: string
   unit?: string
   note?: string
+  /** material (blank), by_product or waste (docs/domain/bom-by-products.md). */
+  lineType?: string
 }
 
 /** What a BOM line import did or would do; nothing is saved when any row has an error or it is a dry run. */
@@ -1203,4 +1207,19 @@ export interface ProcessTemplateDto {
   defaultConfig: string | null
   publicYn: string
   sortOrder: number | null
+}
+
+/** Stock moved between places in the last days (GET /stock-analysis/transfers, docs/domain/stock-analysis.md "위치 간 이동"). */
+export interface StockTransferAnalysisDto {
+  days: number
+  from: string
+  to: string
+  /** Most moves first; a null place is stock kept without one. */
+  routes: {
+    fromLocation: string | null
+    toLocation: string | null
+    moves: number
+    /** Quantities in the item's unit, the most moved item first. */
+    items: { itemId: string; itemCode: string | null; itemName: string | null; unit: string | null; quantity: number; moves: number }[]
+  }[]
 }

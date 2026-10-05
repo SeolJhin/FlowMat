@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useImportItemsMutation } from '../../../entities/catalog/api/useImportItemsMutation'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import type { ItemDto, ItemImportResultDto, ItemImportRowDto, UnitDto } from '../../../shared/types/api'
@@ -25,37 +25,60 @@ export function ItemCsvPanel({ projectId, items, units }: { projectId: string; i
   const [check, setCheck] = useState<ItemImportResultDto | null>(null)
   const [done, setDone] = useState<ItemImportResultDto | null>(null)
   const [readError, setReadError] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const selectionGeneration = useRef(0)
   const unitCodes = new Map(units.map((unit) => [unit.unitId, unit.unitCode]))
 
   async function choose(chosen: File | undefined) {
+    if (saving) return
+    const generation = ++selectionGeneration.current
     importMutation.reset()
     setCheck(null)
     setDone(null)
     setFile(null)
     setReadError(null)
+    setChecking(Boolean(chosen))
     if (!chosen) return
-    const parsed = rowsFromCsv(await chosen.text())
-    if (!parsed.ok) {
-      setReadError(parsed.error)
-      return
-    }
-    setFile({ name: chosen.name, rows: parsed.rows, ignored: parsed.ignored })
     try {
-      setCheck(await importMutation.mutateAsync({ rows: parsed.rows, dryRun: true }))
-    } catch {
-      // Shown below.
+      let text: string
+      try {
+        text = await chosen.text()
+      } catch {
+        if (generation === selectionGeneration.current) setReadError('The item file could not be read. Choose the file again.')
+        return
+      }
+      if (generation !== selectionGeneration.current) return
+      const parsed = rowsFromCsv(text)
+      if (!parsed.ok) {
+        setReadError(parsed.error)
+        return
+      }
+      setFile({ name: chosen.name, rows: parsed.rows, ignored: parsed.ignored })
+      try {
+        const result = await importMutation.mutateAsync({ rows: parsed.rows, dryRun: true })
+        if (generation === selectionGeneration.current) setCheck(result)
+      } catch (error) {
+        if (generation === selectionGeneration.current) setReadError(errorMessage(error, 'The file could not be checked.'))
+      }
+    } finally {
+      if (generation === selectionGeneration.current) setChecking(false)
     }
   }
 
   async function save() {
-    if (!file) return
+    if (!file || !check || check.errors > 0 || check.created + check.updated === 0 || checking || saving) return
+    setSaving(true)
+    setReadError(null)
     try {
       const result = await importMutation.mutateAsync({ rows: file.rows, dryRun: false })
       setDone(result)
       setCheck(result.applied ? null : result)
       if (result.applied) setFile(null)
-    } catch {
-      // Shown below.
+    } catch (error) {
+      setReadError(errorMessage(error, 'The item changes could not be confirmed.'))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -63,7 +86,7 @@ export function ItemCsvPanel({ projectId, items, units }: { projectId: string; i
   const listed = check ? check.rows.filter((row) => row.action !== 'unchanged') : []
 
   return (
-    <section aria-label="Items spreadsheet" style={{ display: 'grid', gap: 8, marginBottom: 12, fontSize: 13 }}>
+    <section aria-busy={checking || saving} aria-label="Items spreadsheet" style={{ display: 'grid', gap: 8, marginBottom: 12, fontSize: 13 }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <button
           type="button"
@@ -74,14 +97,16 @@ export function ItemCsvPanel({ projectId, items, units }: { projectId: string; i
         </button>
         <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
           <span>Import CSV</span>
-          <input type="file" accept=".csv,text/csv" aria-label="Import items file" onChange={(e) => void choose(e.target.files?.[0])} />
+          <input type="file" accept=".csv,text/csv" aria-label="Import items file" disabled={saving} onChange={(e) => {
+            const chosen = e.target.files?.[0]
+            void choose(chosen)
+            e.target.value = ''
+          }} />
         </label>
         <span className="inspector-hint">Matched by item code: new codes are added, existing ones updated; blank cells leave a value as it is.</span>
       </div>
       {readError && <p role="alert" style={{ color: '#dc2626', margin: 0 }}>{readError}</p>}
-      {importMutation.isError && (
-        <p role="alert" style={{ color: '#dc2626', margin: 0 }}>{errorMessage(importMutation.error, 'The file could not be checked.')}</p>
-      )}
+      {checking && <p role="status" style={{ margin: 0 }}>Reading and checking item file...</p>}
       {done?.applied && (
         <p role="status" style={{ color: '#047857', margin: 0 }}>
           Saved: {done.created} added, {done.updated} updated, {done.unchanged} unchanged.
@@ -113,15 +138,18 @@ export function ItemCsvPanel({ projectId, items, units }: { projectId: string; i
             </table>
           )}
           <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
-            <button type="button" disabled={check.errors > 0 || changes === 0 || importMutation.isPending} onClick={() => void save()}>
+            <button type="button" disabled={check.errors > 0 || changes === 0 || checking || saving} onClick={() => void save()}>
               {changes === 0 ? 'Nothing to save' : `Save ${changes} change${changes === 1 ? '' : 's'}`}
             </button>
-            <button type="button" style={{ background: 'transparent' }} onClick={() => void choose(undefined)}>
-              Cancel
-            </button>
+
             {check.errors > 0 && <span className="inspector-hint">Fix the lines with problems and choose the file again.</span>}
           </div>
         </div>
+      )}
+      {(checking || file) && (
+        <button type="button" disabled={saving} style={{ background: 'transparent', justifySelf: 'start' }} onClick={() => void choose(undefined)}>
+          Cancel
+        </button>
       )}
     </section>
   )

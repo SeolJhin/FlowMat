@@ -33,4 +33,8 @@ public class WorkInstructionStep {
 
     /** What the value is, such as "Oven °C"; only for steps that record one. */
     private String valueLabel;
+
+    /** Limits for the recorded value (R7); a value outside them is recorded and marked. */
+    private java.math.BigDecimal valueMin;
+    private java.math.BigDecimal valueMax;
 }

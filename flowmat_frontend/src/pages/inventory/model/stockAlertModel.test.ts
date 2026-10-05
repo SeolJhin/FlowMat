@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { ItemDto, MaterialRequirementDto, ReorderLineDto } from '../../../shared/types/api'
+import type { BomDto, ItemDto, MaterialRequirementDto, ReorderLineDto } from '../../../shared/types/api'
 import type { StockAlertDto } from '../../../shared/types/api'
-import { describeAlert, fromPacks, needsCsv, orderAlerts, orderQuantity, orderValue, packsFor, reorderCsv, suggestedOrder } from './stockAlertModel'
+import {
+  alertsWithin, describeAlert, fromPacks, leftAfterOrders, needsCsv, orderAlerts, orderQuantity, orderValue, packsFor, reorderCsv,
+  subAssemblyDrafts, suggestedOrder,
+} from './stockAlertModel'
 
 function alert(id: string, patch: Partial<StockAlertDto> = {}): StockAlertDto {
   return {
@@ -126,16 +129,64 @@ describe('needsCsv', () => {
   ]
   const items = new Map<string, ItemDto>([
     ['flour', { itemId: 'flour', purchaseUnit: 'bag', purchaseUnitQty: 25, itemStatus: 'active' } as ItemDto],
-    ['salt', { itemId: 'salt', purchaseUnit: 'box', purchaseUnitQty: 1, itemStatus: 'discontinued' } as ItemDto],
+    ['salt', { itemId: 'salt', purchaseUnit: 'box', purchaseUnitQty: 1, itemStatus: 'discontinued', safetyStockQty: 6 } as ItemDto],
   ])
 
   it('lists every material with the shortage in purchase units and the orders that need it', () => {
     const rows = needsCsv(lines, items).replace('\ufeff', '').trim().split('\r\n')
-    expect(rows[0]).toBe('item_code,item_name,unit,needed,usable,short,purchase_unit,packs,item_status,work_orders,being_made,made_here')
-    expect(rows[1]).toBe('FL,"Flour, fine",kg,40,12,28,bag,2,active,Bread 30; Buns 10,0,no')
-    // Covered: no packs to buy.
-    expect(rows[2]).toBe('SA,Salt,kg,1,5,0,,,discontinued,,0,no')
+    expect(rows[0]).toBe(
+      'item_code,item_name,unit,needed,usable,short,purchase_unit,packs,item_status,work_orders,being_made,made_here,left_after,safety_stock,under_safety',
+    )
+    expect(rows[1]).toBe('FL,"Flour, fine",kg,40,12,28,bag,2,active,Bread 30; Buns 10,0,no,0,,0')
+    // Covered: no packs to buy, but the 4 left are 2 under the safety stock of 6.
+    expect(rows[2]).toBe('SA,Salt,kg,1,5,0,,,discontinued,,0,no,4,6,2')
     // A sub-assembly: its need comes from making a short item above it, and open orders already make 5.
-    expect(rows[3]).toBe('DO,Dough,kg,8,2,1,,,,via LOAF 8,5,yes')
+    expect(rows[3]).toBe('DO,Dough,kg,8,2,1,,,,via LOAF 8,5,yes,0,,0')
+  })
+})
+
+describe('alertsWithin', () => {
+  it('keeps the alerts of records at the chosen places, ignoring case', () => {
+    const bin = alert('a', { location: 'bin-1' })
+    const shelf = alert('b', { location: 'SHELF' })
+    const nowhere = alert('c', { location: null })
+    expect(alertsWithin([bin, shelf, nowhere], new Set(['wh-a', 'bin-1']))).toEqual([bin])
+    expect(alertsWithin([bin, shelf, nowhere], null)).toHaveLength(3)
+  })
+})
+
+describe('leftAfterOrders', () => {
+  it('leaves usable stock and what is being made after the open orders, against the safety stock', () => {
+    expect(leftAfterOrders({ required: 6, usable: 10 }, 8)).toEqual({ left: 4, underSafety: 4 })
+    expect(leftAfterOrders({ required: 6, usable: 10, plannedSupply: 5 }, 8)).toEqual({ left: 9, underSafety: 0 })
+    // Short: nothing left, so the whole safety stock is missing on top of the shortage.
+    expect(leftAfterOrders({ required: 12, usable: 10 }, 8)).toEqual({ left: 0, underSafety: 8 })
+    expect(leftAfterOrders({ required: 0.3, usable: 0.5 }, 0.4)).toEqual({ left: 0.2, underSafety: 0.2 })
+    expect(leftAfterOrders({ required: 6, usable: 10 }, null)).toEqual({ left: 4, underSafety: 0 })
+    expect(leftAfterOrders({ required: 6, usable: 10 }, 0)).toEqual({ left: 4, underSafety: 0 })
+  })
+})
+
+describe('subAssemblyDrafts', () => {
+  const line = (itemId: string, shortage: number, madeHere: boolean) => ({ itemId, itemCode: itemId.toUpperCase(), shortage, madeHere })
+  const bom = (bomId: string, targetItemId: string, bomStatus: BomDto['bomStatus']) => ({ bomId, targetItemId, bomStatus })
+
+  it('drafts every short made-here material with its approved BOM, all levels at once', () => {
+    const items = new Map<string, ItemDto>([['old', { itemId: 'old', itemStatus: 'discontinued' } as ItemDto]])
+    const { drafts, skipped } = subAssemblyDrafts(
+      [line('sponge', 20, true), line('cream', 4, true), line('flour', 3, false), line('jam', 0, true), line('glaze', 2, true),
+        line('icing', 1, true), line('old', 5, true)],
+      [bom('b1', 'sponge', 'approved'), bom('b2', 'cream', 'approved'), bom('b3', 'glaze', 'draft'), bom('b4', 'icing', 'approved'),
+        bom('b5', 'old', 'approved')],
+      [{ workOrderNumber: 'WO-0007', workOrderStatus: 'draft', targetItemId: 'icing' },
+        { workOrderNumber: 'WO-0003', workOrderStatus: 'approved', targetItemId: 'cream' }],
+      items,
+    )
+    expect(drafts).toEqual([
+      { itemId: 'sponge', itemCode: 'SPONGE', quantity: 20, bomId: 'b1' },
+      // An approved order is already counted in the needs; only a draft stops another.
+      { itemId: 'cream', itemCode: 'CREAM', quantity: 4, bomId: 'b2' },
+    ])
+    expect(skipped).toEqual(['GLAZE has no approved BOM', 'ICING already has draft WO-0007', 'OLD is discontinued'])
   })
 })

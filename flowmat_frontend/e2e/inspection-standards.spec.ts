@@ -75,6 +75,18 @@ test('an item\'s standards become the run checklist and fill in the inspection f
     await form.getByRole('button', { name: 'Save inspection' }).click()
     await expect(checklist.getByRole('status')).toHaveText('1 of 2 required checks passed · 1 missing')
     await expect(checklist.getByRole('row', { name: /Moisture/ })).toContainText('✓ Pass (11 %)')
+
+    // Finishing warns about the required check still missing, next to the button and in the confirmation.
+    const warning = `Quality: 1 required check is not recorded (${PRODUCT} Visual).`
+    await expect(page.getByRole('note', { name: 'Quality before finishing' })).toHaveText(warning)
+    // A click that opens a confirm only returns once the dialog is answered, so answer it from a handler.
+    let question = ''
+    page.once('dialog', (dialog) => {
+      question = dialog.message()
+      void dialog.dismiss()
+    })
+    await page.getByRole('button', { name: 'Finish', exact: true }).click()
+    expect(question).toContain(warning)
   } finally {
     for (const one of standards) await call('DELETE', `/inspection-standards/${one.standardId}`)
   }

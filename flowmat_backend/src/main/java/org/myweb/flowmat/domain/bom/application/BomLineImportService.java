@@ -18,8 +18,8 @@ import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
 import org.myweb.flowmat.domain.bom.repository.BomLineRepository;
 import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
-import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
@@ -42,7 +42,7 @@ public class BomLineImportService {
 
     private final BomHeaderRepository bomHeaderRepository;
     private final BomLineRepository bomLineRepository;
-    private final ItemRepository itemRepository;
+    private final CatalogQuery catalogQuery;
     private final UnitConverter unitConverter;
     private final BomService bomService;
     private final ProjectAccessService projectAccessService;
@@ -63,9 +63,8 @@ public class BomLineImportService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Import at most " + MAX_ROWS + " materials at a time.");
         }
 
-        Map<String, List<Item>> byCode = itemRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(header.getProjectId(), NOT_DELETED)
-            .stream()
-            .collect(Collectors.groupingBy(Item::getItemCode));
+        Map<String, List<CatalogItemView>> byCode = catalogQuery.findProjectItems(header.getProjectId()).stream()
+            .collect(Collectors.groupingBy(CatalogItemView::itemCode));
         List<BomLine> current = bomLineRepository.findAllByBomIdOrderBySortOrderAscBomLineIdAsc(header.getBomId());
         Set<String> taken = request.replace()
             ? new HashSet<>()
@@ -110,7 +109,7 @@ public class BomLineImportService {
         BomLineImportRequest.Row row,
         String code,
         BomHeader header,
-        Map<String, List<Item>> byCode,
+        Map<String, List<CatalogItemView>> byCode,
         Set<String> taken,
         Map<String, List<String>> tree,
         List<String> problems
@@ -119,7 +118,7 @@ public class BomLineImportService {
             problems.add("Item code is missing");
             return null;
         }
-        List<Item> matches = byCode.getOrDefault(code, List.of());
+        List<CatalogItemView> matches = byCode.getOrDefault(code, List.of());
         if (matches.isEmpty()) {
             problems.add("No item has code " + code);
         } else if (matches.size() > 1) {
@@ -143,31 +142,38 @@ public class BomLineImportService {
         if (unit == null) {
             problems.add("Unit is missing");
         }
+        String lineType = null;
+        try {
+            lineType = BomServiceImpl.lineType(row.lineType());
+        } catch (BusinessException e) {
+            problems.add("Type must be material, by_product or waste, not " + row.lineType().trim());
+        }
         if (matches.size() != 1) {
             return null;
         }
-        Item material = matches.get(0);
-        if (!ItemStatusRule.isActive(material)) {
-            problems.add(ItemStatusRule.refusal(material, "use it in a BOM"));
+        CatalogItemView material = matches.get(0);
+        if (!ItemStatusRule.isActive(material.itemStatus())) {
+            problems.add(ItemStatusRule.refusal(material.itemCode(), material.itemStatus(), "use it in a BOM"));
         }
-        if (material.getItemId().equals(header.getTargetItemId())) {
+        if (material.itemId().equals(header.getTargetItemId())) {
             problems.add(code + " is the item this BOM produces");
         }
-        if (!taken.add(material.getItemId())) {
+        if (!taken.add(material.itemId())) {
             problems.add(code + " is already a material of this BOM; combine the lines");
         }
-        if (BomTree.pathTo(material.getItemId(), header.getTargetItemId(), tree) != null) {
+        // Only what is consumed can lead back to this BOM's item; a by-product or waste line is given off (bom-by-products.md).
+        if (BomTree.MATERIAL.equals(lineType) && BomTree.pathTo(material.itemId(), header.getTargetItemId(), tree) != null) {
             problems.add(code + " is made from this BOM's item through its own BOM; a BOM cannot contain itself");
         }
         if (unit != null) {
             try {
-                unitConverter.toItemUnit(BigDecimal.ONE, unit, material.getUnitId());
+                unitConverter.toItemUnit(BigDecimal.ONE, unit, material.unitId());
             } catch (BusinessException e) {
                 problems.add(e.getMessage());
             }
         }
         return problems.isEmpty()
-            ? new BomLineCreateRequest(material.getItemId(), quantity, unit, null, null, null, null, trimToNull(row.note()), null)
+            ? new BomLineCreateRequest(material.itemId(), quantity, unit, null, null, null, null, trimToNull(row.note()), lineType)
             : null;
     }
 

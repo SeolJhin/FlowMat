@@ -1,4 +1,6 @@
-import type { ItemDto, MaterialRequirementDto, ReorderLineDto, StockAlertDto } from '../../../shared/types/api'
+import type { BomDto, ItemDto, MaterialRequirementDto, ReorderLineDto, StockAlertDto, WorkOrderDto } from '../../../shared/types/api'
+import { approvedRevision } from './bomModel'
+import { isActiveItem } from './itemStatusModel'
 import { csvCell } from './ledgerModel'
 
 const SEVERITY_ORDER: Record<StockAlertDto['severity'], number> = { critical: 0, warning: 1, info: 2 }
@@ -116,17 +118,65 @@ export function needLabel(need: MaterialRequirementDto['lines'][number]['orders'
 
 export function needsCsv(lines: MaterialRequirementDto['lines'], items: Map<string, ItemDto>): string {
   const header = ['item_code', 'item_name', 'unit', 'needed', 'usable', 'short', 'purchase_unit', 'packs', 'item_status', 'work_orders',
-    'being_made', 'made_here']
+    'being_made', 'made_here', 'left_after', 'safety_stock', 'under_safety']
   const rows = lines.map((line) => {
     const item = items.get(line.itemId)
     const packs = line.shortage > 0 && item?.purchaseUnit ? packsFor(line.shortage, item.purchaseUnitQty) : null
+    const after = leftAfterOrders(line, item?.safetyStockQty)
     return [
       line.itemCode, line.itemName, line.unit, line.required, line.usable, line.shortage, packs == null ? null : item?.purchaseUnit ?? null,
       packs, item?.itemStatus ?? null, line.orders.map((order) => needLabel(order)).join('; '), line.plannedSupply ?? 0,
-      line.madeHere ? 'yes' : 'no',
+      line.madeHere ? 'yes' : 'no', after.left, item?.safetyStockQty ? item.safetyStockQty : null, after.underSafety,
     ]
       .map(csvCell)
       .join(',')
   })
   return '\ufeff' + [header.join(','), ...rows].join('\r\n') + '\r\n'
+}
+
+/** The alerts of stock records at the given places (lower-cased codes, see locationModel.codesWithin); all without them. */
+export function alertsWithin(alerts: StockAlertDto[], codes: Set<string> | null): StockAlertDto[] {
+  if (!codes) return alerts
+  return alerts.filter((alert) => alert.location !== null && codes.has(alert.location.trim().toLowerCase()))
+}
+
+/**
+ * What a material has left once the open work orders are made from usable stock and what is being made, and how far that
+ * is under the item's safety stock (docs/domain/material-requirements.md "주문 뒤 남는 양"). Never below zero: what is
+ * missing beyond that is the shortage. No safety stock (none or 0) is never under it.
+ */
+export function leftAfterOrders(
+  line: Pick<MaterialRequirementDto['lines'][number], 'required' | 'usable' | 'plannedSupply'>,
+  safetyStock: number | null | undefined,
+): { left: number; underSafety: number } {
+  const left = Math.max(0, Math.round((line.usable + (line.plannedSupply ?? 0) - line.required) * 10000) / 10000)
+  const safety = safetyStock && safetyStock > 0 ? safetyStock : 0
+  return { left, underSafety: safety > left ? Math.round((safety - left) * 10000) / 10000 : 0 }
+}
+
+/**
+ * Draft work orders for every sub-assembly open work orders leave short, all levels at once (docs/domain/multi-level-bom.md
+ * "모든 단계 한 번에"): the shortage of each made-here material, with its approved BOM. One that already has a draft order,
+ * has no approved BOM or takes no new stock is left out, with why. Drafts do not count in the needs until approved.
+ */
+export function subAssemblyDrafts(
+  lines: Pick<MaterialRequirementDto['lines'][number], 'itemId' | 'itemCode' | 'shortage' | 'madeHere'>[],
+  boms: Pick<BomDto, 'bomId' | 'targetItemId' | 'bomStatus'>[],
+  orders: Pick<WorkOrderDto, 'workOrderNumber' | 'workOrderStatus' | 'targetItemId'>[],
+  items: Map<string, ItemDto>,
+): { drafts: { itemId: string; itemCode: string; quantity: number; bomId: string }[]; skipped: string[] } {
+  const drafts: { itemId: string; itemCode: string; quantity: number; bomId: string }[] = []
+  const skipped: string[] = []
+  for (const line of lines) {
+    if (!line.madeHere || line.shortage <= 0) continue
+    const code = line.itemCode ?? line.itemId
+    const draft = orders.find((order) => order.workOrderStatus === 'draft' && order.targetItemId === line.itemId)
+    const item = items.get(line.itemId)
+    const bom = approvedRevision(boms as BomDto[], line.itemId)
+    if (draft) skipped.push(`${code} already has draft ${draft.workOrderNumber}`)
+    else if (item && !isActiveItem(item)) skipped.push(`${code} is ${item.itemStatus}`)
+    else if (!bom) skipped.push(`${code} has no approved BOM`)
+    else drafts.push({ itemId: line.itemId, itemCode: code, quantity: line.shortage, bomId: bom.bomId })
+  }
+  return { drafts, skipped }
 }

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useEquipmentLoadQuery } from '../../../entities/production/api/useEquipmentLoad'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import {
+  changeoverPlanText,
   dateInputValue,
   loadLabel,
   loadTone,
@@ -13,6 +14,7 @@ import {
   type LoadTone,
 } from '../model/equipmentLoadModel'
 import { formatHours } from '../model/equipmentScheduleModel'
+import { LoadTimeline } from './LoadTimeline'
 
 const cell = { padding: '4px 6px', verticalAlign: 'top' } as const
 
@@ -64,6 +66,11 @@ export function EquipmentLoadBoard({ projectId }: { projectId: string }) {
             </td>
             <td style={cell}>
               {row.orders.map((order) => <div key={order.workOrderId}>{orderLine(order)}</div>)}
+              {row.changeovers && (
+                <div className="inspector-hint" style={{ color: row.changeovers.suggestedOrder ? '#b45309' : undefined }}>
+                  {changeoverPlanText(row.changeovers)}
+                </div>
+              )}
               {row.unplannedOrders > 0 && <div className="inspector-hint">{row.unplannedOrders} open order(s) without planned dates</div>}
               {row.unmeasuredOrders > 0 && <div className="inspector-hint">
                 {row.unmeasuredOrders} order(s) without a quantity or capacity per hour are not counted</div>}
@@ -71,6 +78,7 @@ export function EquipmentLoadBoard({ projectId }: { projectId: string }) {
           </tr>
         })}</tbody>
       </table>}
+      {rows.length > 0 && <LoadTimeline rows={rows} start={start} from={range.from} to={range.to} />}
     </section>
   )
 }

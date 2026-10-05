@@ -36,7 +36,12 @@ public final class ItemStatusRule {
 
     /** An item saved before statuses were checked may have none; it counts as active. */
     public static boolean isActive(Item item) {
-        return item.getItemStatus() == null || ACTIVE.equalsIgnoreCase(item.getItemStatus().trim());
+        return isActive(item.getItemStatus());
+    }
+
+    /** {@link #isActive(Item)} for an item's status as read through a view. */
+    public static boolean isActive(String itemStatus) {
+        return itemStatus == null || ACTIVE.equalsIgnoreCase(itemStatus.trim());
     }
 
     /**
@@ -53,6 +58,11 @@ public final class ItemStatusRule {
 
     /** The refusal message, for checks that collect problems instead of throwing. */
     public static String refusal(Item item, String action) {
-        return item.getItemCode() + " is " + item.getItemStatus().trim().toLowerCase() + "; set it back to active to " + action + ".";
+        return refusal(item.getItemCode(), item.getItemStatus(), action);
+    }
+
+    /** {@link #refusal(Item, String)} for an item's code and status as read through a view. */
+    public static String refusal(String itemCode, String itemStatus, String action) {
+        return itemCode + " is " + itemStatus.trim().toLowerCase() + "; set it back to active to " + action + ".";
     }
 }
