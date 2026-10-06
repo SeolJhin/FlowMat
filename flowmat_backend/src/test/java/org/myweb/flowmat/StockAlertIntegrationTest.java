@@ -77,7 +77,10 @@ class StockAlertIntegrationTest extends IntegrationTestSupport {
         assertThat(alertsOf(row, true)).extracting(a -> a.path("alertType").asText()).containsExactly("over");
 
         // New thresholds on the form re-check the row without any movement.
-        call(put("/inventories/" + row), stock(item, "110", "150", "200")).andExpect(status().isOk());
+        JsonNode currentStock = objectMapper.readTree(call(get("/inventories/" + row))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
+        call(put("/inventories/" + row), stock(item, "110", "150", "200", currentStock.path("version").asLong()))
+            .andExpect(status().isOk());
         List<JsonNode> afterEdit = alertsOf(row, true);
         assertThat(afterEdit).extracting(a -> a.path("alertType").asText()).containsExactly("low");
         assertThat(afterEdit.get(0).path("actualValue").decimalValue()).isEqualByComparingTo("110");
@@ -212,9 +215,14 @@ class StockAlertIntegrationTest extends IntegrationTestSupport {
     }
 
     private String stock(String itemId, String quantity, String min, String max) {
+        return stock(itemId, quantity, min, max, null);
+    }
+
+    private String stock(String itemId, String quantity, String min, String max, Long expectedVersion) {
         return "{\"projectId\":\"" + DEMO_PROJECT + "\",\"itemId\":\"" + itemId + "\",\"quantity\":" + quantity
             + ",\"location\":\"WH-" + suffix().substring(0, 6) + "\",\"minThreshold\":" + min
-            + (max != null ? ",\"maxThreshold\":" + max : "") + "}";
+            + (max != null ? ",\"maxThreshold\":" + max : "")
+            + (expectedVersion != null ? ",\"expectedVersion\":" + expectedVersion : "") + "}";
     }
 
     private void move(String inventoryId, String type, String quantity) throws Exception {
