@@ -1,5 +1,7 @@
 package org.myweb.flowmat.domain.catalog.application;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +47,7 @@ public class EquipmentChangeoverService {
     private final ItemRepository itemRepository;
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
+    private final EntityManager entities;
 
     /** The rule that applies and its time. */
     public record Match(int minutes, String changeoverId) {
@@ -58,8 +61,7 @@ public class EquipmentChangeoverService {
 
     @Transactional
     public List<EquipmentChangeoverResponse> add(String equipmentId, EquipmentChangeoverRequest request) {
-        Equipment equipment = findEquipment(equipmentId);
-        projectAccessService.requireProjectWriteAccess(equipment.getProjectId());
+        Equipment equipment = findEquipmentForWrite(equipmentId);
         if (request == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "minutes is required.");
         }
@@ -88,8 +90,7 @@ public class EquipmentChangeoverService {
 
     @Transactional
     public List<EquipmentChangeoverResponse> update(String equipmentId, String changeoverId, EquipmentChangeoverUpdateRequest request) {
-        Equipment equipment = findEquipment(equipmentId);
-        projectAccessService.requireProjectWriteAccess(equipment.getProjectId());
+        Equipment equipment = findEquipmentForWrite(equipmentId);
         EquipmentChangeover rule = findRule(equipment, changeoverId);
         if (request == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "minutes is required.");
@@ -103,8 +104,7 @@ public class EquipmentChangeoverService {
 
     @Transactional
     public List<EquipmentChangeoverResponse> remove(String equipmentId, String changeoverId) {
-        Equipment equipment = findEquipment(equipmentId);
-        projectAccessService.requireProjectWriteAccess(equipment.getProjectId());
+        Equipment equipment = findEquipmentForWrite(equipmentId);
         EquipmentChangeover rule = findRule(equipment, changeoverId);
         rule.setDeletedYn("Y");
         rule.setUpdatedBy(projectAccessService.requireCurrentUserId());
@@ -174,6 +174,15 @@ public class EquipmentChangeoverService {
         return changeoverRepository.findByChangeoverIdAndDeletedYn(changeoverId, NOT_DELETED)
             .filter(found -> equipment.getEquipmentId().equals(found.getEquipmentId()))
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+    }
+
+    /** Serialize rule changes before reading a rule so deletion and the previous committed values cannot be undone. */
+    private Equipment findEquipmentForWrite(String equipmentId) {
+        Equipment equipment = findEquipment(equipmentId);
+        projectAccessService.requireProjectWriteAccess(equipment.getProjectId());
+        entities.refresh(equipment, LockModeType.PESSIMISTIC_WRITE);
+        if (!NOT_DELETED.equals(equipment.getDeletedYn())) throw new BusinessException(ErrorCode.NOT_FOUND);
+        return equipment;
     }
 
     private Equipment findEquipment(String equipmentId) {

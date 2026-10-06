@@ -51,7 +51,7 @@ for (const mode of ['owner', 'draft-editor', 'viewer', 'approved-editor', 'retry
     await mockedLogin(page)
     await page.goto(`/projects/${projectId}/inventory?tab=boms`)
     const panel = page.getByRole('region', { name: 'BOM effective periods' })
-    const selector = panel.getByLabel('Revision', { exact: true })
+    const selector = panel.getByRole('combobox', { name: 'Revision', exact: true })
     await selector.selectOption('first')
     await expect(panel.getByText('Current period: No start limit → No end limit', { exact: true })).toBeVisible()
     if (mode === 'viewer' || mode === 'approved-editor') {
@@ -87,3 +87,48 @@ for (const mode of ['owner', 'draft-editor', 'viewer', 'approved-editor', 'retry
     expect(consoleErrors).toHaveLength(0)
   })
 }
+
+test('BOM date preview selects boundary revisions and clears a previous result when the day changes', async ({ page }) => {
+  const projectId = 'prj-effective-preview'
+  const boms = [1, 2].map((version) => ({ bomId: `b${version}`, projectId, targetItemId: 'product', bomName: 'Date formula',
+    bomVersion: version, baseQuantity: 1, baseUnit: 'kg', bomStatus: 'approved', approvedBy: 'demo-owner', approvedAt: null, note: null, lines: [] }))
+  const queries: string[] = []
+  await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
+    const request = route.request(); const url = new URL(request.url()); const { pathname } = url
+    if (await answerAuth(route, pathname)) return
+    if (request.method() !== 'GET') throw new Error(`Unexpected write: ${pathname}`)
+    if (pathname === '/api/boms') return ok(route, boms)
+    if (pathname === '/api/boms/effective') {
+      const on = url.searchParams.get('on')!; queries.push(on)
+      expect(url.searchParams.get('targetItemId')).toBe('product')
+      if (on === '2030-02-01' && queries.filter((day) => day === on).length === 2) return route.fulfill({ status: 503, contentType: 'application/json',
+        body: JSON.stringify({ success: false, data: null, message: 'Temporary preview outage.' }) })
+      if (on === '2030-03-01' && queries.filter((day) => day === on).length === 1) return route.fulfill({ status: 503, contentType: 'application/json',
+        body: JSON.stringify({ success: false, data: null, message: 'Temporary preview outage.' }) })
+      if (on === '2030-03-01') return route.fulfill({ status: 404, contentType: 'application/json',
+        body: JSON.stringify({ success: false, data: null, message: 'No approved revision covers the requested date.' }) })
+      return ok(route, { bomId: on === '2030-01-31' ? 'b1' : 'b2', targetItemId: 'product',
+        bomVersion: on === '2030-01-31' ? 1 : 2, effectiveFrom: on === '2030-01-31' ? '2030-01-01' : '2030-02-01',
+        effectiveTo: on === '2030-01-31' ? '2030-01-31' : '2030-02-28' })
+    }
+    return ok(route, [])
+  })
+  await mockedLogin(page); await page.goto(`/projects/${projectId}/inventory?tab=boms`)
+  const preview = page.getByRole('region', { name: 'BOM effective revision preview' })
+  const date = preview.getByLabel('Project calendar day', { exact: true })
+  await expect(date).toHaveValue('')
+  await preview.getByRole('combobox', { name: 'Preview product', exact: true }).selectOption('product')
+  await date.fill('2030-01-31'); await preview.getByRole('button', { name: 'Find effective revision' }).click()
+  await expect(preview.getByRole('status')).toContainText('On 2030-01-31: revision v1')
+  await date.fill('2030-02-01'); await expect(preview.getByRole('status')).toHaveCount(0)
+  await preview.getByRole('button', { name: 'Find effective revision' }).click()
+  await expect(preview.getByRole('status')).toContainText('On 2030-02-01: revision v2')
+  await preview.getByRole('button', { name: 'Find effective revision' }).click()
+  await expect(preview.getByRole('alert')).toHaveText('Temporary preview outage.')
+  await expect(preview.getByRole('status')).toHaveCount(0)
+  await date.fill('2030-03-01'); await preview.getByRole('button', { name: 'Find effective revision' }).click()
+  await expect(preview.getByRole('alert')).toHaveText('Temporary preview outage.')
+  await preview.getByRole('button', { name: 'Find effective revision' }).click()
+  await expect(preview.getByRole('alert')).toHaveText('No approved revision covers the requested date.')
+  expect(queries).toEqual(['2030-01-31', '2030-02-01', '2030-02-01', '2030-03-01', '2030-03-01'])
+})

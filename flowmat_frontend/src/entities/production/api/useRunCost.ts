@@ -29,3 +29,17 @@ export function useRunMaterialUsageQuery(runId: string) {
     staleTime: 0,
   })
 }
+
+export type RunByProductValue = {
+  productionRunId: string; byProductValue: number; valueComplete: boolean;
+  costBasis: 'CURRENT' | 'HISTORICAL' | 'ESTIMATED'; costBasisAt: string | null; estimated: boolean;
+  lines: { itemId: string; itemCode: string; itemName: string | null; quantity: number | null;
+    unit: string | null; unitCost: number | null; value: number | null; costBasis: 'CURRENT' | 'HISTORICAL' | 'ESTIMATED' }[];
+}
+/** Separate recorded by-product value; refreshes with the same recordings as material cost. */
+export function useRunByProductValueQuery(runId: string) {
+  return useQuery<RunByProductValue>({ queryKey: ['production-run-items', runId, 'by-product-value'], retry: false,
+    enabled: Boolean(runId), staleTime: 0,
+    queryFn: async () => unwrapApiResponse(await httpClient.get<ApiEnvelope<RunByProductValue>>(
+      `/production-runs/${encodeURIComponent(runId)}/by-product-value`)) })
+}

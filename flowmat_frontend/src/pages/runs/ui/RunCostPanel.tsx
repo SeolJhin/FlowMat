@@ -1,3 +1,4 @@
+import { RunByProductValuePanel } from './RunByProductValuePanel'
 import { useRunCostQuery, useRunMaterialUsageQuery } from '../../../entities/production/api/useRunCost'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import type { RunMaterialUsageDto } from '../../../shared/types/api'
@@ -58,6 +59,7 @@ export function RunCostPanel({ runId }: { runId: string }) {
         </p>
       )}
       {usage?.bomId && usage.lines.length > 0 && <UsageAgainstBom usage={usage} />}
+      <RunByProductValuePanel runId={runId} />
     </section>
   )
 }

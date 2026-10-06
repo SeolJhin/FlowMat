@@ -17,5 +17,7 @@ public interface BomHeaderRepository extends JpaRepository<BomHeader, String> {
     Optional<BomHeader> findTopByProjectIdAndTargetItemIdAndDeletedYnOrderByBomVersionDesc(
         String projectId, String targetItemId, String deletedYn);
 
+    Optional<BomHeader> findTopByProjectIdAndTargetItemIdOrderByBomVersionDesc(String projectId, String targetItemId);
+
     List<BomHeader> findAllByProjectIdAndBomStatusAndDeletedYn(String projectId, String bomStatus, String deletedYn);
 }

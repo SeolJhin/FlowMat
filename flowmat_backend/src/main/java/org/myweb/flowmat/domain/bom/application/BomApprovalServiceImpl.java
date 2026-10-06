@@ -18,8 +18,8 @@ import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
 import org.myweb.flowmat.domain.bom.repository.BomLineRepository;
 import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
-import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
@@ -35,7 +35,8 @@ public class BomApprovalServiceImpl implements BomApprovalService {
 
     private final BomHeaderRepository bomHeaderRepository;
     private final BomLineRepository bomLineRepository;
-    private final ItemRepository itemRepository;
+    private final CatalogQuery catalogQuery;
+    private final BomRevisionLock revisionLock;
     private final UnitConverter unitConverter;
     private final ProjectAccessService projectAccessService;
 
@@ -46,6 +47,11 @@ public class BomApprovalServiceImpl implements BomApprovalService {
         List<BomLine> lines = lines(header);
         // Check now so the approver only sees revisions that can pass; approval checks again.
         requireApprovable(header, lines);
+        for (BomHeader revision : bomHeaderRepository.findAllByProjectIdAndTargetItemIdAndDeletedYnOrderByBomVersionDesc(
+            header.getProjectId(), header.getTargetItemId(), NOT_DELETED)) {
+            if (!revision.getBomId().equals(header.getBomId()) && BomStatus.PENDING_APPROVAL.code().equals(revision.getBomStatus()))
+                throw new BusinessException(ErrorCode.CONFLICT, "Revision " + revision.getBomVersion() + " is already pending approval for this item.");
+        }
         transition(header, BomStatus.PENDING_APPROVAL);
         header.setApprovalStatus("pending");
         header.setUpdatedBy(projectAccessService.requireCurrentUserId());
@@ -115,13 +121,12 @@ public class BomApprovalServiceImpl implements BomApprovalService {
 
     List<String> problems(BomHeader header, List<BomLine> lines) {
         List<String> problems = new ArrayList<>();
-        Item target = itemRepository.findByItemIdAndDeletedYn(header.getTargetItemId(), NOT_DELETED)
-            .filter(item -> header.getProjectId().equals(item.getProjectId()))
+        CatalogItemView target = catalogQuery.findProjectItem(header.getProjectId(), header.getTargetItemId())
             .orElse(null);
         if (target == null) {
             problems.add("The target item no longer exists in this project.");
-        } else if (!ItemStatusRule.isActive(target)) {
-            problems.add(ItemStatusRule.refusal(target, "approve its BOM"));
+        } else if (!ItemStatusRule.isActive(target.itemStatus())) {
+            problems.add(ItemStatusRule.refusal(target.itemCode(), target.itemStatus(), "approve its BOM"));
         }
         if (header.getBaseQuantity() == null || header.getBaseQuantity().signum() <= 0) {
             problems.add("Base quantity must be greater than 0.");
@@ -132,26 +137,26 @@ public class BomApprovalServiceImpl implements BomApprovalService {
             problems.add("Add at least one material.");
         }
 
-        Map<String, Item> items = itemRepository.findAllById(lines.stream().map(BomLine::getChildItemId).toList()).stream()
-            .collect(Collectors.toMap(Item::getItemId, Function.identity()));
+        Map<String, CatalogItemView> items = catalogQuery.findProjectItems(header.getProjectId()).stream()
+            .collect(Collectors.toMap(CatalogItemView::itemId, Function.identity()));
         Set<String> seen = new HashSet<>();
         for (BomLine line : lines) {
-            Item child = items.get(line.getChildItemId());
-            String label = child != null ? child.getItemCode() : line.getChildItemId();
-            if (child == null || !"N".equals(child.getDeletedYn()) || !header.getProjectId().equals(child.getProjectId())) {
+            CatalogItemView child = items.get(line.getChildItemId());
+            String label = child != null ? child.itemCode() : line.getChildItemId();
+            if (child == null || !header.getProjectId().equals(child.projectId())) {
                 problems.add("Material " + label + " no longer exists in this project.");
                 continue;
             }
             if (line.getQuantity() == null || line.getQuantity().signum() <= 0) {
                 problems.add("Material " + label + " needs a quantity greater than 0.");
             }
-            if (!ItemStatusRule.isActive(child)) {
-                problems.add("Material " + ItemStatusRule.refusal(child, "use it in a BOM"));
+            if (!ItemStatusRule.isActive(child.itemStatus())) {
+                problems.add("Material " + ItemStatusRule.refusal(child.itemCode(), child.itemStatus(), "use it in a BOM"));
             }
-            if (child.getItemId().equals(header.getTargetItemId())) {
+            if (child.itemId().equals(header.getTargetItemId())) {
                 problems.add("Material " + label + " is the item this BOM produces.");
             }
-            if (!seen.add(child.getItemId())) {
+            if (!seen.add(child.itemId())) {
                 problems.add("Material " + label + " appears more than once; combine the lines.");
             }
             if (line.getSubstituteGroup() != null) {
@@ -193,14 +198,14 @@ public class BomApprovalServiceImpl implements BomApprovalService {
 
     private Map<String, String> codes(List<String> itemIds) {
         Map<String, String> codes = new java.util.HashMap<>();
-        itemRepository.findAllById(itemIds).forEach(item -> codes.put(item.getItemId(), item.getItemCode()));
+        catalogQuery.findItems(itemIds).values().forEach(item -> codes.put(item.itemId(), item.itemCode()));
         itemIds.forEach(id -> codes.putIfAbsent(id, id));
         return codes;
     }
 
-    private void convertible(BigDecimal quantity, String unit, Item item, String label, List<String> problems) {
+    private void convertible(BigDecimal quantity, String unit, CatalogItemView item, String label, List<String> problems) {
         try {
-            unitConverter.toItemUnit(quantity, unit, item.getUnitId());
+            unitConverter.toItemUnit(quantity, unit, item.unitId());
         } catch (BusinessException e) {
             problems.add(label + ": " + e.getMessage());
         }
@@ -223,8 +228,12 @@ public class BomApprovalServiceImpl implements BomApprovalService {
     }
 
     private BomHeader findBom(String bomId) {
-        return bomHeaderRepository.findByBomIdAndDeletedYn(bomId, NOT_DELETED)
+        BomHeader header = bomHeaderRepository.findByBomIdAndDeletedYn(bomId, NOT_DELETED)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        projectAccessService.requireProjectReadAccess(header.getProjectId());
+        revisionLock.lockProject(header.getProjectId());
+        revisionLock.lockHeader(header);
+        return header;
     }
 
     private List<BomLine> lines(BomHeader header) {

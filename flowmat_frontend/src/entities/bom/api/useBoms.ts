@@ -1,3 +1,4 @@
+import { errorStatus } from '../../../shared/lib/errorMessage'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
 import { unwrapApiResponse } from '../../../shared/api/unwrapApiResponse'
@@ -141,11 +142,27 @@ export function useBomLineMutations(projectId: string) {
   return { add, remove }
 }
 
+// Unconfirmed revision commands survive detail remounts in this browser session. No token or item data is stored.
+const pendingRevisions = new Map<string, string>()
+
 export function useBomActionMutation(projectId: string) {
   const onSuccess = useInvalidateBoms(projectId)
   return useMutation({
-    mutationFn: async ({ bomId, action, note }: { bomId: string; action: BomAction; note?: string }) =>
-      unwrapApiResponse(await httpClient.post<ApiEnvelope<BomDto>>(`${path(bomId)}/${action}`, note ? { note } : {})),
+    mutationFn: async ({ bomId, action, note }: { bomId: string; action: BomAction; note?: string }) => {
+      if (action !== 'revisions') return unwrapApiResponse(await httpClient.post<ApiEnvelope<BomDto>>(`${path(bomId)}/${action}`, note ? { note } : {}))
+      const key = `${projectId}|${bomId}`
+      const requestId = pendingRevisions.get(key) ?? crypto.randomUUID()
+      pendingRevisions.set(key, requestId)
+      try {
+        const result = unwrapApiResponse(await httpClient.post<ApiEnvelope<BomDto>>(`${path(bomId)}/revisions`, { requestId }))
+        pendingRevisions.delete(key)
+        return result
+      } catch (error) {
+        const status = errorStatus(error)
+        if (status != null && status >= 400 && status < 500) pendingRevisions.delete(key)
+        throw error
+      }
+    },
     onSuccess,
   })
 }

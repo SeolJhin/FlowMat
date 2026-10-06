@@ -69,3 +69,18 @@ BOM 줄마다 `lineType`:
 - ~~실행 마감 시 예상 대비 부산물 기록 차이 표시~~ → 위 "화면"의 Finish Run 알림(2026-10-03). 끝난 실행의 차이는 위 "화면"의 끝난 실행(2026-10-03, 프런트만, 저장하지 않음)
 - `emission`(배출) 같은 종류와 단위(CO₂ kg)
 - ~~자재 CSV에 종류 열~~ → 위 규칙(2026-10-03)
+
+## 기록된 부산물 가치 표시 (2026-10-06)
+
+승인 정책 B의 별도 조회·표시 구현. `GET /production-runs/{id}/by-product-value`는 Project read 권한이 필요하다. 재고·BOM·실적을 변경하거나 저장 금액을 만들지 않는다.
+
+| 규칙 | 처리 |
+|---|---|
+| B1 | 실행에 고정된 `bomId`의 `by_product` 품목만 분류. 새 revision이나 retire로 다른 BOM을 고르지 않는다. BOM 없는 실행의 임의 출력은 부산물로 추정하지 않음 |
+| B2 | 실제 수량이 있는 미취소 output만 합산. 계획 행·input·주제품·waste 제외. correction으로 취소된 원기록도 제외하고 살아 있는 보정 출력만 합산 |
+| B3 | 모든 출력량을 품목 단위로 환산해 합산한 뒤 소수 4자리 HALF_UP. 수량 × 품목 단위 가격이 부산물 가치. 환산 미상은 quantity=null, 가격/환산 미상은 value=null로 보존, 전체는 valueComplete=false와 아는 값의 subtotal |
+| B4 | D+와 같은 가격 기준: 진행 중 현재, 완료는 원 마감 시각 가격, 시각/가격 이력 부족이면 ESTIMATED. 과거에 가격이 미상이었던 기록을 현재 가격으로 덮지 않음. 원 마감 시각 저장은 별도 미완료 범위로 유지 |
+| B5 | public `BomOutputQuery`와 `CatalogQuery`/`CatalogUnitCostQuery`로 읽으며 다른 context Repository를 추가하지 않음. 다른 프로젝트 품목의 이름·코드·가격 숨김, 다른 프로젝트 BOM 분류·없는/삭제 실행은 404 |
+| B6 | 실행 Material cost 안에 **By-product value** 표를 별도로 표시. 총 가치 또는 아는 가치 소계와 가격 기준·estimated 표시. 출력 기록/취소/보정/마감 후 기존 production-run-items 캐시 무효화로 다시 조회. 재료비·단위당 재료비에서 차감하지 않음 |
+
+폐기 처리비와 EmissionFactor는 구현하지 않았다. 폐기물에 Item.unitCost를 대입하지 않는다. 통합 테스트와 모의 API 브라우저 검증 결과는 [WORKBOARD](../status/WORKBOARD.md) §2 2bp에 기록한다.

@@ -10,6 +10,10 @@ import org.myweb.flowmat.domain.bom.api.dto.request.BomCreateRequest;
 import org.myweb.flowmat.domain.bom.api.dto.request.BomLineCreateRequest;
 import org.myweb.flowmat.domain.bom.api.dto.request.BomLineImportRequest;
 import org.myweb.flowmat.domain.bom.api.dto.request.BomUpdateRequest;
+import org.myweb.flowmat.domain.bom.api.dto.request.BomRevisionRequest;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomLineImportResponse;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomResponse;
@@ -139,8 +143,14 @@ public class BomController {
     }
 
     @PostMapping("/{bomId}/revisions")
-    public ApiResponse<BomResponse> createRevision(@PathVariable("bomId") String bomId) {
-        return ApiResponse.ok(bomService.createRevision(bomId));
+    public ApiResponse<BomResponse> createRevision(@PathVariable("bomId") String bomId,
+        @RequestBody(required = false) BomRevisionRequest request) {
+        return ApiResponse.ok(bomService.createRevision(bomId, request == null ? null : request.requestId()));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> invalidBody(HttpMessageNotReadableException exception) {
+        return ResponseEntity.badRequest().body(ApiResponse.error("Invalid BOM request fields: requestId must be a UUID and quantities must be numbers."));
     }
 
     @GetMapping("/{bomId}/requirements")

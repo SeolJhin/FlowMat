@@ -25,3 +25,12 @@ export function useBomEffectivityMutation(projectId: string) {
       void cache.invalidateQueries({ queryKey: ['boms', projectId] })
     } })
 }
+
+export type EffectiveBomRevision = { bomId: string; targetItemId: string; bomVersion: number;
+  effectiveFrom: string | null; effectiveTo: string | null }
+export function useEffectiveBomQuery(projectId: string, targetItemId: string, on: string) {
+  return useQuery<EffectiveBomRevision>({ queryKey: ['boms', projectId, 'effective', targetItemId, on],
+    enabled: Boolean(projectId && targetItemId && on), retry: false,
+    queryFn: async () => unwrapApiResponse(await httpClient.get<ApiEnvelope<EffectiveBomRevision>>(
+      `/boms/effective?projectId=${encodeURIComponent(projectId)}&targetItemId=${encodeURIComponent(targetItemId)}&on=${encodeURIComponent(on)}`)) })
+}

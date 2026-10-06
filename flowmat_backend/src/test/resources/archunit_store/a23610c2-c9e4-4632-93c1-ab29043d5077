@@ -1,6 +1,4 @@
-org.myweb.flowmat.domain.bom.application.BomApprovalServiceImpl uses org.myweb.flowmat.domain.catalog.repository.ItemRepository
 org.myweb.flowmat.domain.bom.application.BomExplosionService uses org.myweb.flowmat.domain.catalog.repository.ItemRepository
-org.myweb.flowmat.domain.bom.application.BomServiceImpl uses org.myweb.flowmat.domain.catalog.repository.ItemRepository
 org.myweb.flowmat.domain.flowrun.application.FlowRunService uses org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository
 org.myweb.flowmat.domain.flowrun.application.FlowRunStepService uses org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository
 org.myweb.flowmat.domain.inventory.application.ExpiredStockService uses org.myweb.flowmat.domain.catalog.repository.ItemRepository

@@ -1,7 +1,5 @@
 package org.myweb.flowmat.domain.bom.application;
 
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.LockModeType;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -18,7 +16,6 @@ import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,8 +26,7 @@ public class BomEffectivityService {
     private final BomEffectivityChangeRepository changes;
     private final ProjectAccessService access;
     private final IdGenerator ids;
-    private final JdbcTemplate jdbc;
-    private final EntityManager entities;
+    private final BomRevisionLock revisionLock;
 
     @Transactional(readOnly = true)
     public BomEffectivityResponse get(String bomId) {
@@ -43,11 +39,7 @@ public class BomEffectivityService {
     public BomEffectivityResponse change(String bomId, BomEffectivityRequest request) {
         BomHeader header = find(bomId);
         access.requireProjectWriteAccess(header.getProjectId());
-        // Serialize intervals across all revisions of the same item, not just this header.
-        jdbc.queryForObject("select pg_advisory_xact_lock(hashtextextended(?, 0))", Object.class,
-            "bom-effectivity|" + header.getProjectId() + "|" + header.getTargetItemId());
-        entities.refresh(header, LockModeType.PESSIMISTIC_WRITE);
-        if ("Y".equals(header.getDeletedYn())) throw new BusinessException(ErrorCode.NOT_FOUND);
+        revisionLock.lockHeader(header);
         if ("approved".equals(header.getBomStatus())) access.requireProjectOwnerAccess(header.getProjectId());
         String actor = access.requireCurrentUserId();
         String reason = request.reason() == null ? "" : request.reason().trim();

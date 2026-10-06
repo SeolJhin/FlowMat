@@ -45,6 +45,7 @@ public class BomLineImportService {
     private final CatalogQuery catalogQuery;
     private final UnitConverter unitConverter;
     private final BomService bomService;
+    private final BomRevisionLock revisionLock;
     private final ProjectAccessService projectAccessService;
 
     @Transactional
@@ -52,6 +53,7 @@ public class BomLineImportService {
         BomHeader header = bomHeaderRepository.findByBomIdAndDeletedYn(bomId, NOT_DELETED)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         projectAccessService.requireProjectWriteAccess(header.getProjectId());
+        revisionLock.lockHeader(header);
         if (BomStatus.fromCode(header.getBomStatus()) != BomStatus.DRAFT) {
             throw new BusinessException(ErrorCode.CONFLICT, "Only a draft BOM can take new materials.");
         }

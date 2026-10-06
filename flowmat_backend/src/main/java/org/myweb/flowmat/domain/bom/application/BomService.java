@@ -2,6 +2,7 @@ package org.myweb.flowmat.domain.bom.application;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 import org.myweb.flowmat.domain.bom.api.dto.request.BomCreateRequest;
 import org.myweb.flowmat.domain.bom.api.dto.request.BomLineCreateRequest;
 import org.myweb.flowmat.domain.bom.api.dto.request.BomUpdateRequest;
@@ -32,6 +33,9 @@ public interface BomService {
 
     /** Copies an approved or retired revision into a new draft with the next version number. */
     BomResponse createRevision(String bomId);
+
+    /** With a requestId, repeating the same source/actor command returns the original created revision. */
+    BomResponse createRevision(String bomId, UUID requestId);
 
     BomRequirementResponse calculateRequirements(String bomId, BigDecimal productionQuantity);
 

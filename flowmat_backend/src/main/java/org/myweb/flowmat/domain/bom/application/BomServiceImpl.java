@@ -6,6 +6,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -23,8 +28,8 @@ import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
 import org.myweb.flowmat.domain.bom.repository.BomLineRepository;
 import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
-import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
@@ -45,7 +50,8 @@ public class BomServiceImpl implements BomService {
 
     private final BomHeaderRepository bomHeaderRepository;
     private final BomLineRepository bomLineRepository;
-    private final ItemRepository itemRepository;
+    private final CatalogQuery catalogQuery;
+    private final BomRevisionLock revisionLock;
     private final UnitConverter unitConverter;
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
@@ -85,22 +91,21 @@ public class BomServiceImpl implements BomService {
             .stream()
             .filter(header -> project.equals(header.getProjectId()) && NOT_DELETED.equals(header.getDeletedYn()))
             .collect(Collectors.toMap(BomHeader::getBomId, Function.identity()));
-        Map<String, Item> targets = itemRepository.findAllById(headers.values().stream().map(BomHeader::getTargetItemId).distinct().toList())
-            .stream()
-            .collect(Collectors.toMap(Item::getItemId, Function.identity()));
+        Map<String, CatalogItemView> targets = catalogQuery.findItems(
+            headers.values().stream().map(BomHeader::getTargetItemId).distinct().toList());
         return lines.stream()
             .filter(line -> headers.containsKey(line.getBomId()))
             .map(line -> {
                 BomHeader header = headers.get(line.getBomId());
-                Item target = targets.get(header.getTargetItemId());
+                CatalogItemView target = targets.get(header.getTargetItemId());
                 return new BomWhereUsedResponse(
                     header.getBomId(),
                     header.getBomName(),
                     header.getBomVersion(),
                     header.getBomStatus(),
                     header.getTargetItemId(),
-                    target == null ? null : target.getItemCode(),
-                    target == null ? null : target.getItemName(),
+                    target == null ? null : target.itemCode(),
+                    target == null ? null : target.itemName(),
                     header.getBaseQuantity(),
                     header.getBaseUnit(),
                     line.getBomLineId(),
@@ -138,19 +143,20 @@ public class BomServiceImpl implements BomService {
     public BomResponse createBom(BomCreateRequest request) {
         String projectId = request.projectId().trim();
         projectAccessService.requireProjectWriteAccess(projectId);
-        Item target = findProjectItem(request.targetItemId(), projectId);
-        ItemStatusRule.requireActive(target, "give it a BOM");
+        CatalogItemView target = findProjectItem(request.targetItemId(), projectId);
+        requireActive(target, "give it a BOM");
+        revisionLock.lockItem(projectId, target.itemId());
         if (bomHeaderRepository.findTopByProjectIdAndTargetItemIdAndDeletedYnOrderByBomVersionDesc(
-            projectId, target.getItemId(), NOT_DELETED).isPresent()) {
+            projectId, target.itemId(), NOT_DELETED).isPresent()) {
             throw new BusinessException(ErrorCode.CONFLICT,
-                target.getItemCode() + " already has a BOM. Create a new revision of it instead.");
+                target.itemCode() + " already has a BOM. Create a new revision of it instead.");
         }
         requirePositive(request.baseQuantity(), "Base quantity");
 
         BomHeader header = new BomHeader();
         header.setBomId(idGenerator.generate());
         header.setProjectId(projectId);
-        header.setTargetItemId(target.getItemId());
+        header.setTargetItemId(target.itemId());
         header.setBomName(request.bomName().trim());
         header.setBomVersion(1);
         header.setBaseQuantity(request.baseQuantity());
@@ -196,14 +202,14 @@ public class BomServiceImpl implements BomService {
     @Transactional
     public BomResponse addLine(String bomId, BomLineCreateRequest request) {
         BomHeader header = findEditableBom(bomId);
-        Item child = findProjectItem(request.childItemId(), header.getProjectId());
-        ItemStatusRule.requireActive(child, "use it in a BOM");
+        CatalogItemView child = findProjectItem(request.childItemId(), header.getProjectId());
+        requireActive(child, "use it in a BOM");
         requirePositive(request.quantity(), "Material quantity");
 
         BomLine line = new BomLine();
         line.setBomLineId(idGenerator.generate());
         line.setBomId(header.getBomId());
-        line.setChildItemId(child.getItemId());
+        line.setChildItemId(child.itemId());
         line.setLineType(lineType(request.lineType()));
         line.setQuantity(request.quantity());
         line.setUnit(request.unit().trim());
@@ -233,28 +239,42 @@ public class BomServiceImpl implements BomService {
     @Override
     @Transactional
     public BomResponse createRevision(String bomId) {
+        return createRevision(bomId, null);
+    }
+
+    @Override
+    @Transactional
+    public BomResponse createRevision(String bomId, UUID requestId) {
         BomHeader source = findBom(bomId);
         projectAccessService.requireProjectWriteAccess(source.getProjectId());
+        revisionLock.lockHeader(source);
+        String actor = projectAccessService.requireCurrentUserId();
+        // A deterministic primary key is the durable receipt. Soft deletion keeps it reserved forever.
+        String createdId = requestId == null ? idGenerator.generate() : revisionId(source.getBomId(), requestId);
+        if (requestId != null) {
+            var existing = bomHeaderRepository.findById(createdId);
+            if (existing.isPresent()) {
+                BomHeader result = existing.get();
+                if (!actor.equals(result.getCreatedBy()) || !source.getProjectId().equals(result.getProjectId())
+                    || !source.getTargetItemId().equals(result.getTargetItemId()))
+                    throw new BusinessException(ErrorCode.CONFLICT, "requestId is already used by another revision author.");
+                if (!NOT_DELETED.equals(result.getDeletedYn()))
+                    throw new BusinessException(ErrorCode.CONFLICT, "The revision created by requestId was deleted; check the revision list.");
+                return toResponse(result);
+            }
+        }
         BomStatus status = BomStatus.fromCode(source.getBomStatus());
         if (status != BomStatus.APPROVED && status != BomStatus.RETIRED) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 "Only approved or retired revisions can be copied; edit this " + status.code() + " revision instead.");
         }
-        List<BomHeader> revisions = bomHeaderRepository.findAllByProjectIdAndTargetItemIdAndDeletedYnOrderByBomVersionDesc(
-            source.getProjectId(), source.getTargetItemId(), NOT_DELETED);
-        revisions.stream()
-            .filter(revision -> BomStatus.fromCode(revision.getBomStatus()) == BomStatus.DRAFT
-                || BomStatus.fromCode(revision.getBomStatus()) == BomStatus.PENDING_APPROVAL)
-            .findFirst()
-            .ifPresent(open -> {
-                throw new BusinessException(ErrorCode.CONFLICT,
-                    "Revision " + open.getBomVersion() + " is still " + open.getBomStatus() + "; finish or delete it first.");
-            });
-        int nextVersion = revisions.isEmpty() ? 1 : revisions.get(0).getBomVersion() + 1;
-        String actor = projectAccessService.requireCurrentUserId();
+        int lastVersion = bomHeaderRepository.findTopByProjectIdAndTargetItemIdOrderByBomVersionDesc(
+            source.getProjectId(), source.getTargetItemId()).map(BomHeader::getBomVersion).orElse(0);
+        if (lastVersion == Integer.MAX_VALUE) throw new BusinessException(ErrorCode.CONFLICT, "bomVersion has reached its limit.");
+        int nextVersion = lastVersion + 1;
 
         BomHeader copy = new BomHeader();
-        copy.setBomId(idGenerator.generate());
+        copy.setBomId(createdId);
         copy.setProjectId(source.getProjectId());
         copy.setTargetItemId(source.getTargetItemId());
         copy.setBomName(source.getBomName());
@@ -264,6 +284,8 @@ public class BomServiceImpl implements BomService {
         copy.setBomStatus(BomStatus.DRAFT.code());
         copy.setApprovalStatus("draft");
         copy.setNote(source.getNote());
+        copy.setEffectiveFrom(source.getEffectiveFrom());
+        copy.setEffectiveTo(source.getEffectiveTo());
         copy.setCreatedBy(actor);
         copy.setDeletedYn(NOT_DELETED);
         bomHeaderRepository.save(copy);
@@ -320,8 +342,8 @@ public class BomServiceImpl implements BomService {
     /** productionQuantity / base × line quantity, converted to each material's unit. */
     private BomRequirementResponse requirements(BomHeader header, BigDecimal productionQuantity) {
         requirePositive(productionQuantity, "Production quantity");
-        Item target = findProjectItem(header.getTargetItemId(), header.getProjectId());
-        BigDecimal base = unitConverter.toItemUnit(header.getBaseQuantity(), header.getBaseUnit(), target.getUnitId()).quantity();
+        CatalogItemView target = findProjectItem(header.getTargetItemId(), header.getProjectId());
+        BigDecimal base = unitConverter.toItemUnit(header.getBaseQuantity(), header.getBaseUnit(), target.unitId()).quantity();
         requirePositive(base, "Base quantity");
         BigDecimal factor = productionQuantity.divide(base, FACTOR_SCALE, RoundingMode.HALF_UP);
 
@@ -330,20 +352,20 @@ public class BomServiceImpl implements BomService {
         BigDecimal materialCost = BigDecimal.ZERO;
         boolean costComplete = true;
         for (BomLine line : lines(header.getBomId())) {
-            Item child = findProjectItem(line.getChildItemId(), header.getProjectId());
+            CatalogItemView child = findProjectItem(line.getChildItemId(), header.getProjectId());
             BigDecimal required = factor.multiply(line.getQuantity()).setScale(8, RoundingMode.HALF_UP).stripTrailingZeros();
-            UnitConverter.Conversion conversion = unitConverter.toItemUnit(required, line.getUnit(), child.getUnitId());
+            UnitConverter.Conversion conversion = unitConverter.toItemUnit(required, line.getUnit(), child.unitId());
             if (!BomTree.isMaterial(line.getLineType())) {
                 // By-products and waste come out of the batch; nothing is consumed or costed for them.
-                outputs.add(new BomRequirementResponse.Output(line.getBomLineId(), child.getItemId(), line.getLineType(),
+                outputs.add(new BomRequirementResponse.Output(line.getBomLineId(), child.itemId(), line.getLineType(),
                     line.getQuantity(), line.getUnit(), required, conversion.toUnitCode(),
                     conversion.quantity().setScale(STOCK_SCALE, RoundingMode.HALF_UP)));
                 continue;
             }
-            BigDecimal rate = unitConverter.toItemUnit(BigDecimal.ONE, line.getUnit(), child.getUnitId()).quantity();
+            BigDecimal rate = unitConverter.toItemUnit(BigDecimal.ONE, line.getUnit(), child.unitId()).quantity();
             BigDecimal itemQuantity = conversion.quantity().setScale(STOCK_SCALE, RoundingMode.HALF_UP);
             // Unit cost is per the item's own unit, so it multiplies the quantity already converted to that unit.
-            BigDecimal unitCost = child.getUnitCost() != null && child.getUnitCost().signum() > 0 ? child.getUnitCost() : null;
+            BigDecimal unitCost = child.unitCost() != null && child.unitCost().signum() > 0 ? child.unitCost() : null;
             BigDecimal lineCost = unitCost == null ? null : itemQuantity.multiply(unitCost).setScale(STOCK_SCALE, RoundingMode.HALF_UP);
             if (lineCost == null) {
                 costComplete = false;
@@ -352,7 +374,7 @@ public class BomServiceImpl implements BomService {
             }
             result.add(new BomRequirementResponse.Line(
                 line.getBomLineId(),
-                child.getItemId(),
+                child.itemId(),
                 line.getQuantity(),
                 line.getUnit(),
                 required,
@@ -371,6 +393,7 @@ public class BomServiceImpl implements BomService {
     private BomHeader findEditableBom(String bomId) {
         BomHeader header = findBom(bomId);
         projectAccessService.requireProjectWriteAccess(header.getProjectId());
+        revisionLock.lockHeader(header);
         BomStatus status = BomStatus.fromCode(header.getBomStatus());
         if (!status.editable()) {
             throw new BusinessException(ErrorCode.CONFLICT,
@@ -385,13 +408,29 @@ public class BomServiceImpl implements BomService {
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
-    private Item findProjectItem(String itemId, String projectId) {
-        Item item = itemRepository.findByItemIdAndDeletedYn(itemId == null ? "" : itemId.trim(), NOT_DELETED)
+    private CatalogItemView findProjectItem(String itemId, String projectId) {
+        CatalogItemView item = catalogQuery.findActiveItem(itemId == null ? "" : itemId.trim())
             .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "Item " + itemId + " does not exist."));
-        if (!projectId.equals(item.getProjectId())) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "Item " + item.getItemCode() + " belongs to another project.");
+        if (!projectId.equals(item.projectId())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Item " + item.itemCode() + " belongs to another project.");
         }
         return item;
+    }
+
+    /** Opaque 48-character key, scoped to source and request, within the existing varchar(50) primary key. */
+    private static String revisionId(String sourceId, UUID requestId) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(
+                ("flowmat:bom:revision:v1:" + sourceId + ":" + requestId).getBytes(StandardCharsets.UTF_8));
+            return "bom-rev-" + HexFormat.of().formatHex(digest).substring(0, 40);
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is required by this runtime.", impossible);
+        }
+    }
+
+    private static void requireActive(CatalogItemView item, String action) {
+        if (!ItemStatusRule.isActive(item.itemStatus()))
+            throw new BusinessException(ErrorCode.CONFLICT, ItemStatusRule.refusal(item.itemCode(), item.itemStatus(), action));
     }
 
     private List<BomLine> lines(String bomId) {

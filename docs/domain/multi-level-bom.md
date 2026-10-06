@@ -145,3 +145,23 @@
 - 대체 자재(`substitute_group`)·선택 자재·스크랩률(1차 계약 §5-6에서 아직 거절)
 - ~~준비 점검에서 부족한 반제품에 "반제품 작업지시로 만들기" 안내~~ → 위 "준비 점검의 반제품 작업지시"(2026-10-03). ~~여러 단계 반제품을 한 번에~~ → 위 "모든 단계 한 번에"(2026-10-03, Open work order needs에서. 작업지시 하나의 준비 점검은 지금처럼 바로 아래 반제품만)
 - 유효일자(effective date) 기준 revision 선택
+
+## 유효기간 명령·날짜 조회와 여러 초안 (2026-10-06)
+
+기간별 다중 승인 전환의 기반 구현이다. 기존 승인은 아직 이전 approved revision을 자동 retire한다. 작업지시 계획 시작일에 맞춘 자동 revision 선택과 팬텀 전개는 아직 적용하지 않았다. 프로젝트 시간대 정책은 Accepted이며, project 담당 범위 수정 허가를 기다리고 있다.
+
+| 규칙 | 구현 |
+|---|---|
+| E1 | V1 `effective_from`/`effective_to`는 날짜로 매핑. null은 해당 방향 무제한, 시작·끝 포함. 양쪽 JSON 키는 필수이며 null로 명시적 해제. 역순·1~9999년 밖 날짜·비어 있는 사유 400 |
+| E2 | `GET/POST /boms/{id}/effectivity`. 읽기는 Project read, draft 변경은 write, approved 변경은 owner, pending/retired 변경 409. 기존 날짜 version 0; V55의 단조 증가 version·변경 전/후 날짜·사유·작성자·시각 보존 |
+| E3 | `expectedPeriodVersion`과 UUID requestId 사용. 같은 작성자의 정확한 재송신만 재생, 이미 뒤에 변경됐다면 현재 상태 반환. 오래된 version·다른 approved 기간과 overlap은 409. 헤더와 이력 저장은 한 트랜잭션 |
+| E4 | 공개 `BomRevisionQuery.findEffective(projectId, targetItemId, on)`와 `GET /boms/effective?projectId=&targetItemId=&on=YYYY-MM-DD`. on은 명시적 프로젝트 달력 날짜이며 브라우저/서버의 오늘을 가정하지 않음. active approved만 고려, 일치 없음 404, 기존 겹친 데이터는 409(최신 revision 임의 선택 금지) |
+| E5 | BOMs의 Effective periods에서 기간 편집·이력과 날짜별 revision 미리보기. viewer와 approved를 편집하는 editor는 변경 버튼 없음. 미확인 저장은 같은 UUID/값으로만 재시도, 409 뒤 원래 편집을 보존하고 명시적 최신 상태 불러오기 |
+| D1 | approved/retired 원본에서 여러 초안 복사 가능. 번호는 삭제 이력까지 포함한 최대 번호 +1. 기간은 복사하되 새 초안의 기간 version은 0, 이전 변경 이력은 복사하지 않음 |
+| D2 | 품목당 pending approval 하나. 동시에 제출해도 하나만 승인 대기, 나머지는 409·draft 유지. 반려 뒤 다른 초안 제출 가능 |
+| D3 | 공통 품목 advisory lock → 헤더 최신 상태/행 잠금. 승인·제출·반려·폐기는 프로젝트 승인 그래프 lock → 품목 → 헤더 순서. 다른 품목의 상호 순환 후보도 동시에 승인 불가 |
+| D4 | 자재 CSV는 초안 lock 뒤 기존 줄·상태를 검증. 동일 자재의 동시 append는 하나만 적용하고 다른 요청은 행 오류와 applied=false. 검사와 삭제/추가는 같은 트랜잭션 |
+
+검증: `BomEffectivityIntegrationTest` 13건, `BomDraftConcurrencyIntegrationTest` 7건(독립 Postgres/Testcontainers), `bom-effectivity.spec.ts` 기간·권한·충돌·정확한 재송신·날짜 경계/결과 해제, `bom-multiple-drafts.spec.ts` 초안 둘과 단일 pending. 브라우저 API는 전부 가짜로 응답하여 개발 DB에 BOM을 넣지 않는다. #44의 Revision locator는 select의 combobox 역할과 정확한 이름으로 수정했다.
+
+남은 연결: Project.timeZone 조회/설정 → 작업지시 plannedStartAt의 프로젝트 날짜 → 승인 기간 overlap 검증과 자동 retire 제거 → 날짜별 반제품 트리/MRP/원가 조회 → 실행에 선택 revision 상속. 이 연결을 끝내기 전 전체 유효일 BOM 기능을 완료로 올리지 않는다. 기존 V1–V55는 수정하지 않는다.

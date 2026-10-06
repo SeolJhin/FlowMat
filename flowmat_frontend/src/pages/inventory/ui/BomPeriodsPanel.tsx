@@ -6,6 +6,7 @@ import { useBomEffectivityMutation, useBomEffectivityQuery, type BomEffectivity,
 import type { BomDto } from '../../../shared/types/api'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { validBomPeriod } from '../model/bomEffectivity'
+import { BomEffectivePreview } from './BomEffectivePreview'
 
 const showPeriod = (from: string | null, to: string | null) => `${from ?? 'No start limit'} → ${to ?? 'No end limit'}`
 export function BomPeriodsPanel({ projectId, boms }: { projectId: string; boms: BomDto[] }) {
@@ -70,5 +71,6 @@ export function BomPeriodsPanel({ projectId, boms }: { projectId: string; boms: 
     </>}
     {message && <p role={mutation.isError ? 'alert' : 'status'}>{message}</p>}
     {unknown && <p role="alert">The result is unconfirmed. Retry the same period change before editing or selecting another revision.</p>}
+    <BomEffectivePreview projectId={projectId} boms={boms} />
   </section>
 }
