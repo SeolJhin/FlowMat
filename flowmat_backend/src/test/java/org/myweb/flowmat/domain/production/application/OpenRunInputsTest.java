@@ -67,4 +67,32 @@ class OpenRunInputsTest {
         assertThat(openRunInputs.byOrder(List.of(simulation, actual)).get("order-1"))
             .containsEntry("material-1", BigDecimal.ONE);
     }
+
+    @Test
+    void fallsBackToPlannedQuantityWhenRecordedInputHasNoActualQuantity() {
+        ProductionRun run = new ProductionRun();
+        run.setProductionRunId("run-1");
+        run.setWorkOrderId("order-1");
+        run.setRunStatus("running");
+        run.setRunType("actual");
+
+        ProductionRunItem input = new ProductionRunItem();
+        input.setProductionRunId("run-1");
+        input.setItemId("material-1");
+        input.setDirection("input");
+        input.setPlannedQty(new BigDecimal("5"));
+        input.setUnit("kg");
+        when(productionRunItemRepository.findAllByProductionRunIdOrderByProductionRunItemIdAsc("run-1"))
+            .thenReturn(List.of(input));
+
+        Item item = new Item();
+        item.setItemId("material-1");
+        item.setUnitId("unit-kg");
+        when(itemRepository.findAllById(any())).thenReturn(List.of(item));
+        when(unitConverter.toItemUnit(new BigDecimal("5"), "kg", "unit-kg"))
+            .thenReturn(new UnitConverter.Conversion(new BigDecimal("5"), "kg", "kg", false));
+
+        assertThat(openRunInputs.byOrder(List.of(run)).get("order-1"))
+            .containsEntry("material-1", new BigDecimal("5"));
+    }
 }

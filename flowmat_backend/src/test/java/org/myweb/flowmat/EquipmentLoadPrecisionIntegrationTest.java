@@ -70,6 +70,21 @@ class EquipmentLoadPrecisionIntegrationTest extends IntegrationTestSupport {
             .andExpect(jsonPath("$.data.producedQuantity").value(15));
     }
 
+    @Test
+    void anOpenOrderWhoseOutputExceedsItsTargetCannotGetANegativePlanSuggestion() throws Exception {
+        Fixture fixture = order(10, START, "2030-01-07T01:00:00+09:00");
+        String run = data(call(post("/production-runs/start"), Map.of("projectId", DEMO_PROJECT,
+            "workflowId", DEMO_WORKFLOW, "workOrderId", fixture.order(), "plannedOutputQty", 10)))
+            .path("productionRunId").asText();
+        call(post("/production-runs/" + run + "/finish"), Map.of("actualOutputQty", 15))
+            .andExpect(status().isOk());
+
+        call(get("/work-orders/" + fixture.order() + "/plan-suggestion")
+                .param("from", START))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.message").value("The target quantity has already been produced."));
+    }
+
     private Fixture order(int quantity, String start, String end) throws Exception {
         String tag = UUID.randomUUID().toString();
         String equipment = data(call(post("/equipments"), Map.of("projectId", DEMO_PROJECT,

@@ -51,7 +51,8 @@ export function toSearchParams(filter: LedgerFilter): Record<string, string> {
 
 export function csvCell(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return ''
-  const text = String(value)
+  const raw = String(value)
+  const text = typeof value === 'string' && /^[\t\r\n ]*[=+\-@]/.test(raw) ? `'${raw}` : raw
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
 }
 

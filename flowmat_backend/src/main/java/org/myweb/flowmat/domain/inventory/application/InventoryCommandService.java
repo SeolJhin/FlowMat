@@ -222,7 +222,7 @@ public class InventoryCommandService {
                             lotStatusResync.resync(lot);
                         } catch (RuntimeException e) {
                             // The movement is committed and its own check stands; a missed re-check is logged, not thrown.
-                            log.warn("LOT {} status re-check after commit failed: {}", lot, e.getMessage());
+                            log.warn("LOT {} status re-check after commit failed", lot, e);
                         }
                     }
                 }

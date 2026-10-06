@@ -28,6 +28,13 @@ describe('entriesFromSheet', () => {
     expect(entriesFromSheet('inventory_id,counted\nr1,\n', new Set(['r1']))).toEqual({ ok: false, error: 'No counted quantities in the sheet.' })
   })
 
+  it('reports malformed quoted cells as a file error', () => {
+    expect(entriesFromSheet('inventory_id,counted\nr1,"8', new Set(['r1']))).toEqual({
+      ok: false,
+      error: 'A quoted CSV cell is not closed.',
+    })
+  })
+
   it('refuses conflicting counts for the same record instead of silently taking the last one', () => {
     expect(entriesFromSheet('inventory_id,counted\nr1,8\nr1,9\n', new Set(['r1']))).toEqual({
       ok: false, error: 'The sheet counts stock record r1 more than once. Keep one counted row per stock record.',

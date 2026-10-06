@@ -24,11 +24,12 @@ final class EquipmentSequence {
         return others.stream()
             .filter(other -> other.getTargetItemId() != null && other.getPlannedStartAt() != null
                 && other.getPlannedStartAt().isBefore(start))
+            .filter(other -> other.getPlannedEndAt() == null || other.getPlannedEndAt().isAfter(other.getPlannedStartAt()))
             .filter(other -> {
                 WorkOrderStatus status = WorkOrderServiceImpl.status(other);
                 return status.acceptsRuns() || status == WorkOrderStatus.COMPLETED;
             })
-            .max(Comparator.comparing(WorkOrder::getPlannedStartAt))
+            .max(Comparator.comparing(WorkOrder::getPlannedStartAt).thenComparing(WorkOrder::getWorkOrderId))
             .orElse(null);
     }
 }

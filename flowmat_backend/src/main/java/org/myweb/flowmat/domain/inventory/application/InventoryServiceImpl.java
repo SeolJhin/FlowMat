@@ -145,7 +145,7 @@ public class InventoryServiceImpl implements InventoryService {
         Inventory inventory = findActiveInventory(inventoryId);
         projectAccessService.requireProjectWriteAccess(inventory.getProjectId());
         // The adjustment replaces absolute quantities, so it must be based on what is stored now.
-        if (request.expectedVersion() != null && !request.expectedVersion().equals(inventory.getVersion())) {
+        if (request.expectedVersion() == null || !request.expectedVersion().equals(inventory.getVersion())) {
             throw new BusinessException(ErrorCode.CONFLICT,
                 "This stock record changed since you opened it (now " + inventory.getQuantity().stripTrailingZeros().toPlainString()
                     + " on hand). Reload and try again.");

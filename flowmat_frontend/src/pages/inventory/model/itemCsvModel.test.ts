@@ -10,6 +10,14 @@ describe('parseCsv', () => {
       ['1', ''],
     ])
   })
+
+  it.each([
+    ['a,"unterminated', 'A quoted CSV cell is not closed.'],
+    ['a,b"c', 'A quote may only start an empty CSV cell.'],
+    ['a,"b"x', 'A quoted cell must be followed by a comma or the end of its row.'],
+  ])('rejects malformed CSV quoting in %s', (text, error) => {
+    expect(() => parseCsv(text)).toThrow(error)
+  })
 })
 
 describe('rowsFromCsv', () => {
@@ -32,6 +40,13 @@ describe('rowsFromCsv', () => {
     expect(rowsFromCsv('')).toEqual({ ok: false, error: 'The file is empty.' })
     expect(rowsFromCsv('name\nFlour')).toMatchObject({ ok: false })
     expect(rowsFromCsv('item_code\n')).toEqual({ ok: false, error: 'The file has no items under its header.' })
+  })
+
+  it('returns malformed quoting as a file error instead of importing shifted columns', () => {
+    expect(rowsFromCsv('item_code,item_name\nFLR-1,"Flour')).toEqual({
+      ok: false,
+      error: 'A quoted CSV cell is not closed.',
+    })
   })
 })
 

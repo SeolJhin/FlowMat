@@ -1,5 +1,5 @@
 import type { StockImportRowDto } from '../../../shared/types/api'
-import { parseCsv } from './itemCsvModel'
+import { CsvParseError, parseCsv } from './itemCsvModel'
 
 const COLUMNS: Record<string, keyof StockImportRowDto> = {
   item_code: 'itemCode',
@@ -24,7 +24,14 @@ export const STOCK_CSV_TEMPLATE = '\ufeffitem_code,location,lot_no,quantity,expi
  * the rest optional.
  */
 export function stockRowsFromCsv(text: string): { ok: true; rows: StockImportRowDto[] } | { ok: false; error: string } {
-  const [header, ...data] = parseCsv(text)
+  let parsed: string[][]
+  try {
+    parsed = parseCsv(text)
+  } catch (error) {
+    if (error instanceof CsvParseError) return { ok: false, error: error.message }
+    throw error
+  }
+  const [header, ...data] = parsed
   if (!header) return { ok: false, error: 'The file is empty.' }
   const fields = header.map((name) => COLUMNS[name.trim().toLowerCase().replace(/[\s-]+/g, '_')] ?? null)
   const duplicate = fields.find((field, index) => field !== null && fields.indexOf(field) !== index)

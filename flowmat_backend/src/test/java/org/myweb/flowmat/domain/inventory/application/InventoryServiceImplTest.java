@@ -84,6 +84,24 @@ class InventoryServiceImplTest {
     }
 
     @Test
+    void adjustmentWithoutVersionIsRejectedInsteadOfOverwritingNewerMovements() {
+        givenInventory();
+
+        BusinessException exception = assertThrows(
+            BusinessException.class,
+            () -> inventoryService.updateInventory(
+                "inventory-1",
+                new InventoryAdjustRequest("project-1", "item-1", new BigDecimal("8"), null, null, null, null, null, null, null, null)
+            )
+        );
+
+        assertEquals(ErrorCode.CONFLICT, exception.getErrorCode());
+        assertEquals("This stock record changed since you opened it (now 10 on hand). Reload and try again.", exception.getMessage());
+        verify(itemRepository, never()).findByItemIdAndDeletedYn(any(), any());
+        verify(inventoryRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
     void updateChecksAccessOnStoredProjectNotRequestBody() {
         givenInventory();
         when(projectAccessService.requireProjectWriteAccess("project-1"))

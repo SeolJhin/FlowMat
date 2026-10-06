@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { InventoryTransactionDto } from '../../../shared/types/api'
-import { EMPTY_LEDGER_FILTER, LEDGER_TYPES, ledgerCsv, toSearchParams } from './ledgerModel'
+import { csvCell, EMPTY_LEDGER_FILTER, LEDGER_TYPES, ledgerCsv, toSearchParams } from './ledgerModel'
 
 function tx(id: string, patch: Partial<InventoryTransactionDto> = {}): InventoryTransactionDto {
   return {
@@ -27,6 +27,13 @@ function tx(id: string, patch: Partial<InventoryTransactionDto> = {}): Inventory
 }
 
 describe('movement ledger', () => {
+  it('escapes formula-like text in CSV cells while preserving numeric values', () => {
+    expect(csvCell('=1+1')).toBe("'=1+1")
+    expect(csvCell(' \t@SUM(1,2)')).toBe(`"' \t@SUM(1,2)"`)
+    expect(csvCell('-2')).toBe("'-2")
+    expect(csvCell(-2)).toBe('-2')
+  })
+
   it('sends only what is set, with local days as a whole-day range of instants', () => {
     expect(toSearchParams(EMPTY_LEDGER_FILTER)).toEqual({})
     const params = toSearchParams({ type: 'issue', itemId: 'flour', from: '2026-09-20', to: '2026-09-22', text: '  urgent ' })

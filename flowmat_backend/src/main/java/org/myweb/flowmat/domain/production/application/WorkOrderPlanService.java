@@ -158,7 +158,7 @@ public class WorkOrderPlanService {
             .map(ProductionRun::getActualOutputQty)
             .filter(qty -> qty != null)
             .reduce(BigDecimal.ZERO, BigDecimal::add);
-        return order.getTargetQuantity().subtract(produced);
+        return order.getTargetQuantity().subtract(produced).max(BigDecimal.ZERO);
     }
 
     private static long seconds(BigDecimal hours) {

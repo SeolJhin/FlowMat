@@ -1,5 +1,5 @@
 import type { InventoryDto } from '../../../shared/types/api'
-import { parseCsv } from './itemCsvModel'
+import { CsvParseError, parseCsv } from './itemCsvModel'
 import { csvCell } from './ledgerModel'
 
 /**
@@ -24,7 +24,14 @@ export type SheetResult =
  * count is applied, like typed ones.
  */
 export function entriesFromSheet(text: string, known: Set<string>): SheetResult {
-  const [header, ...data] = parseCsv(text)
+  let parsed: string[][]
+  try {
+    parsed = parseCsv(text)
+  } catch (error) {
+    if (error instanceof CsvParseError) return { ok: false, error: error.message }
+    throw error
+  }
+  const [header, ...data] = parsed
   if (!header) return { ok: false, error: 'The file is empty.' }
   const names = header.map((name) => name.trim().toLowerCase())
   const duplicate = names.find((name, index) => (name === 'inventory_id' || name === 'counted') && names.indexOf(name) !== index)

@@ -1,6 +1,6 @@
 import type { BomDto, BomLineImportRowDto, BomStatus } from '../../../shared/types/api'
 import type { BomAction } from '../../../entities/bom/api/useBoms'
-import { parseCsv } from './itemCsvModel'
+import { CsvParseError, parseCsv } from './itemCsvModel'
 
 /**
  * Buttons each BOM status offers (docs/domain/inventory-bom-lot-contract.md §5). The server enforces the same rules and
@@ -122,7 +122,14 @@ const BOM_LINE_COLUMNS: Record<string, keyof BomLineImportRowDto> = {
  * material (blank), by_product or waste.
  */
 export function bomLinesFromCsv(text: string): { ok: true; rows: BomLineImportRowDto[] } | { ok: false; error: string } {
-  const [header, ...data] = parseCsv(text)
+  let parsed: string[][]
+  try {
+    parsed = parseCsv(text)
+  } catch (error) {
+    if (error instanceof CsvParseError) return { ok: false, error: error.message }
+    throw error
+  }
+  const [header, ...data] = parsed
   if (!header) return { ok: false, error: 'The file is empty.' }
   const fields = header.map((name) => BOM_LINE_COLUMNS[name.trim().toLowerCase().replace(/[\s-]+/g, '_')] ?? null)
   const duplicate = fields.find((field, index) => field !== null && fields.indexOf(field) !== index)

@@ -64,12 +64,13 @@ public class OpenRunInputs {
             .collect(Collectors.toMap(Item::getItemId, Function.identity()));
         for (ProductionRunItem recording : recordings) {
             Item item = items.get(recording.getItemId());
+            BigDecimal recordedQuantity = recording.getActualQty() != null ? recording.getActualQty() : recording.getPlannedQty();
             if (!"input".equals(recording.getDirection()) || recording.isCancelled() || "bom".equals(recording.getQuantitySource())
-                || recording.getActualQty() == null || item == null) {
+                || recordedQuantity == null || item == null) {
                 continue;
             }
             try {
-                BigDecimal inItemUnit = unitConverter.toItemUnit(recording.getActualQty(), recording.getUnit(), item.getUnitId()).quantity();
+                BigDecimal inItemUnit = unitConverter.toItemUnit(recordedQuantity, recording.getUnit(), item.getUnitId()).quantity();
                 used.computeIfAbsent(orderOfRun.get(recording.getProductionRunId()), id -> new HashMap<>())
                     .merge(item.getItemId(), inItemUnit, BigDecimal::add);
             } catch (BusinessException ignored) {

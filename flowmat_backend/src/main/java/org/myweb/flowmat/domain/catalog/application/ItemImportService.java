@@ -25,6 +25,7 @@ import org.myweb.flowmat.domain.inventory.application.publicapi.StockQuery;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
+import org.myweb.flowmat.global.util.CsvDecimalParser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -303,12 +304,16 @@ public class ItemImportService {
             return null;
         }
         try {
-            BigDecimal number = new BigDecimal(trimmed.replace(",", ""));
+            BigDecimal number = CsvDecimalParser.parse(trimmed);
             if (number.signum() < 0) {
                 problems.add(what + " cannot be negative");
                 return null;
             }
-            if (number.setScale(4, RoundingMode.HALF_UP).precision() - 4 > MAX_INTEGER_DIGITS) {
+            if (number.signum() == 0) {
+                return number;
+            }
+            if (CsvDecimalParser.hasMoreThanIntegerDigits(number, MAX_INTEGER_DIGITS)
+                || number.setScale(4, RoundingMode.HALF_UP).precision() - 4 > MAX_INTEGER_DIGITS) {
                 problems.add(what + " is too large");
                 return null;
             }

@@ -31,6 +31,7 @@ import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
+import org.myweb.flowmat.global.util.CsvDecimalParser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -206,7 +207,7 @@ public class StockImportService {
             if (item.getPurchaseUnit() == null || item.getConversionRate() == null) {
                 problems.add(code + " has no purchase unit; give the quantity");
             } else {
-                quantity = packs.multiply(item.getConversionRate()).setScale(4, RoundingMode.HALF_UP).stripTrailingZeros();
+                quantity = storedQuantity(packs.multiply(item.getConversionRate()), "Quantity", problems);
             }
         }
 
@@ -266,20 +267,33 @@ public class StockImportService {
             return null;
         }
         try {
-            BigDecimal number = new BigDecimal(trimmed.replace(",", ""));
+            BigDecimal number = CsvDecimalParser.parse(trimmed);
             if (number.signum() <= 0) {
                 problems.add(what + " must be greater than 0");
                 return null;
             }
-            if (number.setScale(4, RoundingMode.HALF_UP).precision() - 4 > MAX_INTEGER_DIGITS) {
-                problems.add(what + " is too large");
-                return null;
-            }
-            return number;
+            return storedQuantity(number, what, problems);
         } catch (NumberFormatException e) {
             problems.add(what + " is not a number: " + trimmed);
             return null;
         }
+    }
+
+    static BigDecimal storedQuantity(BigDecimal number, String what, List<String> problems) {
+        if (CsvDecimalParser.hasMoreThanIntegerDigits(number, MAX_INTEGER_DIGITS)) {
+            problems.add(what + " is too large");
+            return null;
+        }
+        BigDecimal rounded = number.setScale(4, RoundingMode.HALF_UP);
+        if (rounded.precision() - 4 > MAX_INTEGER_DIGITS) {
+            problems.add(what + " is too large");
+            return null;
+        }
+        if (rounded.signum() == 0) {
+            problems.add(what + " is too small to store at four decimal places");
+            return null;
+        }
+        return rounded;
     }
 
     private static LocalDate date(String value, List<String> problems) {

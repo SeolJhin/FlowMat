@@ -33,4 +33,11 @@ describe('stockRowsFromCsv', () => {
   it('takes packs instead of a quantity', () => {
     expect(stockRowsFromCsv('item_code,location,bags\nFLR-1,WH-A,2\n')).toEqual({ ok: true, rows: [{ itemCode: 'FLR-1', location: 'WH-A', packs: '2' }] })
   })
+
+  it('reports malformed quoted cells as a file error', () => {
+    expect(stockRowsFromCsv('item_code,quantity\nFLR-1,"5')).toEqual({
+      ok: false,
+      error: 'A quoted CSV cell is not closed.',
+    })
+  })
 })

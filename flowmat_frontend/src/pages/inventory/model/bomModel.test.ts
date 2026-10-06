@@ -148,6 +148,13 @@ describe('bomLinesFromCsv', () => {
     })
     expect(bomLinesFromCsv('item_code,quantity,unit\n')).toEqual({ ok: false, error: 'The file has no materials under its header.' })
   })
+
+  it('reports malformed quoted cells as a file error', () => {
+    expect(bomLinesFromCsv('item_code,quantity,unit\nFLR-1,5,"kg')).toEqual({
+      ok: false,
+      error: 'A quoted CSV cell is not closed.',
+    })
+  })
 })
 
 describe('costChange', () => {

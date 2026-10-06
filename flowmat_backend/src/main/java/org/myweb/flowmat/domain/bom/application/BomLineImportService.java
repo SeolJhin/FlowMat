@@ -1,6 +1,7 @@
 package org.myweb.flowmat.domain.bom.application;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -23,6 +24,7 @@ import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
+import org.myweb.flowmat.global.util.CsvDecimalParser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,9 +38,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class BomLineImportService {
-
     public static final int MAX_ROWS = 500;
     private static final String NOT_DELETED = "N";
+    private static final int MAX_INTEGER_DIGITS = 10;
 
     private final BomHeaderRepository bomHeaderRepository;
     private final BomLineRepository bomLineRepository;
@@ -132,9 +134,18 @@ public class BomLineImportService {
             problems.add("Quantity is missing");
         } else {
             try {
-                quantity = new BigDecimal(quantityText.replace(",", ""));
+                quantity = CsvDecimalParser.parse(quantityText);
                 if (quantity.signum() <= 0) {
                     problems.add("Quantity must be greater than 0");
+                } else if (CsvDecimalParser.hasMoreThanIntegerDigits(quantity, MAX_INTEGER_DIGITS)) {
+                    problems.add("Quantity is too large");
+                } else {
+                    BigDecimal rounded = quantity.setScale(4, RoundingMode.HALF_UP);
+                    if (rounded.signum() == 0) {
+                        problems.add("Quantity is too small to store at four decimal places");
+                    } else if (rounded.precision() - 4 > MAX_INTEGER_DIGITS) {
+                        problems.add("Quantity is too large");
+                    }
                 }
             } catch (NumberFormatException e) {
                 problems.add("Quantity is not a number: " + quantityText);
