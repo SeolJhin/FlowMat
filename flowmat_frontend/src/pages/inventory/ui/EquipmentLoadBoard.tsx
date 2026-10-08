@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useEquipmentLoadQuery } from '../../../entities/production/api/useEquipmentLoad'
 import { errorMessage } from '../../../shared/lib/errorMessage'
+import { formatQty } from '../../../shared/lib/formatQty'
 import {
   changeoverPlanText,
   dateInputValue,
@@ -65,7 +66,12 @@ export function EquipmentLoadBoard({ projectId }: { projectId: string }) {
               <span style={{ color: tone === 'over' ? TONE.over : undefined }}>{loadLabel(row)}{row.overloaded && ' · Overloaded'}</span>
             </td>
             <td style={cell}>
-              {row.orders.map((order) => <div key={order.workOrderId}>{orderLine(order)}</div>)}
+              {row.orders.map((order) => <div key={order.workOrderId}>
+                {orderLine(order)}
+                {'setupCostEstimate' in order && <div className="inspector-hint">
+                  Setup estimate: {order.setupCostEstimate == null ? 'unknown' : formatQty(order.setupCostEstimate)}
+                </div>}
+              </div>)}
               {row.changeovers && (
                 <div className="inspector-hint" style={{ color: row.changeovers.suggestedOrder ? '#b45309' : undefined }}>
                   {changeoverPlanText(row.changeovers)}
@@ -78,6 +84,8 @@ export function EquipmentLoadBoard({ projectId }: { projectId: string }) {
           </tr>
         })}</tbody>
       </table>}
+      {rows.some((row) => row.orders.some((order) => 'setupCostEstimate' in order)) &&
+        <p className="inspector-hint" style={{ margin: 0 }}>Whole-order setup at current equipment rates; shown separately from material and actual costs.</p>}
       {rows.length > 0 && <LoadTimeline rows={rows} start={start} from={range.from} to={range.to} />}
     </section>
   )

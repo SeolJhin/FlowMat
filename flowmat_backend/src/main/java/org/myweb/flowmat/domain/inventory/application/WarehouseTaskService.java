@@ -65,6 +65,7 @@ public class WarehouseTaskService {
     private static final String AVAILABLE = "available";
 
     private final WarehouseTaskRepository taskRepository;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
     private final InventoryRepository inventoryRepository;
     private final CatalogQuery catalogQuery;
     private final LotMasterRepository lotMasterRepository;
@@ -169,7 +170,7 @@ public class WarehouseTaskService {
         String note = trimToNull(request.note());
         List<WarehouseTask> created = new ArrayList<>();
         List<PickListResponse.Line> summary = new ArrayList<>();
-        LocalDate today = LocalDate.now();
+        LocalDate today = projectCalendar.today(projectId);
         for (Map.Entry<String, BigDecimal> need : needs.entrySet()) {
             CatalogItemView item = catalogQuery.findProjectItem(projectId, need.getKey())
                 .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "An item to pick was not found in this project."));

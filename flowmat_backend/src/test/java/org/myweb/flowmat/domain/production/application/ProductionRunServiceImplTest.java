@@ -11,8 +11,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.LockModeType;
 import java.math.BigDecimal;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -22,16 +20,20 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
+import org.junit.jupiter.api.BeforeEach;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.myweb.flowmat.domain.workflow.application.publicapi.WorkflowProductionQuery;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemFactsQuery;
+import org.myweb.flowmat.domain.inventory.application.publicapi.StockFactsQuery;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.myweb.flowmat.domain.bom.application.BomService;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.production.domain.entity.ProductionRunItem;
 import org.myweb.flowmat.domain.inventory.application.InventoryCommandService;
 import org.myweb.flowmat.domain.inventory.domain.enums.InventoryTransactionType;
-import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunFinishRequest;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunItemRecordRequest;
 import org.myweb.flowmat.domain.production.api.dto.response.ProductionRunResponse;
@@ -46,10 +48,6 @@ import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.rule.application.FlowRuleEngineService;
-import org.myweb.flowmat.domain.workflow.repository.ProcessIoRepository;
-import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
-import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
-import org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
@@ -60,13 +58,6 @@ class ProductionRunServiceImplTest {
     @Mock private ProductionRunRepository productionRunRepository;
     @Mock private ProductionRunItemRepository productionRunItemRepository;
     @Mock private ProjectAccessService projectAccessService;
-    @Mock private EntityManager entityManager;
-    @Mock private WorkflowRepository workflowRepository;
-    @Mock private WorkflowRevisionRepository workflowRevisionRepository;
-    @Mock private ProcessRepository processRepository;
-    @Mock private ProcessIoRepository processIoRepository;
-    @Mock private ItemRepository itemRepository;
-    @Mock private InventoryRepository inventoryRepository;
     @Mock private InventoryCommandService inventoryCommandService;
     @Mock private FlowRuleEngineService flowRuleEngineService;
     @Mock private IdGenerator idGenerator;
@@ -77,6 +68,21 @@ class ProductionRunServiceImplTest {
     @Mock private ProductionFlowRunAdapter productionFlowRunAdapter;
     @Mock private StockAllocationService stockAllocationService;
     @Mock private RunInstructionService runInstructionService;
+
+    @Mock private WorkflowProductionQuery workflowReferences;
+    @Mock private CatalogItemFactsQuery itemFacts;
+    @Mock private StockFactsQuery stockFacts;
+    @Spy private ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+
+    @BeforeEach
+    void setupReferences() {
+        lenient().when(workflowReferences.lockWorkflow(any(String.class)))
+            .thenAnswer(call -> workflowReferences.findWorkflow(call.getArgument(0)).orElseThrow());
+    }
+    private String facts(Object row) {
+        try { return new ObjectMapper().findAndRegisterModules().writeValueAsString(row); }
+        catch (Exception error) { throw new AssertionError(error); }
+    }
 
     @InjectMocks
     private ProductionRunServiceImpl productionRunService;
@@ -96,7 +102,7 @@ class ProductionRunServiceImplTest {
             new ProductionRunItemRecordRequest(null, null, "inv-1", "item-1", "input", new BigDecimal("500"), null, "g"));
 
         // Stock moves only through the inventory command (conditional atomic UPDATE + history), never a direct save.
-        verify(inventoryRepository, never()).save(any());
+        verify(stockFacts).findActiveStock("inv-1");
         verify(inventoryCommandService).apply(argThat(movement ->
             movement.inventoryId().equals(inventory.getInventoryId())
                 && movement.type() == InventoryTransactionType.PRODUCTION_INPUT
@@ -179,8 +185,8 @@ class ProductionRunServiceImplTest {
         Workflow workflow = new Workflow();
         workflow.setWorkflowId("workflow-1");
         workflow.setProjectId("project-1");
-        lenient().when(workflowRepository.findByWorkflowIdAndDeletedYn("workflow-1", "N"))
-            .thenReturn(Optional.of(workflow));
+        lenient().when(workflowReferences.findWorkflow("workflow-1"))
+            .thenReturn(Optional.of(new WorkflowProductionQuery.Facts(facts(workflow))));
         lenient().when(idGenerator.generate()).thenReturn("virtual-run-1");
         lenient().when(productionRunRepository.save(any(ProductionRun.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
@@ -216,8 +222,8 @@ class ProductionRunServiceImplTest {
         Process process = new Process();
         process.setProcessId("foreign-process");
         process.setWorkflowId("foreign-workflow");
-        when(processIoRepository.findByProcessIoIdAndDeletedYn("foreign-io", "N")).thenReturn(Optional.of(io));
-        when(processRepository.findByProcessIdAndDeletedYn("foreign-process", "N")).thenReturn(Optional.of(process));
+        when(workflowReferences.findProcessIo("foreign-io")).thenReturn(Optional.of(new WorkflowProductionQuery.Facts(facts(io))));
+        when(workflowReferences.findProcess("foreign-process")).thenReturn(Optional.of(new WorkflowProductionQuery.Facts(facts(process))));
 
         assertThrows(BusinessException.class, () -> productionRunService.recordRunItem("run-1",
             new ProductionRunItemRecordRequest(null, "foreign-io", null, "item-1", "input", BigDecimal.ONE, null, "kg")));
@@ -243,8 +249,8 @@ class ProductionRunServiceImplTest {
         io.setProcessId("process-1");
         io.setItemId(portItemId);
         io.setDirection(portDirection);
-        when(processIoRepository.findByProcessIoIdAndDeletedYn("io-1", "N")).thenReturn(Optional.of(io));
-        when(processRepository.findByProcessIdAndDeletedYn("process-1", "N")).thenReturn(Optional.of(process));
+        when(workflowReferences.findProcessIo("io-1")).thenReturn(Optional.of(new WorkflowProductionQuery.Facts(facts(io))));
+        when(workflowReferences.findProcess("process-1")).thenReturn(Optional.of(new WorkflowProductionQuery.Facts(facts(process))));
         lenient().when(unitConverter.toItemUnit(BigDecimal.ONE, "kg", "unit_kg"))
             .thenReturn(new UnitConverter.Conversion(BigDecimal.ONE, "kg", "kg", false));
         lenient().when(idGenerator.generate()).thenReturn("mismatched-item");
@@ -265,7 +271,7 @@ class ProductionRunServiceImplTest {
         item.setItemId("item-1");
         item.setProjectId("project-1");
         item.setUnitId("unit_kg");
-        when(itemRepository.findByItemIdAndDeletedYn("item-1", "N")).thenReturn(Optional.of(item));
+        when(itemFacts.findActiveItem("item-1")).thenReturn(Optional.of(new CatalogItemFactsQuery.Facts(facts(item))));
         return item;
     }
 
@@ -276,7 +282,7 @@ class ProductionRunServiceImplTest {
         inventory.setItemId(itemId);
         inventory.setQuantity(new BigDecimal(quantity));
         inventory.setAvailableQuantity(new BigDecimal(quantity));
-        when(inventoryRepository.findByInventoryIdAndDeletedYn("inv-1", "N")).thenReturn(Optional.of(inventory));
+        when(stockFacts.findActiveStock("inv-1")).thenReturn(Optional.of(new StockFactsQuery.Facts(facts(inventory))));
         return inventory;
     }
 
@@ -291,7 +297,7 @@ class ProductionRunServiceImplTest {
 
         assertEquals("wo-1", run.workOrderId());
         assertEquals("in_progress", order.getWorkOrderStatus());
-        verify(entityManager).lock(any(Workflow.class), eq(LockModeType.PESSIMISTIC_WRITE));
+        verify(workflowReferences).lockWorkflow("workflow-1");
         verify(workOrderRepository).save(order);
     }
 
@@ -321,7 +327,7 @@ class ProductionRunServiceImplTest {
         Workflow workflow = new Workflow();
         workflow.setWorkflowId("workflow-1");
         workflow.setProjectId("project-1");
-        when(workflowRepository.findByWorkflowIdAndDeletedYn("workflow-1", "N")).thenReturn(Optional.of(workflow));
+        when(workflowReferences.findWorkflow("workflow-1")).thenReturn(Optional.of(new WorkflowProductionQuery.Facts(facts(workflow))));
     }
 
     private WorkOrder givenWorkOrder(String status, String workflowId) {
@@ -417,8 +423,8 @@ class ProductionRunServiceImplTest {
         Workflow workflow = new Workflow();
         workflow.setWorkflowId("workflow-1");
         workflow.setProjectId("project-1");
-        lenient().when(workflowRepository.findByWorkflowIdAndDeletedYn("workflow-1", "N"))
-            .thenReturn(Optional.of(workflow));
+        lenient().when(workflowReferences.findWorkflow("workflow-1"))
+            .thenReturn(Optional.of(new WorkflowProductionQuery.Facts(facts(workflow))));
 
         BusinessException exception = assertThrows(BusinessException.class, () -> productionRunService.startRun(
             new ProductionRunStartRequest("project-1", "workflow-1", null, new BigDecimal("-1"), null, null, null, null, null)));
@@ -436,7 +442,7 @@ class ProductionRunServiceImplTest {
         item.setItemId("item-1");
         item.setProjectId("project-1");
         item.setUnitId("unit_kg");
-        lenient().when(itemRepository.findByItemIdAndDeletedYn("item-1", "N")).thenReturn(Optional.of(item));
+        lenient().when(itemFacts.findActiveItem("item-1")).thenReturn(Optional.of(new CatalogItemFactsQuery.Facts(facts(item))));
         lenient().when(unitConverter.toItemUnit(BigDecimal.ONE, "kg", "unit_kg"))
             .thenReturn(new UnitConverter.Conversion(BigDecimal.ONE, "kg", "kg", false));
         lenient().when(productionRunItemRepository.save(any(ProductionRunItem.class)))
@@ -471,7 +477,7 @@ class ProductionRunServiceImplTest {
             () -> productionRunService.recordRunItem("run-1", recordRequest("input"))
         );
 
-        verifyNoInteractions(itemRepository, inventoryRepository, productionRunItemRepository);
+        verifyNoInteractions(itemFacts, stockFacts, productionRunItemRepository);
     }
 
     @Test
@@ -484,7 +490,7 @@ class ProductionRunServiceImplTest {
         );
 
         assertEquals("direction must be 'input' or 'output'.", exception.getMessage());
-        verifyNoInteractions(itemRepository, productionRunItemRepository);
+        verifyNoInteractions(itemFacts, productionRunItemRepository);
     }
 
     private ProductionRun givenRun(String status) {

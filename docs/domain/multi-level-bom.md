@@ -162,6 +162,18 @@
 | D3 | 공통 품목 advisory lock → 헤더 최신 상태/행 잠금. 승인·제출·반려·폐기는 프로젝트 승인 그래프 lock → 품목 → 헤더 순서. 다른 품목의 상호 순환 후보도 동시에 승인 불가 |
 | D4 | 자재 CSV는 초안 lock 뒤 기존 줄·상태를 검증. 동일 자재의 동시 append는 하나만 적용하고 다른 요청은 행 오류와 applied=false. 검사와 삭제/추가는 같은 트랜잭션 |
 
-검증: `BomEffectivityIntegrationTest` 13건, `BomDraftConcurrencyIntegrationTest` 7건(독립 Postgres/Testcontainers), `bom-effectivity.spec.ts` 기간·권한·충돌·정확한 재송신·날짜 경계/결과 해제, `bom-multiple-drafts.spec.ts` 초안 둘과 단일 pending. 브라우저 API는 전부 가짜로 응답하여 개발 DB에 BOM을 넣지 않는다. #44의 Revision locator는 select의 combobox 역할과 정확한 이름으로 수정했다.
+| D5 | `POST /boms/{id}/revisions`의 선택적 UUID requestId를 원본 ID와 함께 불변 생성 키로 사용한다. 같은 작성자의 재송신은 기존 초안의 현재 상태를 반환하며 추가 복사하지 않는다. 다른 작성자 재생·삭제된 초안 재생은 409. 본문 없는 기존 호출은 매번 새 초안을 만드는 호환 동작을 유지한다 |
+| D6 | 화면은 프로젝트/원본별 미확인 UUID를 같은 탭의 sessionStorage에 보존한다. 상세 닫기/재열기와 페이지 새로고침 뒤 네트워크·503 재시도는 같은 키, 확정 4xx 거절/검증된 성공 뒤 새 명령은 새 키. 미확인 생성은 같은 원본의 New revision으로 복구하도록 안내한다. 저장소 차단 때는 현재 페이지의 메모리 재시도만 유지하며, 탭 닫기·저장소 지우기 뒤 복구는 보장하지 않는다. 아래 §2 2bw 참조 |
+
+검증: `BomEffectivityIntegrationTest` 13건, `BomDraftConcurrencyIntegrationTest` 10건(독립 Postgres/Testcontainers), `bom-effectivity.spec.ts` 기간·권한·충돌·정확한 재송신·날짜 경계/결과 해제, `bom-multiple-drafts.spec.ts` 정상·응답 유실·503의 초안 둘과 단일 pending, revision mutation 단위 5건. 브라우저 API는 전부 가짜로 응답하여 개발 DB에 BOM을 넣지 않는다. #44의 Revision locator는 select의 combobox 역할과 정확한 이름으로 수정했다.
 
 남은 연결: Project.timeZone 조회/설정 → 작업지시 plannedStartAt의 프로젝트 날짜 → 승인 기간 overlap 검증과 자동 retire 제거 → 날짜별 반제품 트리/MRP/원가 조회 → 실행에 선택 revision 상속. 이 연결을 끝내기 전 전체 유효일 BOM 기능을 완료로 올리지 않는다. 기존 V1–V55는 수정하지 않는다.
+
+## Revision 미확인 요청의 새로고침 복구 (2026-10-08, §2 2bw)
+
+- 생성 전 requestId를 **같은 브라우저 탭의 sessionStorage**에 보관한다. 프로젝트/원본 ID를 JSON tuple로 나누어 키 충돌을 피한다. 페이지 새로고침 후에도 원본의 New revision을 다시 누르면 같은 requestId로 서버의 기존 초안을 복구한다. 조회나 새로고침만으로 생성 요청을 보내지 않는다.
+- 확정 성공과 확정 4xx 거절 때 해당 requestId만 지운다. 더 오래된 응답이 뒤늦게 와도 새로운 미확인 요청의 키를 지우지 않는다. 성공 응답의 BOM ID·프로젝트·revision 번호가 올바르지 않으면 미확인으로 유지한다. 자동 mutation 반복은 하지 않는다.
+- 저장 내용은 원본/프로젝트별 불투명 요청 ID다. 토큰·쿠키·메모·recipe 내용을 저장하지 않는다. 작성자 권한과 재생은 기존 서버 계약 D5가 검증한다.
+- 브라우저가 저장소 읽기/쓰기를 차단하면 현재 페이지 안의 메모리 재시도는 유지한다. 이 경우 새로고침 복구는 보장하지 않는다. 탭 닫기/저장소 지우기 뒤 복구도 이 계약에 포함하지 않는다. 저장소 제거 실패 때 확정한 키를 현재 페이지에서 다시 쓰지 않도록 tombstone을 남긴다.
+- 재현: 응답 유실→새로고침→New revision이 v2 대신 새 v3를 만들어 실패했다. 수정 후 정상·유실·503·유실/503 뒤 새로고침 5개 모의 UI가 같은 v2를 복구하고, 확정 뒤 다음 요청만 새 v3를 생성한다. 모든 API를 가짜 응답으로 처리하며 개발 DB에는 BOM을 넣지 않는다.
+- receipt 저장소 9건(라인/분기/함수 100%), BOM mutation 6건. 저장소 차단/잘못된 키/제거 실패/늦은 응답과 잘못된 성공 응답도 대조한다.

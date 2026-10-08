@@ -32,6 +32,14 @@ class EquipmentSequenceTest {
     }
 
     @Test
+    void skipsApprovedOrdersWithoutAPlannedEnd() {
+        WorkOrder approved = order("approved", "item-approved", "2030-01-07T08:00:00+09:00",
+            null, WorkOrderStatus.APPROVED);
+
+        assertNull(EquipmentSequence.previous(START, List.of(approved)));
+    }
+
+    @Test
     void returnsNoPriorOrderWhenAllCandidatesHaveInvalidIntervals() {
         WorkOrder malformed = order("malformed", "item-malformed", "2030-01-07T08:00:00+09:00",
             "2030-01-07T07:00:00+09:00", WorkOrderStatus.APPROVED);

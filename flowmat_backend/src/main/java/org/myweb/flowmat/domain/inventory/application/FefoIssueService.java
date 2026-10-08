@@ -12,8 +12,6 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
-import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
 import org.myweb.flowmat.domain.inventory.api.dto.request.FefoIssueRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.response.FefoIssueResponse;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
@@ -45,8 +43,8 @@ public class FefoIssueService {
     private static final String NOT_DELETED = "N";
 
     private final ProjectAccessService projectAccessService;
-    private final ItemRepository itemRepository;
-    private final UnitMasterRepository unitMasterRepository;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
+    private final InventoryCatalogReferences catalogReferences;
     private final UnitConverter unitConverter;
     private final InventoryRepository inventoryRepository;
     private final InventoryTransactionRepository inventoryTransactionRepository;
@@ -58,13 +56,13 @@ public class FefoIssueService {
         String projectId = request.projectId().trim();
         projectAccessService.requireProjectWriteAccess(projectId);
         String actor = projectAccessService.requireCurrentUserId();
-        Item item = itemRepository.findByItemIdAndDeletedYn(request.itemId(), NOT_DELETED)
+        Item item = catalogReferences.item(request.itemId())
             .filter(found -> projectId.equals(found.getProjectId()))
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         if (!"Y".equals(item.getLotManageYn())) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, item.getItemCode() + " is not LOT-tracked; issue from its stock record.");
         }
-        String unit = item.getUnitId() == null ? null : unitMasterRepository.findById(item.getUnitId()).map(u -> u.getUnitCode()).orElse(null);
+        String unit = item.getUnitId() == null ? null : catalogReferences.unitCode(item.getUnitId()).orElse(null);
         String requestId = request.requestId().trim();
         boolean reserve = "reserve".equalsIgnoreCase(request.action() == null ? "" : request.action().trim());
         String referenceType = reserve ? RESERVE_REFERENCE_TYPE : REFERENCE_TYPE;
@@ -103,7 +101,7 @@ public class FefoIssueService {
         Map<String, LotMaster> lots = lotMasterRepository.findAllById(stock.stream().map(Inventory::getLotId).distinct().toList())
             .stream()
             .collect(Collectors.toMap(LotMaster::getLotId, Function.identity()));
-        LocalDate today = LocalDate.now();
+        LocalDate today = projectCalendar.today(projectId);
         List<Inventory> usable = stock.stream()
             .filter(row -> {
                 LotMaster lot = lots.get(row.getLotId());

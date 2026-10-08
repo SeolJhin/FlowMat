@@ -53,6 +53,7 @@ public class StockMovementAnalysisService {
     private static final BigDecimal B_SHARE = new BigDecimal("0.95");
 
     private final InventoryTransactionRepository transactionRepository;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
     private final InventoryRepository inventoryRepository;
     private final LotMasterRepository lotMasterRepository;
     private final CatalogQuery catalogQuery;
@@ -97,7 +98,7 @@ public class StockMovementAnalysisService {
         Map<String, LotMaster> lots = StreamSupport.stream(lotMasterRepository.findAllById(
                 rows.stream().map(Inventory::getLotId).filter(Objects::nonNull).collect(Collectors.toSet())).spliterator(), false)
             .collect(Collectors.toMap(LotMaster::getLotId, Function.identity()));
-        LocalDate today = LocalDate.now();
+        LocalDate today = projectCalendar.today(projectId);
         Map<String, BigDecimal> onHand = new HashMap<>();
         Map<String, BigDecimal> usable = new HashMap<>();
         for (Inventory row : rows) {

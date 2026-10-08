@@ -1,3 +1,4 @@
+import { createRevisionReceipts } from '../lib/revisionReceipts'
 import { errorStatus } from '../../../shared/lib/errorMessage'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { httpClient } from '../../../shared/api/httpClient'
@@ -142,28 +143,30 @@ export function useBomLineMutations(projectId: string) {
   return { add, remove }
 }
 
-// Unconfirmed revision commands survive detail remounts in this browser session. No token or item data is stored.
-const pendingRevisions = new Map<string, string>()
+// Pending request IDs survive reloads in this tab when session storage is available; denied storage falls back to this page. No tokens or recipe contents are stored.
+const pendingRevisions = createRevisionReceipts(() => typeof window === 'undefined' ? null : window.sessionStorage)
 
 export function useBomActionMutation(projectId: string) {
   const onSuccess = useInvalidateBoms(projectId)
   return useMutation({
     mutationFn: async ({ bomId, action, note }: { bomId: string; action: BomAction; note?: string }) => {
       if (action !== 'revisions') return unwrapApiResponse(await httpClient.post<ApiEnvelope<BomDto>>(`${path(bomId)}/${action}`, note ? { note } : {}))
-      const key = `${projectId}|${bomId}`
-      const requestId = pendingRevisions.get(key) ?? crypto.randomUUID()
-      pendingRevisions.set(key, requestId)
+      const requestId = pendingRevisions.requestId(projectId, bomId)
       try {
         const result = unwrapApiResponse(await httpClient.post<ApiEnvelope<BomDto>>(`${path(bomId)}/revisions`, { requestId }))
-        pendingRevisions.delete(key)
+        if (!result || typeof result.bomId !== 'string' || !result.bomId || result.bomId === bomId
+          || result.projectId !== projectId || !Number.isSafeInteger(result.bomVersion) || result.bomVersion < 1)
+          throw new Error('Revision creation response is invalid. Retry New revision to recover the same revision.')
+        pendingRevisions.confirmed(projectId, bomId, requestId)
         return result
       } catch (error) {
         const status = errorStatus(error)
-        if (status != null && status >= 400 && status < 500) pendingRevisions.delete(key)
+        if (status != null && status >= 400 && status < 500) pendingRevisions.confirmed(projectId, bomId, requestId)
         throw error
       }
     },
     onSuccess,
+    retry: false,
   })
 }
 

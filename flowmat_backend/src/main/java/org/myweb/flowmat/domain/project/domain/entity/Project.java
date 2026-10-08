@@ -22,4 +22,7 @@ public class Project extends CreatedUpdatedAuditEntity {
     private String projectStatus;
     private String visibility;
     private String currentWorkflowId;
+    private String timeZone = "Asia/Seoul";
+    private long timeZoneVersion;
+    private String timeZoneUpdatedBy;
 }

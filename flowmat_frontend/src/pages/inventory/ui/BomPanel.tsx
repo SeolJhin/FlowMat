@@ -10,7 +10,7 @@ import {
   type BomAction,
 } from '../../../entities/bom/api/useBoms'
 import type { BomDto, BomLineType, BuildableQuantityDto, ItemDto, UnitDto } from '../../../shared/types/api'
-import { errorMessage } from '../../../shared/lib/errorMessage'
+import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import { BOM_ACTION_LABELS, bomActions, groupByTarget, isEditable } from '../model/bomModel'
 import { shortBy, usableByMaterial } from '../model/buildableModel'
@@ -307,6 +307,9 @@ function BomDetail({
   }
 
   const error = add.error ?? remove.error ?? actionMutation.error
+  const revisionStatus = errorStatus(actionMutation.error)
+  const revisionUnconfirmed = actionMutation.variables?.action === 'revisions' && Boolean(actionMutation.error)
+    && !(revisionStatus != null && revisionStatus >= 400 && revisionStatus < 500)
 
   return (
     <>
@@ -417,6 +420,11 @@ function BomDetail({
         ))}
       </div>
       {error && <p style={{ color: '#dc2626', fontSize: 12, margin: '8px 0 0' }}>{errorMessage(error, 'The BOM change failed.')}</p>}
+      {revisionUnconfirmed && (
+        <p role="status" style={{ fontSize: 12, margin: '8px 0 0' }}>
+          Revision creation is unconfirmed. Retry New revision on this source to recover the same revision.
+        </p>
+      )}
 
       {bom.bomStatus !== 'draft' && (
         <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>

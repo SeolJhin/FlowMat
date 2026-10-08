@@ -29,7 +29,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Changeover times on equipment (docs/domain/equipment-changeover.md). The most specific rule wins: the exact pair, then
+ * Changeover times on equipment (docs/domain/equipment-changeover.md). The exact pair wins, then a configured setup-attribute rule, then
  * from the item to any, then from any to the item, then any to any. Making the same item again needs no changeover
  * unless the exact pair is set.
  */
@@ -48,6 +48,7 @@ public class EquipmentChangeoverService {
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
     private final EntityManager entities;
+    private final EquipmentSetupChangeoverService setupChangeovers;
 
     /** The rule that applies and its time. */
     public record Match(int minutes, String changeoverId) {
@@ -127,6 +128,8 @@ public class EquipmentChangeoverService {
         if (exact.isPresent() || fromItemId.equals(toItemId)) {
             return exact.map(rule -> new Match(rule.getChangeoverMinutes(), rule.getChangeoverId()));
         }
+        Optional<EquipmentSetupChangeoverService.Match> attribute=setupChangeovers.match(equipmentId,fromItemId,toItemId);
+        if(attribute.isPresent())return attribute.map(rule->new Match(rule.minutes(),rule.changeoverId()));
         List<Predicate<EquipmentChangeover>> fallbacks = List.of(
             rule -> fromItemId.equals(rule.getFromItemId()) && rule.getToItemId() == null,
             rule -> rule.getFromItemId() == null && toItemId.equals(rule.getToItemId()),

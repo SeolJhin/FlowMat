@@ -13,7 +13,6 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.api.dto.request.LotCreateRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.response.LotResponse;
 import org.myweb.flowmat.domain.inventory.api.dto.response.LotTraceResponse;
@@ -43,8 +42,9 @@ public class LotServiceImpl implements LotService {
     private final LotMasterRepository lotMasterRepository;
     private final LotTraceRepository lotTraceRepository;
     private final InventoryRepository inventoryRepository;
-    private final ItemRepository itemRepository;
     private final ProjectAccessService projectAccessService;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
+    private final InventoryCatalogReferences catalogReferences;
     private final IdGenerator idGenerator;
 
     @Override
@@ -52,7 +52,7 @@ public class LotServiceImpl implements LotService {
     public LotResponse createLot(LotCreateRequest request) {
         String projectId = request.projectId().trim();
         projectAccessService.requireProjectWriteAccess(projectId);
-        Item item = itemRepository.findByItemIdAndDeletedYn(request.itemId().trim(), NOT_DELETED)
+        Item item = catalogReferences.item(request.itemId().trim())
             .filter(found -> projectId.equals(found.getProjectId()))
             .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "Item does not exist in this project."));
         if (!"Y".equals(item.getLotManageYn())) {
@@ -243,7 +243,7 @@ public class LotServiceImpl implements LotService {
         return toResponse(lot, inventoryRepository.findAllByLotIdAndDeletedYn(lot.getLotId(), NOT_DELETED));
     }
 
-    private static LotResponse toResponse(LotMaster lot, List<Inventory> stock) {
+    private LotResponse toResponse(LotMaster lot, List<Inventory> stock) {
         return new LotResponse(
             lot.getLotId(),
             lot.getProjectId(),
@@ -257,7 +257,7 @@ public class LotServiceImpl implements LotService {
             lot.getProductionRunId(),
             sum(stock, Inventory::getQuantity),
             sum(stock, Inventory::getReservedQuantity),
-            lot.isExpiredOn(LocalDate.now())
+            lot.isExpiredOn(projectCalendar.today(lot.getProjectId()))
         );
     }
 

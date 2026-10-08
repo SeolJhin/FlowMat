@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { answerAuth, mockedLogin, ok } from './support/mockApi'
 
-for (const mode of ['normal', 'lost-reply'] as const) {
+for (const mode of ['normal', 'lost-reply', 'gateway-error', 'lost-reload', 'gateway-reload'] as const) {
 test(`BOM permits several drafts with ${mode} and explains an occupied approval slot`, async ({ page }) => {
   const projectId = 'prj-draft-fixture'
   const product = { itemId: 'product', projectId, itemCode: 'PROD', itemName: 'Product', unitId: 'kg', itemStatus: 'active', lotManageYn: 'N' }
@@ -23,7 +23,11 @@ test(`BOM permits several drafts with ${mode} and explains an occupied approval 
         lines: boms[0].lines.map((line) => ({ ...line, bomLineId: `line-${version}` })) }
       boms.push(created)
       if (command.requestId) receipts.set(command.requestId, created)
-      if (mode === 'lost-reply' && requests.length === 1) return route.abort('failed')
+      if (requests.length === 1) {
+        if (mode === 'lost-reply' || mode === 'lost-reload') return route.abort('failed')
+        if (mode === 'gateway-error' || mode === 'gateway-reload') return route.fulfill({ status: 503, contentType: 'application/json',
+          body: JSON.stringify({ success: false, data: null, message: 'Gateway unavailable' }) })
+      }
       return ok(route, created)
     }
     if (pathname.endsWith('/submit') && request.method() === 'POST') {
@@ -46,9 +50,11 @@ test(`BOM permits several drafts with ${mode} and explains an occupied approval 
   await page.goto(`/projects/${projectId}/inventory?tab=boms`)
   await page.getByRole('row', { name: /v1.*Parallel formula/ }).click()
   await page.getByRole('button', { name: 'New revision', exact: true }).click()
-  if (mode === 'lost-reply') {
-    await expect(page.getByText('Failed to fetch', { exact: true })).toBeVisible()
-    await page.getByRole('button', { name: 'New BOM', exact: true }).click()
+  if (mode !== 'normal') {
+    await expect(page.getByText(mode === 'lost-reply' || mode === 'lost-reload' ? 'Failed to fetch' : 'Gateway unavailable', { exact: true })).toBeVisible()
+    await expect(page.getByRole('status')).toHaveText('Revision creation is unconfirmed. Retry New revision on this source to recover the same revision.')
+    if (mode.endsWith('reload')) await page.reload()
+    else await page.getByRole('button', { name: 'New BOM', exact: true }).click()
     await page.getByRole('row', { name: /v1.*Parallel formula/ }).click()
     await page.getByRole('button', { name: 'New revision', exact: true }).click()
   }
@@ -63,7 +69,7 @@ test(`BOM permits several drafts with ${mode} and explains an occupied approval 
   await expect(page.getByText('Revision 3 is already pending approval for this item.', { exact: true })).toBeVisible()
   expect(boms.map((bom) => bom.bomStatus)).toEqual(['approved', 'draft', 'pending_approval'])
   expect(requests[0].requestId).toEqual(expect.any(String))
-  if (mode === 'lost-reply') expect(requests[1].requestId).toBe(requests[0].requestId)
+  if (mode !== 'normal') expect(requests[1].requestId).toBe(requests[0].requestId)
   expect(requests.at(-1)!.requestId).not.toBe(requests[0].requestId)
 })
 }

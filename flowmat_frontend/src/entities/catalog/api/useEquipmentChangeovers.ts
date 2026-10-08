@@ -44,7 +44,8 @@ export function useEquipmentChangeoverMutations(equipmentId: string) {
   const base = `/equipments/${encodeURIComponent(equipmentId)}/changeovers`
   const onSuccess = (rules: EquipmentChangeoverDto[]) => {
     queryClient.setQueryData(changeoversKey(equipmentId), rules)
-    void queryClient.invalidateQueries({ queryKey: ['work-order-readiness'] })
+    for (const queryKey of [['work-order-readiness'], ['work-order-plan'], ['equipment-load'], ['equipment-setup-preview']])
+      void queryClient.invalidateQueries({ queryKey })
   }
   return {
     add: useMutation({

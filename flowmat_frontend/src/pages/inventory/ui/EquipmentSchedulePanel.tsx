@@ -37,6 +37,9 @@ import {
   type ShiftForm,
 } from '../model/equipmentScheduleModel'
 import { EquipmentChangeovers } from './EquipmentChangeovers'
+import { EquipmentSetupPreviewPanel } from './EquipmentSetupPreviewPanel'
+import { EquipmentSetupChangeoversPanel } from './EquipmentSetupChangeoversPanel'
+import { EquipmentHourlyCostPanel } from './EquipmentHourlyCostPanel'
 import { dateInputValue } from '../model/equipmentLoadModel'
 
 const cell = { padding: '4px 6px' } as const
@@ -284,6 +287,9 @@ export function EquipmentSchedulePanel({ equipment, others = [], onClose }: {
           </table>}
 
         <EquipmentChangeovers equipment={equipment} />
+        <EquipmentSetupChangeoversPanel equipmentId={equipment.equipmentId} projectId={equipment.projectId} />
+        <EquipmentSetupPreviewPanel equipmentId={equipment.equipmentId} projectId={equipment.projectId} />
+        <EquipmentHourlyCostPanel equipmentId={equipment.equipmentId} projectId={equipment.projectId} />
       </>}
     </section>
   )

@@ -8,6 +8,8 @@ import { useUpdateMemberRoleMutation } from '../../../entities/project/api/useUp
 import { useRemoveMemberMutation } from '../../../entities/project/api/useRemoveMemberMutation'
 import type { ProjectMemberDto, ProjectInviteDto } from '../../../shared/types/api'
 
+import { ProjectTimeZonePanel } from './ProjectTimeZonePanel'
+
 const ROLES = ['viewer', 'editor'] as const
 
 const sectionStyle: React.CSSProperties = {
@@ -292,6 +294,7 @@ export function ProjectSettingsRoute() {
         <span style={{ fontSize: 12, opacity: 0.5 }}>{projectId}</span>
       </header>
 
+      <ProjectTimeZonePanel key={projectId} projectId={projectId} />
       <MembersPanel projectId={projectId} />
       <InvitesPanel projectId={projectId} />
     </div>

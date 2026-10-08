@@ -26,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class AllocatedStockTransferService {
     private final AllocationTransferCommand allocations;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
     private final InventoryRepository stocks;
     private final InventoryTransactionRepository transactions;
     private final LotMasterRepository lots;
@@ -56,7 +57,7 @@ public class AllocatedStockTransferService {
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         if (stock.getLotId() != null) {
             var lot = lots.findById(stock.getLotId()).orElseThrow(() -> new BusinessException(ErrorCode.CONFLICT, "The allocated LOT is missing."));
-            if (!LotStatus.fromCode(lot.getLotStatus()).usable() || lot.isExpiredOn(LocalDate.now())) {
+            if (!LotStatus.fromCode(lot.getLotStatus()).usable() || lot.isExpiredOn(projectCalendar.today(project))) {
                 throw new BusinessException(ErrorCode.CONFLICT, "An unavailable or expired LOT cannot be picked for production.");
             }
         }

@@ -17,8 +17,6 @@ import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.domain.entity.UnitMaster;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
-import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
 import org.myweb.flowmat.domain.inventory.api.dto.response.ReorderLineResponse;
 import org.myweb.flowmat.domain.inventory.api.dto.response.StockAlertResponse;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
@@ -50,10 +48,10 @@ public class StockAlertService {
 
     private final StockAlertRepository stockAlertRepository;
     private final InventoryRepository inventoryRepository;
-    private final ItemRepository itemRepository;
-    private final UnitMasterRepository unitMasterRepository;
     private final LotMasterRepository lotMasterRepository;
     private final ProjectAccessService projectAccessService;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
+    private final InventoryCatalogReferences catalogReferences;
     private final IdGenerator idGenerator;
 
     /** How many days ahead of a LOT's expiry date its stock raises an expiry alert. */
@@ -78,7 +76,7 @@ public class StockAlertService {
 
         // Stock of a LOT that expires soon, or already has: the date moves on by itself, so the sweep keeps this current.
         LotMaster lot = inventory.getLotId() == null ? null : lotMasterRepository.findById(inventory.getLotId()).orElse(null);
-        LocalDate today = LocalDate.now();
+        LocalDate today = projectCalendar.today(inventory.getProjectId());
         long daysLeft = lot == null || lot.getExpiryDate() == null ? Long.MAX_VALUE : ChronoUnit.DAYS.between(today, lot.getExpiryDate());
         boolean expiring = active && onHand.signum() > 0 && daysLeft <= expiryWarningDays;
         sync(inventory, StockAlert.EXPIRY, expiring, BigDecimal.valueOf(expiryWarningDays), BigDecimal.valueOf(Math.min(daysLeft, 99_999)),
@@ -107,13 +105,11 @@ public class StockAlertService {
             : stockAlertRepository.findTop200ByProjectIdOrderByTriggeredAtDesc(projectId);
         Map<String, Inventory> rows = byId(inventoryRepository.findAllById(ids(alerts.stream().map(StockAlert::getInventoryId))),
             Inventory::getInventoryId);
-        Map<String, Item> items = byId(itemRepository.findAllById(ids(alerts.stream().map(StockAlert::getItemId))), Item::getItemId);
+        Map<String, Item> items = byId(catalogReferences.items(ids(alerts.stream().map(StockAlert::getItemId))), Item::getItemId);
         Map<String, String> lotNos = StreamSupport.stream(
                 lotMasterRepository.findAllById(ids(rows.values().stream().map(Inventory::getLotId))).spliterator(), false)
             .collect(Collectors.toMap(LotMaster::getLotId, LotMaster::getLotNo, (first, second) -> first));
-        Map<String, String> units = StreamSupport.stream(
-                unitMasterRepository.findAllById(ids(items.values().stream().map(Item::getUnitId))).spliterator(), false)
-            .collect(Collectors.toMap(UnitMaster::getUnitId, UnitMaster::getUnitCode, (first, second) -> first));
+        Map<String, String> units = catalogReferences.unitCodes(ids(items.values().stream().map(Item::getUnitId)));
         return alerts.stream().map(alert -> {
             Inventory row = rows.get(alert.getInventoryId());
             Item item = items.get(alert.getItemId());
@@ -147,7 +143,7 @@ public class StockAlertService {
     @Transactional(readOnly = true)
     public List<ReorderLineResponse> reorderList(String projectId) {
         projectAccessService.requireProjectReadAccess(projectId);
-        List<Item> watched = itemRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(projectId, NOT_DELETED).stream()
+        List<Item> watched = catalogReferences.projectItems(projectId).stream()
             .filter(item -> item.getSafetyStockQty() != null && item.getSafetyStockQty().signum() > 0)
             // An inactive or discontinued item takes no new stock, so it is not suggested for ordering.
             .filter(ItemStatusRule::isActive)
@@ -156,7 +152,7 @@ public class StockAlertService {
             return List.of();
         }
         List<Inventory> rows = inventoryRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(projectId, NOT_DELETED);
-        LocalDate today = LocalDate.now();
+        LocalDate today = projectCalendar.today(projectId);
         Map<String, LotMaster> lots = byId(lotMasterRepository.findAllById(ids(rows.stream().map(Inventory::getLotId))), LotMaster::getLotId);
         Map<String, BigDecimal> usable = new java.util.HashMap<>();
         for (Inventory row : rows) {
@@ -169,9 +165,7 @@ public class StockAlertService {
             }
             usable.merge(row.getItemId(), zeroIfNull(row.getAvailableQuantity()), BigDecimal::add);
         }
-        Map<String, String> units = StreamSupport.stream(
-                unitMasterRepository.findAllById(ids(watched.stream().map(Item::getUnitId))).spliterator(), false)
-            .collect(Collectors.toMap(UnitMaster::getUnitId, UnitMaster::getUnitCode, (first, second) -> first));
+        Map<String, String> units = catalogReferences.unitCodes(ids(watched.stream().map(Item::getUnitId)));
         return watched.stream()
             .map(item -> {
                 BigDecimal available = usable.getOrDefault(item.getItemId(), BigDecimal.ZERO);

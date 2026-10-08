@@ -44,6 +44,7 @@ public class ExpiredStockService {
     private static final String NOT_DELETED = "N";
 
     private final ProjectAccessService projectAccessService;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
     private final LotMasterRepository lotMasterRepository;
     private final InventoryRepository inventoryRepository;
     private final InventoryTransactionRepository inventoryTransactionRepository;
@@ -72,7 +73,7 @@ public class ExpiredStockService {
             return replay(previous);
         }
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = projectCalendar.today(projectId);
         List<LotMaster> lots = chosenLots(projectId, request.lotIds(), today);
         String note = request.note() == null || request.note().isBlank() ? "Expired stock written off" : request.note().trim();
         List<ExpiredWriteOffResponse.Line> lines = new ArrayList<>();

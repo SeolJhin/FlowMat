@@ -6,6 +6,7 @@ public record ProjectResponse(
     String projectDesc,
     String projectStatus,
     String visibility,
-    String currentWorkflowId
+    String currentWorkflowId,
+    String timeZone
 ) {
 }

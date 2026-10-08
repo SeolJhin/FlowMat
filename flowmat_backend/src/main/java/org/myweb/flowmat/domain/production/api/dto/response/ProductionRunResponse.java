@@ -15,6 +15,7 @@ public record ProductionRunResponse(
     BigDecimal actualOutputQty,
     String workOrderId,
     String bomId,
-    Integer bomVersion
+    Integer bomVersion,
+    java.time.OffsetDateTime actualEndAt
 ) {
 }

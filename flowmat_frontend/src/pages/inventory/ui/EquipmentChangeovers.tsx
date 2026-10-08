@@ -50,7 +50,7 @@ export function EquipmentChangeovers({ equipment }: { equipment: EquipmentDto })
     <div role="group" aria-label="Changeovers" style={{ display: 'grid', gap: 8 }}>
       <h4 style={{ margin: 0 }}>Changeovers</h4>
       <span className="inspector-hint">
-        Time to switch from making one item to the next. The most specific rule applies; making the same item again needs none
+        Time to switch from making one item to the next. Exact item pairs apply before attribute rules, item wildcards and the default; making the same item again needs none
         unless that pair is set.
       </span>
       {rulesQuery.isError && <p role="alert">{errorMessage(rulesQuery.error)}</p>}
@@ -72,7 +72,7 @@ export function EquipmentChangeovers({ equipment }: { equipment: EquipmentDto })
       {update.isError && <p role="alert">{errorMessage(update.error)}</p>}
       {remove.isError && <p role="alert">{errorMessage(remove.error)}</p>}
       {rules.length === 0
-        ? <p className="inspector-hint">No changeover times set; switching items takes no extra time.</p>
+        ? <p className="inspector-hint">No changeover times set for item pairs or the default.</p>
         : <table aria-label="Changeover list" style={{ borderCollapse: 'collapse', width: '100%', textAlign: 'left' }}>
           <thead><tr><th style={cell}>From</th><th style={cell}>To</th><th style={cell}>Time</th><th style={cell}>Note</th>
             <th style={cell}>Actions</th></tr></thead>

@@ -20,6 +20,7 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.application.EquipmentScheduleService;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogEquipmentView;
+import org.myweb.flowmat.domain.catalog.application.publicapi.EquipmentCostQuery;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.catalog.application.publicapi.EquipmentWindow;
 import org.myweb.flowmat.domain.production.api.dto.response.EquipmentLoadResponse;
@@ -52,6 +53,7 @@ public class EquipmentLoadService {
     private final WorkOrderRepository workOrderRepository;
     private final ProductionRunRepository productionRunRepository;
     private final CatalogQuery catalogQuery;
+    private final EquipmentCostQuery equipmentCosts;
     private final ProjectAccessService projectAccessService;
 
     public EquipmentLoadResponse load(String projectId, String from, String to) {
@@ -81,9 +83,11 @@ public class EquipmentLoadService {
             .forEach(item -> itemCodes.put(item.itemId(), item.itemCode()));
         Map<String, List<WorkOrder>> byEquipment = orders.stream().collect(Collectors.groupingBy(WorkOrder::getEquipmentId));
 
+        Map<String, BigDecimal> hourlyCosts = equipmentCosts.findHourlyCosts(projectId, byEquipment.keySet());
+
         List<EquipmentLoadResponse.Row> rows = catalogQuery.findProjectEquipments(projectId).stream()
             .sorted(Comparator.comparing(CatalogEquipmentView::label, String.CASE_INSENSITIVE_ORDER))
-            .map(equipment -> row(equipment, byEquipment.getOrDefault(equipment.equipmentId(), List.of()), start, end, produced, itemCodes))
+            .map(equipment -> row(equipment, byEquipment.getOrDefault(equipment.equipmentId(), List.of()), start, end, produced, itemCodes, hourlyCosts.get(equipment.equipmentId())))
             .toList();
         return new EquipmentLoadResponse(start, end, rows);
     }
@@ -94,7 +98,8 @@ public class EquipmentLoadService {
         OffsetDateTime from,
         OffsetDateTime to,
         Map<String, BigDecimal> produced,
-        Map<String, String> itemCodes
+        Map<String, String> itemCodes,
+        BigDecimal hourlyCost
     ) {
         EquipmentWindow window = window(equipment.equipmentId(), from, to);
         BigDecimal rate = equipment.capacityPerHour() != null && equipment.capacityPerHour().signum() > 0
@@ -140,7 +145,7 @@ public class EquipmentLoadService {
             inWindowOrders.add(order);
             shown.add(new EquipmentLoadResponse.Order(order.getWorkOrderId(), order.getWorkOrderNumber(), order.getWorkOrderTitle(),
                 order.getWorkOrderStatus(), order.getTargetItemId(), itemCodes.get(order.getTargetItemId()), start, end, remaining,
-                changeover, needed, inWindow));
+                changeover, needed, inWindow, setupCost(changeover, hourlyCost)));
         }
         BigDecimal available = window.availableHours();
         BigDecimal percent = available.signum() > 0 ? planned.multiply(HUNDRED).divide(available, 1, RoundingMode.HALF_UP) : null;
@@ -154,6 +159,13 @@ public class EquipmentLoadService {
     private EquipmentWindow window(String equipmentId, OffsetDateTime from, OffsetDateTime to) {
         return catalogQuery.equipmentWindow(equipmentId, from, to)
             .orElse(new EquipmentWindow(false, BigDecimal.ZERO, BigDecimal.ZERO));
+    }
+
+    /** Estimate for the whole displayed order, using exact minutes and the current planning rate. */
+    private static BigDecimal setupCost(Integer minutes, BigDecimal rate) {
+        if (minutes == null) return null;
+        if (minutes == 0) return BigDecimal.ZERO.setScale(4);
+        return rate == null ? null : rate.multiply(BigDecimal.valueOf(minutes)).divide(BigDecimal.valueOf(60), 4, RoundingMode.HALF_UP);
     }
 
     /** Production time for what is left plus the changeover; null without a quantity or a capacity per hour. */

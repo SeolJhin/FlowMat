@@ -67,7 +67,9 @@ public record EquipmentLoadResponse(
         /** Production time for what is left plus the changeover; null when it cannot be worked out. */
         BigDecimal neededHours,
         /** The part of the needed hours that falls in the window. */
-        BigDecimal hoursInWindow
+        BigDecimal hoursInWindow,
+        /** Whole-order changeover minutes / 60 × current equipment rate; null if unknown. Not actual or material cost. */
+        BigDecimal setupCostEstimate
     ) {
     }
 }

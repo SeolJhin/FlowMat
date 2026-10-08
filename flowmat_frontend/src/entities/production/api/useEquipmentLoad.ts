@@ -19,6 +19,8 @@ export interface EquipmentLoadOrderDto {
   /** Production time plus changeover; null without a quantity or a capacity per hour. */
   neededHours: number | null
   hoursInWindow: number | null
+  /** Whole-order setup at the current hourly rate, separate from actual and material cost. */
+  setupCostEstimate?: number | null
 }
 
 export interface EquipmentLoadRowDto {

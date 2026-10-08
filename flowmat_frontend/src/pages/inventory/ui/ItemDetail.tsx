@@ -1,3 +1,4 @@
+import { ItemSetupAttributesPanel } from './ItemSetupAttributesPanel'
 import { useBomWhereUsedQuery, useBomsQuery, useBuildableBomsQuery } from '../../../entities/bom/api/useBoms'
 import { useItemsQuery } from '../../../entities/catalog/api/useItemsQuery'
 import { useItemCostHistoryQuery } from '../../../entities/catalog/api/useItemCostHistory'
@@ -104,6 +105,8 @@ export function ItemDetail({
           ))}
         </dl>
       )}
+
+      <ItemSetupAttributesPanel itemId={item.itemId} projectId={projectId} />
 
       {costHistory.length > 0 && (
         <div aria-label="Unit cost history" style={block}>

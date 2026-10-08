@@ -77,8 +77,7 @@ public class EquipmentScheduleService {
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
 
-    @Value("${app.planning.time-zone:Asia/Seoul}")
-    private String timeZone;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
 
     /**
      * Working time in a window: hours with a calendar, hours down inside them, and what is left. {@code holidays} are the
@@ -503,7 +502,7 @@ public class EquipmentScheduleService {
         if (seconds <= 0) {
             throw new IllegalArgumentException("seconds must be positive.");
         }
-        ZoneId zone = zone();
+        ZoneId zone = zone(equipment.getProjectId());
         Instant first = null;
         long left = seconds;
         for (Span span : available(equipment, from, from.plus(LONGEST_WINDOW))) {
@@ -559,7 +558,7 @@ public class EquipmentScheduleService {
      * calendar's, holiday or not (D4).
      */
     private Shifts shifts(List<EquipmentCalendar> calendar, Equipment equipment, Instant start, Instant end) {
-        ZoneId zone = zone();
+        ZoneId zone = zone(equipment.getProjectId());
         LocalDate first = start.atZone(zone).toLocalDate().minusDays(1);
         LocalDate last = end.atZone(zone).toLocalDate();
         Set<LocalDate> holidays = holidayRepository.findAllByProjectIdAndHolidayDateBetweenAndDeletedYn(equipment.getProjectId(),
@@ -654,7 +653,7 @@ public class EquipmentScheduleService {
                     override.getReason(), override.getUpdatedBy(), override.getUpdatedAt());
             })
             .toList();
-        return new EquipmentScheduleResponse(equipment.getEquipmentId(), zone().getId(), calendar, downtimes, days);
+        return new EquipmentScheduleResponse(equipment.getEquipmentId(), zone(equipment.getProjectId()).getId(), calendar, downtimes, days);
     }
 
     private Equipment findEquipment(String equipmentId) {
@@ -662,8 +661,8 @@ public class EquipmentScheduleService {
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
-    private ZoneId zone() {
-        return ZoneId.of(timeZone);
+    private ZoneId zone(String projectId) {
+        return projectCalendar.zone(projectId);
     }
 
     private static TreeSet<Integer> workDays(EquipmentCalendar calendar) {

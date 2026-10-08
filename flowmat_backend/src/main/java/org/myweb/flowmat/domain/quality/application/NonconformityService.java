@@ -61,6 +61,7 @@ public class NonconformityService {
     private static final String NOT_DELETED = "N";
 
     private final NonconformityRepository nonconformityRepository;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
     private final NonconformityDefectRepository linkRepository;
     private final CorrectiveActionRepository actionRepository;
     private final DefectLogRepository defectLogRepository;
@@ -376,8 +377,10 @@ public class NonconformityService {
         Map<String, LotView> lots = lotQuery.findLots(distinct(Stream.concat(
             ncrs.stream().map(Nonconformity::getLotId), defects.values().stream().map(DefectLog::getLotId))));
         Map<String, ProductionRunView> runs = productionRunQuery.findRuns(distinct(ncrs.stream().map(Nonconformity::getProductionRunId)));
-        LocalDate today = LocalDate.now();
+        Map<String, LocalDate> businessDates = ncrs.stream().map(Nonconformity::getProjectId).distinct()
+            .collect(Collectors.toMap(Function.identity(), projectCalendar::today));
         return ncrs.stream().map(ncr -> {
+            LocalDate today = businessDates.get(ncr.getProjectId());
             List<NonconformityResponse.LinkedDefect> linked = links.getOrDefault(ncr.getNonconformityId(), List.of()).stream()
                 .map(link -> defects.get(link.getDefectLogId()))
                 .filter(Objects::nonNull)

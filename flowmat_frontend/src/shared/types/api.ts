@@ -48,6 +48,8 @@ export interface ProductionRunDto {
   plannedOutputQty: number
   actualOutputQty: number | null
   workOrderId: string | null
+  /** Original server completion instant; legacy finished records may lack it. */
+  actualEndAt?: string | null
   /** BOM revision frozen onto the run at start, if any. */
   bomId: string | null
   bomVersion: number | null

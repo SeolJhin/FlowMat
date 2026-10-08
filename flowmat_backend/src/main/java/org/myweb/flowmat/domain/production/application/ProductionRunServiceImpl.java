@@ -4,8 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.LockModeType;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
@@ -23,13 +21,11 @@ import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
 import org.myweb.flowmat.domain.bom.application.BomService;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.application.InventoryCommandService;
 import org.myweb.flowmat.domain.inventory.application.InventoryMovement;
 import org.myweb.flowmat.domain.inventory.application.LotService;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.domain.enums.InventoryTransactionType;
-import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunFinishRequest;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunItemRecordRequest;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunStartRequest;
@@ -49,11 +45,9 @@ import org.myweb.flowmat.domain.rule.application.RuleTarget;
 import org.myweb.flowmat.domain.workflow.domain.entity.Process;
 import org.myweb.flowmat.domain.workflow.domain.entity.ProcessIo;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
-import org.myweb.flowmat.domain.workflow.domain.entity.WorkflowRevision;
-import org.myweb.flowmat.domain.workflow.repository.ProcessIoRepository;
-import org.myweb.flowmat.domain.workflow.repository.ProcessRepository;
-import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
-import org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository;
+import org.myweb.flowmat.domain.workflow.application.publicapi.WorkflowProductionQuery;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemFactsQuery;
+import org.myweb.flowmat.domain.inventory.application.publicapi.StockFactsQuery;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
@@ -75,14 +69,10 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     private final ProductionRunRepository productionRunRepository;
     private final ProductionRunItemRepository productionRunItemRepository;
     private final ProjectAccessService projectAccessService;
-    private final EntityManager entityManager;
-    private final WorkflowRepository workflowRepository;
-    private final WorkflowRevisionRepository workflowRevisionRepository;
     private final ObjectMapper objectMapper;
-    private final ProcessRepository processRepository;
-    private final ProcessIoRepository processIoRepository;
-    private final ItemRepository itemRepository;
-    private final InventoryRepository inventoryRepository;
+    private final WorkflowProductionQuery workflowReferences;
+    private final CatalogItemFactsQuery itemFacts;
+    private final StockFactsQuery stockFacts;
     private final InventoryCommandService inventoryCommandService;
     private final FlowRuleEngineService flowRuleEngineService;
     private final IdGenerator idGenerator;
@@ -124,8 +114,9 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         Workflow workflow = findActiveWorkflow(request.workflowId());
         validateSameProject(request.projectId(), workflow.getProjectId());
         // Publish and retire lock the workflow; resolve its revision under the same lock.
-        entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
-        WorkflowRevision workflowRevision = resolveWorkflowRevision(workflow.getWorkflowId(), request.workflowRevisionId());
+        workflow = readFacts(workflowReferences.lockWorkflow(workflow.getWorkflowId()).json(), Workflow.class);
+        validateSameProject(request.projectId(), workflow.getProjectId());
+        WorkflowProductionQuery.Revision workflowRevision = resolveWorkflowRevision(workflow.getWorkflowId(), request.workflowRevisionId());
         WorkOrder workOrder = findRunnableWorkOrder(request.workOrderId(), request.projectId(), workflow);
         String targetItemId = trimToNull(request.targetItemId());
         if (targetItemId == null && workOrder != null) {
@@ -162,7 +153,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         run.setProductionRunId(idGenerator.generate());
         run.setProjectId(request.projectId().trim());
         run.setWorkflowId(workflow.getWorkflowId());
-        run.setWorkflowRevisionId(workflowRevision != null ? workflowRevision.getWorkflowRevisionId() : null);
+        run.setWorkflowRevisionId(workflowRevision != null ? workflowRevision.workflowRevisionId() : null);
         run.setRunNumber(generateRunNumber());
         run.setRunType(runType);
         run.setRunStatus("running");
@@ -515,6 +506,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         runInstructionService.requireCompleteToFinish(run);
         evaluateRunFinishRules(run, request);
         run.setRunStatus("finished");
+        run.setActualEndAt(OffsetDateTime.now(java.time.ZoneOffset.UTC).truncatedTo(java.time.temporal.ChronoUnit.MICROS));
         if (request != null && request.actualOutputQty() != null) {
             run.setActualOutputQty(request.actualOutputQty());
         }
@@ -524,18 +516,23 @@ public class ProductionRunServiceImpl implements ProductionRunService {
         return toResponse(savedRun);
     }
 
+    private <T> T readFacts(String json, Class<T> type) {
+        try { return objectMapper.readValue(json, type); }
+        catch (JsonProcessingException error) { throw new IllegalStateException("Stored production reference facts are invalid.", error); }
+    }
+
     private Workflow findActiveWorkflow(String workflowId) {
-        return workflowRepository.findByWorkflowIdAndDeletedYn(workflowId, NOT_DELETED)
+        return workflowReferences.findWorkflow(workflowId).map(facts -> readFacts(facts.json(), Workflow.class))
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
     private Process findActiveProcess(String processId) {
-        return processRepository.findByProcessIdAndDeletedYn(processId, NOT_DELETED)
+        return workflowReferences.findProcess(processId).map(facts -> readFacts(facts.json(), Process.class))
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
     private ProcessIo findActiveProcessIo(String processIoId) {
-        return processIoRepository.findByProcessIoIdAndDeletedYn(processIoId, NOT_DELETED)
+        return workflowReferences.findProcessIo(processIoId).map(facts -> readFacts(facts.json(), ProcessIo.class))
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
@@ -563,12 +560,12 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             return new RunProcessSelection(process, io);
         }
 
-        WorkflowRevision revision = workflowRevisionRepository
-            .findByWorkflowRevisionIdAndWorkflowId(run.getWorkflowRevisionId(), run.getWorkflowId())
+        WorkflowProductionQuery.Revision revision = workflowReferences
+            .findRevision(run.getWorkflowRevisionId(), run.getWorkflowId())
             .orElseThrow(() -> new IllegalStateException("Run refers to a missing workflow revision."));
         JsonNode snapshot;
         try {
-            snapshot = objectMapper.readTree(revision.getSnapshotJson());
+            snapshot = objectMapper.readTree(revision.snapshotJson());
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Stored workflow revision snapshot is invalid.", exception);
         }
@@ -626,12 +623,12 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     }
 
     private Item findActiveItem(String itemId) {
-        return itemRepository.findByItemIdAndDeletedYn(itemId, NOT_DELETED)
+        return itemFacts.findActiveItem(itemId).map(facts -> readFacts(facts.json(), Item.class))
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
     private Inventory findActiveInventory(String inventoryId) {
-        return inventoryRepository.findByInventoryIdAndDeletedYn(inventoryId, NOT_DELETED)
+        return stockFacts.findActiveStock(inventoryId).map(facts -> readFacts(facts.json(), Inventory.class))
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
@@ -679,21 +676,21 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             run.getActualOutputQty(),
             run.getWorkOrderId(),
             run.getBomId(),
-            run.getBomVersion()
+            run.getBomVersion(),
+            run.getActualEndAt()
         );
     }
 
-    private WorkflowRevision resolveWorkflowRevision(String workflowId, String requestedRevisionId) {
+    private WorkflowProductionQuery.Revision resolveWorkflowRevision(String workflowId, String requestedRevisionId) {
         if (requestedRevisionId == null || requestedRevisionId.isBlank()) {
-            return workflowRevisionRepository
-                .findTopByWorkflowIdAndStatusOrderByRevisionNoDesc(workflowId, "published")
+            return workflowReferences.latestPublishedRevision(workflowId)
                 .orElse(null);
         }
-        WorkflowRevision revision = workflowRevisionRepository
-            .findByWorkflowRevisionIdAndWorkflowId(requestedRevisionId.trim(), workflowId)
+        WorkflowProductionQuery.Revision revision = workflowReferences
+            .findRevision(requestedRevisionId.trim(), workflowId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                 "Workflow revision was not found for this workflow."));
-        if (!"published".equals(revision.getStatus())) {
+        if (!"published".equals(revision.status())) {
             throw new BusinessException(ErrorCode.CONFLICT,
                 "Retired workflow revisions cannot start new runs.");
         }

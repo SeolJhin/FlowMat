@@ -1,5 +1,14 @@
 # Agent 인계 (세션 1 구역)
 
+> **2026-10-08 최신 상태:** 사용자 HEAD 0a38981 원격 backend/frontend/browser/security CI 성공. 2bq/2br 인계 보완·2bs 설비 원가/추정·2bt 다차원 setup 속성·2bu 계획 갱신·2bv 저장 규칙 미리보기·2bw revision 새로고침 복구 완료. 최종 전체 격리 백엔드 1,165 실패·오류·건너뜀 0·라인 81.89%·분기 68.70%·기준/빌드, 프런트 572·타입·기존 JS/JSX lint·빌드. 전체 기본 모의 E2E 110 통과/16 의도적 제외. V56/V57은 SQL BEGIN/ROLLBACK·Testcontainers에만 적용. 개발 DB BOM·기존 V1–V55·기존 서버·브랜치/커밋/푸시 변경 없음. 다음 V58(직전 최고 재확인). 재개 시 존재한 EquipmentSequence·테스트·equipment-changeover 문서·package-lock 변경 보존. project 시간대/workflow actualEndAt/D2 및 첨부 공용 storage/config/build.gradle 범위 회신 대기. 검증용 4189 프런트와 포트 없는 flowmat-setup-rehearsal-20261008 컨테이너는 소유 확인 후 종료·제거했다. 사용자 서버는 건드리지 않았다.
+
+## 2026-10-08 검증 산출물과 다음 범위
+
+- 산출물: `C:/Users/Public/Documents/ESTsoft/CreatorTemp/flowmat-cost-20261005/`의 `with-preview-validation-20261008.json`, `with-preview-jacoco-20261008.xml`, `full-with-preview-validation-20261008.log`, `frontend-revision-reload-tests-20261008.log`, `frontend-revision-reload-build-20261008.log`, `all-mock-revision-reload-20261008.log`. 브라우저 trace·스크린샷은 `all-mock-revision-reload-20261008/`.
+- 원격 CI 성공은 기존 HEAD 0a38981에 대한 결과다. 이번 커밋 전 구현은 로컬 격리 전체 검증을 통과했으며 원격에는 보내지 않았다.
+- 다음 구현: 프로젝트 시간대 설정/공개 Query, workflow 실제 마감 시각, 지침 첨부 Local-S3. 정책은 이미 승인됐으며 공유 영역 수정 범위 회신을 기다린다. D2 품목 삭제 집계는 확인 전 15/15로 표시하지 않는다. 새 일을 임의로 추가하거나 미응답을 승인으로 간주하지 않는다.
+- 코드는 스테이징하지 않는다. 이 작업의 도메인 계약·상태 문서만 스테이징한다. 재개 시 존재한 `docs/domain/equipment-changeover.md`는 다른 작업자의 변경이므로 제외한다.
+
 > **2026-10-06 부산물 가치 후속:** 2bp 구현·검증 완료. 전체 격리 백엔드 1,128 실패·오류·건너뜀 0·라인 81.60%·분기 68.09%·기준/빌드, 프런트 476·타입·기존 lint·빌드, 전체 기본 모의 브라우저 99 통과/16 제외 및 조회 복구 추가 뒤 관련 5 통과. 재료비 차감 없이 고정 BOM 부산물 실제량 × D+ 가격을 별도 표시, 폐기 비용/배출 모델은 미구현. 다음은 2bq 전환 규칙 삭제·수정 동시성 재현. BOM revision 생성 requestId는 아직 없으며 응답 유실 방어 후속 필요. 프로젝트 시간대/마감 공개 API 허가 답변 대기 유지. 개발 DB·기존 서버·V1–V55 변경 없음.
 
 > **2026-10-06 13:52 최신 상태:** 사용자 커밋 d22d37f의 backend/frontend/security CI 성공, browser #44는 BOM period Revision locator 7건만 실패(90 통과·16 제외). combobox 이름으로 수정, 기간/미리보기·여러 draft 모의 브라우저 9건 통과. 2bn 기간 명령·명시 날짜 Query 기반과 2bo 여러 draft/단일 pending·승인 그래프/CSV 동시성 방어 구현. 전체 격리 백엔드 1,119건 실패·오류·건너뜀 0·라인 81.53%·분기 67.92%·커버리지 기준/빌드 통과. 프런트 476건·타입·기존 lint·빌드, 전체 기본 모의 브라우저 98 통과/16 의도적 제외; 미리보기 재조회 보완 후 관련 9 재통과. Stage B 자동 동결 82→80. V55까지 기존 파일(수정 금지), 다음 V56 직전 재확인. V52–V55 개발 DB 미적용. 기간별 다중 승인·계획일 revision 선택·팬텀은 아직 미완료. 프로젝트 시간대 수정 범위와 workflow actualEndAt 공개 API 허가 답변 대기. 이어서 승인된 별도 부산물 가치 표시를 구현 중. 커밋·푸시·개발 DB BOM 삽입 없음.
@@ -68,7 +77,7 @@
 ## 4. 지킬 것
 
 - 브랜치 생성·전환, 커밋, 푸시를 하지 않는다. 변경은 작업 트리에만 남긴다.
-- 적용된 Flyway 마이그레이션을 고치지 않는다. 새 마이그레이션은 V56부터(추가 직전 최고 버전 재확인), psql `BEGIN; … ROLLBACK;`으로 먼저 돌려 본 뒤 만든다. devtools가 컴파일 때 새 마이그레이션을 바로 적용하므로 완성 전 파일을 두지 않는다.
+- 적용된 Flyway 마이그레이션을 고치지 않는다. 새 마이그레이션은 V58부터(추가 직전 최고 버전 재확인), psql `BEGIN; … ROLLBACK;`으로 먼저 돌려 본 뒤 만든다. devtools가 컴파일 때 새 마이그레이션을 바로 적용하므로 완성 전 파일을 두지 않는다.
 - dev DB(세션 DB 포함)에 BOM을 넣지 않는다. BOM 화면은 가짜 API 스펙(`e2e/support/mockApi.ts`)으로 확인한다.
 - 다른 세션의 dev 서버·컨테이너를 끄거나 재설정하지 않는다. 끌 때는 포트와 시작 시각으로 자기 프로세스인지 확인한다.
 - 토큰·쿠키 값을 문서나 보고에 쓰지 않는다. `.gitignore`는 바꾸지 않는다.

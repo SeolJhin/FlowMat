@@ -39,6 +39,7 @@ public class InventoryCommandService {
     private static final String NOT_DELETED = "N";
 
     private final InventoryRepository inventoryRepository;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
     private final InventoryTransactionRepository inventoryTransactionRepository;
     private final LotMasterRepository lotMasterRepository;
     private final IdGenerator idGenerator;
@@ -61,7 +62,7 @@ public class InventoryCommandService {
             }
             // Expired stock can still be issued or adjusted away, but not used in production or held for it.
             if (lot != null && (type == InventoryTransactionType.PRODUCTION_INPUT || type == InventoryTransactionType.RESERVE)
-                && lot.isExpiredOn(LocalDate.now())) {
+                && lot.isExpiredOn(projectCalendar.today(before.getProjectId()))) {
                 throw new BusinessException(ErrorCode.CONFLICT, "LOT " + lot.getLotNo() + " expired on " + lot.getExpiryDate()
                     + "; it cannot be used or reserved. Issue it to scrap it.");
             }

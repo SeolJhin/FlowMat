@@ -13,8 +13,6 @@ import java.util.stream.StreamSupport;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
-import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
-import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
 import org.springframework.stereotype.Component;
 
 /**
@@ -27,18 +25,19 @@ import org.springframework.stereotype.Component;
 public class UsableStock {
 
     private static final String NOT_DELETED = "N";
+    private final ProductionPlanningReferences references;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
 
-    private final InventoryRepository inventoryRepository;
-    private final LotMasterRepository lotMasterRepository;
+
 
     public Map<String, BigDecimal> byItem(String projectId, Collection<String> itemIds) {
-        List<Inventory> rows = inventoryRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(projectId, NOT_DELETED).stream()
+        List<Inventory> rows = references.projectStocks(projectId).stream()
             .filter(row -> itemIds.contains(row.getItemId()))
             .toList();
-        Map<String, LotMaster> lots = StreamSupport.stream(lotMasterRepository.findAllById(
+        Map<String, LotMaster> lots = StreamSupport.stream(references.lots(
                 rows.stream().map(Inventory::getLotId).filter(Objects::nonNull).collect(Collectors.toSet())).spliterator(), false)
             .collect(Collectors.toMap(LotMaster::getLotId, Function.identity()));
-        LocalDate today = LocalDate.now();
+        LocalDate today = projectCalendar.today(projectId);
         Map<String, BigDecimal> usable = new HashMap<>();
         for (Inventory row : rows) {
             LotMaster lot = row.getLotId() == null ? null : lots.get(row.getLotId());

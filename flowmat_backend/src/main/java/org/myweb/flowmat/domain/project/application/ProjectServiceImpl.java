@@ -101,7 +101,8 @@ public class ProjectServiceImpl implements ProjectService {
             project.getProjectDesc(),
             project.getProjectStatus(),
             project.getVisibility(),
-            project.getCurrentWorkflowId()
+            project.getCurrentWorkflowId(),
+            project.getTimeZone()
         );
     }
 

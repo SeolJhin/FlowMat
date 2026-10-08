@@ -18,15 +18,12 @@ import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
 import org.myweb.flowmat.domain.bom.application.BomService;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.application.InventoryCommandService;
 import org.myweb.flowmat.domain.inventory.application.InventoryMovement;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
 import org.myweb.flowmat.domain.inventory.domain.enums.InventoryTransactionType;
 import org.myweb.flowmat.domain.inventory.domain.enums.LotStatus;
-import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
-import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
 import org.myweb.flowmat.domain.production.api.dto.request.StockAllocationRequest;
 import org.myweb.flowmat.domain.production.api.dto.response.StockAllocationResponse;
 import org.myweb.flowmat.domain.production.domain.entity.ProductionRun;
@@ -60,13 +57,12 @@ public class StockAllocationService {
     private static final BigDecimal MIN_ROUNDABLE_QUANTITY = new BigDecimal("0.00005");
 
     private final StockAllocationRepository allocationRepository;
+    private final ProductionPlanningReferences references;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
     private final WorkOrderRepository workOrderRepository;
     private final ProductionRunRepository productionRunRepository;
     private final BomService bomService;
     private final OpenRunInputs openRunInputs;
-    private final InventoryRepository inventoryRepository;
-    private final ItemRepository itemRepository;
-    private final LotMasterRepository lotMasterRepository;
     private final InventoryCommandService inventoryCommandService;
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
@@ -93,10 +89,10 @@ public class StockAllocationService {
         Map<String, BigDecimal> before = new HashMap<>();
         allocationRepository.findAllByWorkOrderIdAndStatusOrderByCreatedAtAscAllocationIdAsc(order.getWorkOrderId(), OPEN)
             .forEach(allocation -> before.merge(allocation.getItemId(), allocation.remaining(), BigDecimal::add));
-        LocalDate today = LocalDate.now();
+        LocalDate today = projectCalendar.today(projectId);
         List<StockAllocationResponse.PlanLine> plan = new ArrayList<>();
         for (Map.Entry<String, BigDecimal> need : needs.entrySet()) {
-            Item item = itemRepository.findByItemIdAndDeletedYn(need.getKey(), NOT_DELETED)
+            Item item = references.item(need.getKey())
                 .filter(found -> projectId.equals(found.getProjectId()))
                 .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "An item to allocate was not found in this project."));
             BigDecimal already = before.getOrDefault(item.getItemId(), BigDecimal.ZERO);
@@ -104,7 +100,7 @@ public class StockAllocationService {
             BigDecimal now = BigDecimal.ZERO;
             if (left.signum() > 0) {
                 // Locked in id order, so a movement that would drain a record this plan counts on waits for it.
-                List<Inventory> rows = inventoryRepository.findAllById(inventoryRepository.lockItemStock(projectId, item.getItemId()));
+                List<Inventory> rows = references.lockItemStock(projectId, item.getItemId());
                 for (Inventory row : candidates(rows, today)) {
                     if (left.signum() <= 0) {
                         break;
@@ -308,7 +304,7 @@ public class StockAllocationService {
 
     /** Usable records with free stock: available status, usable LOT not expired; expiring LOTs first, then oldest. */
     private List<Inventory> candidates(List<Inventory> rows, LocalDate today) {
-        Map<String, LotMaster> lots = lotMasterRepository.findAllById(rows.stream().map(Inventory::getLotId).filter(Objects::nonNull).distinct().toList())
+        Map<String, LotMaster> lots = references.lots(rows.stream().map(Inventory::getLotId).filter(Objects::nonNull).distinct().toList())
             .stream().collect(Collectors.toMap(LotMaster::getLotId, Function.identity()));
         return rows.stream()
             .filter(row -> AVAILABLE.equals(row.getInventoryStatus()))
@@ -327,12 +323,12 @@ public class StockAllocationService {
 
     private StockAllocationResponse response(WorkOrder order, List<StockAllocationResponse.PlanLine> plan) {
         List<StockAllocation> allocations = allocationRepository.findAllByWorkOrderIdOrderByCreatedAtAscAllocationIdAsc(order.getWorkOrderId());
-        Map<String, Item> items = itemRepository.findAllById(allocations.stream().map(StockAllocation::getItemId).distinct().toList())
+        Map<String, Item> items = references.items(allocations.stream().map(StockAllocation::getItemId).distinct().toList())
             .stream().collect(Collectors.toMap(Item::getItemId, Function.identity()));
-        Map<String, LotMaster> lots = lotMasterRepository.findAllById(allocations.stream().map(StockAllocation::getLotId)
+        Map<String, LotMaster> lots = references.lots(allocations.stream().map(StockAllocation::getLotId)
                 .filter(Objects::nonNull).distinct().toList())
             .stream().collect(Collectors.toMap(LotMaster::getLotId, Function.identity()));
-        Map<String, Inventory> rows = inventoryRepository.findAllById(allocations.stream().map(StockAllocation::getInventoryId).distinct().toList())
+        Map<String, Inventory> rows = references.stocks(allocations.stream().map(StockAllocation::getInventoryId).distinct().toList())
             .stream().collect(Collectors.toMap(Inventory::getInventoryId, Function.identity()));
         List<StockAllocationResponse.Allocation> list = allocations.stream()
             .map(allocation -> {

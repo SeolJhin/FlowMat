@@ -25,12 +25,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
-import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
-import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
-import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunItemRecordRequest;
 import org.myweb.flowmat.domain.production.api.dto.request.RunInputAllocationRequest;
 import org.myweb.flowmat.domain.production.domain.entity.ProductionRun;
@@ -46,13 +42,12 @@ class RunInputAllocationServiceTest {
     @Mock private ProductionRunService productionRunService;
     @Mock private ProductionRunRepository productionRunRepository;
     @Mock private ProjectAccessService projectAccessService;
-    @Mock private ItemRepository itemRepository;
-    @Mock private UnitMasterRepository unitMasterRepository;
     @Mock private UnitConverter unitConverter;
-    @Mock private InventoryRepository inventoryRepository;
-    @Mock private LotMasterRepository lotMasterRepository;
     @Mock private StockAllocationRepository stockAllocationRepository;
     @Mock private StockAllocationService stockAllocationService;
+    @Mock private ProductionPlanningReferences references;
+    @Mock private org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
+
     @InjectMocks private RunInputAllocationService service;
 
     private ProductionRun run;
@@ -79,12 +74,12 @@ class RunInputAllocationServiceTest {
         ownSoon = allocation("soon_stock", "5");
         ownLate = allocation("late_stock", "3");
         lenient().when(productionRunRepository.findForUpdate("run")).thenReturn(Optional.of(run));
-        lenient().when(itemRepository.findByItemIdAndDeletedYn("item", "N")).thenReturn(Optional.of(item));
+        lenient().when(references.item("item")).thenReturn(Optional.of(item));
         lenient().when(unitConverter.toItemUnit(any(BigDecimal.class), eq("kg"), eq("unit_kg")))
             .thenAnswer(invocation -> new UnitConverter.Conversion(invocation.getArgument(0), "kg", "kg", false));
-        lenient().when(inventoryRepository.lockItemStock("project", "item")).thenReturn(List.of("soon_stock", "late_stock"));
-        lenient().when(inventoryRepository.findAllById(any())).thenReturn(List.of(stock("late_stock", "late"), stock("soon_stock", "soon")));
-        lenient().when(lotMasterRepository.findAllById(any())).thenReturn(List.of(late, soon));
+        lenient().when(projectCalendar.today("project")).thenReturn(java.time.LocalDate.now());
+        lenient().when(references.lockItemStock("project", "item")).thenReturn(List.of(stock("late_stock", "late"), stock("soon_stock", "soon")));
+        lenient().when(references.lots(any())).thenReturn(List.of(late, soon));
         lenient().when(stockAllocationRepository.findAllByWorkOrderIdAndStatusOrderByCreatedAtAscAllocationIdAsc("order", "open"))
             .thenReturn(List.of(ownSoon, ownLate));
     }

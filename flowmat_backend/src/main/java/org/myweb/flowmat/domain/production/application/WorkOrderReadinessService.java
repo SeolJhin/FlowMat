@@ -16,17 +16,12 @@ import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
 import org.myweb.flowmat.domain.bom.application.BomService;
 import org.myweb.flowmat.domain.bom.domain.entity.BomHeader;
-import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
 import org.myweb.flowmat.domain.catalog.application.EquipmentChangeoverService;
 import org.myweb.flowmat.domain.catalog.application.EquipmentScheduleService;
 import org.myweb.flowmat.domain.catalog.domain.entity.Equipment;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.EquipmentRepository;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
-import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
-import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
 import org.myweb.flowmat.domain.production.api.dto.response.WorkOrderReadinessResponse;
 import org.myweb.flowmat.domain.production.api.dto.response.WorkOrderReadinessResponse.Check;
 import org.myweb.flowmat.domain.production.api.dto.response.WorkOrderReadinessResponse.Material;
@@ -37,7 +32,6 @@ import org.myweb.flowmat.domain.production.repository.ProductionRunRepository;
 import org.myweb.flowmat.domain.production.repository.StockAllocationRepository;
 import org.myweb.flowmat.domain.production.repository.WorkOrderRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
-import org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.springframework.beans.factory.annotation.Value;
@@ -57,13 +51,11 @@ public class WorkOrderReadinessService {
     private static final String NOT_DELETED = "N";
 
     private final WorkOrderRepository workOrderRepository;
+    private final org.myweb.flowmat.domain.workflow.application.publicapi.WorkflowProductionQuery workflows;
+    private final ProductionPlanningReferences references;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
     private final ProductionRunRepository productionRunRepository;
-    private final WorkflowRevisionRepository workflowRevisionRepository;
-    private final BomHeaderRepository bomHeaderRepository;
     private final BomService bomService;
-    private final ItemRepository itemRepository;
-    private final InventoryRepository inventoryRepository;
-    private final LotMasterRepository lotMasterRepository;
     private final OpenRunInputs openRunInputs;
     private final EquipmentRepository equipmentRepository;
     private final EquipmentScheduleService equipmentScheduleService;
@@ -93,8 +85,8 @@ public class WorkOrderReadinessService {
         if (order.getWorkflowId() == null) {
             checks.add(new Check("workflow", FAIL, "Choose the workflow the order runs on."));
         } else {
-            checks.add(workflowRevisionRepository.findTopByWorkflowIdAndStatusOrderByRevisionNoDesc(order.getWorkflowId(), "published")
-                .map(revision -> new Check("workflow", OK, "Runs start on workflow revision v" + revision.getRevisionNo() + "."))
+            checks.add(workflows.latestPublishedRevision(order.getWorkflowId())
+                .map(revision -> new Check("workflow", OK, "Runs start on workflow revision v" + revision.revisionNo() + "."))
                 .orElseGet(() -> new Check("workflow", WARN,
                     "The workflow has no published revision; publish one so runs are fixed to a version.")));
         }
@@ -114,7 +106,7 @@ public class WorkOrderReadinessService {
         List<Material> materials = new ArrayList<>();
         BomHeader bom = order.getBomId() == null
             ? null
-            : bomHeaderRepository.findByBomIdAndDeletedYn(order.getBomId(), NOT_DELETED).orElse(null);
+            : references.bom(order.getBomId()).orElse(null);
         if (order.getBomId() == null) {
             checks.add(new Check("bom", WARN, "No BOM; materials are neither planned nor checked."));
         } else if (bom == null) {
@@ -238,7 +230,7 @@ public class WorkOrderReadinessService {
     }
 
     private String itemCode(String itemId) {
-        return itemRepository.findByItemIdAndDeletedYn(itemId, NOT_DELETED).map(Item::getItemCode).orElse(itemId);
+        return references.item(itemId).map(Item::getItemCode).orElse(itemId);
     }
 
     private List<Material> materials(WorkOrder order, BomHeader bom, BigDecimal remaining, List<Check> checks) {
@@ -250,7 +242,7 @@ public class WorkOrderReadinessService {
             return List.of();
         }
 
-        List<Inventory> stock = inventoryRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(order.getProjectId(), NOT_DELETED);
+        List<Inventory> stock = references.projectStocks(order.getProjectId());
         // Stock allocated to this order is reserved for it, so it counts as available here (docs/domain/stock-allocation.md).
         Map<String, BigDecimal> ownAllocated = new HashMap<>();
         stockAllocationRepository.findAllByWorkOrderIdAndStatusOrderByCreatedAtAscAllocationIdAsc(order.getWorkOrderId(), "open")
@@ -264,8 +256,8 @@ public class WorkOrderReadinessService {
         Map<String, String> lotStatus = new HashMap<>();
         Set<String> expiredLots = new HashSet<>();
         Map<String, LotMaster> lotsById = new HashMap<>();
-        LocalDate today = LocalDate.now();
-        lotMasterRepository.findAllById(lotIds).forEach(lot -> {
+        LocalDate today = projectCalendar.today(order.getProjectId());
+        references.lots(lotIds).forEach(lot -> {
             lotsById.put(lot.getLotId(), lot);
             lotStatus.put(lot.getLotId(), lot.getLotStatus() == null ? "" : lot.getLotStatus());
             if (lot.isExpiredOn(today)) {
@@ -280,7 +272,7 @@ public class WorkOrderReadinessService {
         // What this order's unfinished runs already put in has left stock, so it is not needed again.
         Map<String, BigDecimal> alreadyUsed = openRunInputs.forOrder(order.getWorkOrderId());
         for (BomRequirementResponse.Line line : requirement.lines()) {
-            Item item = itemRepository.findByItemIdAndDeletedYn(line.childItemId(), NOT_DELETED).orElse(null);
+            Item item = references.item(line.childItemId()).orElse(null);
             boolean lotTracked = item != null && "Y".equals(item.getLotManageYn());
             BigDecimal available = BigDecimal.ZERO;
             Set<String> usableLots = new HashSet<>();

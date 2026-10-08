@@ -13,13 +13,9 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
-import org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
 import org.myweb.flowmat.domain.inventory.domain.enums.LotStatus;
-import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
-import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
 import org.myweb.flowmat.domain.production.api.dto.request.ProductionRunItemRecordRequest;
 import org.myweb.flowmat.domain.production.api.dto.request.RunInputAllocationRequest;
 import org.myweb.flowmat.domain.production.api.dto.response.ProductionRunItemResponse;
@@ -45,13 +41,11 @@ public class RunInputAllocationService {
     private static final String NOT_DELETED = "N";
 
     private final ProductionRunService productionRunService;
+    private final ProductionPlanningReferences references;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
     private final ProductionRunRepository productionRunRepository;
     private final ProjectAccessService projectAccessService;
-    private final ItemRepository itemRepository;
-    private final UnitMasterRepository unitMasterRepository;
     private final UnitConverter unitConverter;
-    private final InventoryRepository inventoryRepository;
-    private final LotMasterRepository lotMasterRepository;
     private final StockAllocationRepository stockAllocationRepository;
     private final StockAllocationService stockAllocationService;
 
@@ -64,7 +58,7 @@ public class RunInputAllocationService {
         ProductionRunServiceImpl.requireOpenRun(run);
         ProductionText.requireStorable(request.itemId(), "itemId");
         ProductionText.requireStorable(request.processId(), "processId");
-        Item item = itemRepository.findByItemIdAndDeletedYn(request.itemId(), NOT_DELETED)
+        Item item = references.item(request.itemId())
             .filter(found -> run.getProjectId().equals(found.getProjectId()))
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         if (!"Y".equals(item.getLotManageYn())) {
@@ -80,14 +74,14 @@ public class RunInputAllocationService {
         BigDecimal needed = conversion.quantity().setScale(4, RoundingMode.HALF_UP);
         String recordUnit = item.getUnitId() == null
             ? unit
-            : unitMasterRepository.findById(item.getUnitId()).map(unitMaster -> unitMaster.getUnitCode()).orElse(unit);
+            : references.unitCode(item.getUnitId()).orElse(unit);
 
         // An actual run can consume its order's reservation through the ordinary recording path.
         // Simulations do not release physical reservations, so they can only plan against free stock.
         Map<String, BigDecimal> ownAllocated = ownAllocations(run);
 
         // Locked before they are read, so a concurrent movement waits instead of draining a record this split counts on.
-        List<Inventory> stock = inventoryRepository.findAllById(inventoryRepository.lockItemStock(run.getProjectId(), item.getItemId()))
+        List<Inventory> stock = references.lockItemStock(run.getProjectId(), item.getItemId())
             .stream()
             .sorted(Comparator.comparing(Inventory::getCreatedAt, Comparator.nullsLast(Comparator.<OffsetDateTime>naturalOrder()))
                 .thenComparing(Inventory::getInventoryId))
@@ -95,10 +89,10 @@ public class RunInputAllocationService {
             .filter(row -> !"quarantined".equalsIgnoreCase(row.getInventoryStatus()))
             .filter(row -> usableQuantity(row, ownAllocated).signum() > 0)
             .toList();
-        Map<String, LotMaster> lots = lotMasterRepository.findAllById(stock.stream().map(Inventory::getLotId).distinct().toList())
+        Map<String, LotMaster> lots = references.lots(stock.stream().map(Inventory::getLotId).distinct().toList())
             .stream()
             .collect(Collectors.toMap(LotMaster::getLotId, Function.identity()));
-        LocalDate today = LocalDate.now();
+        LocalDate today = projectCalendar.today(run.getProjectId());
         List<Inventory> usable = stock.stream()
             .filter(row -> {
                 LotMaster lot = lots.get(row.getLotId());
