@@ -79,6 +79,22 @@ public class BomEffectivityService {
         return response(header);
     }
 
+    /**
+     * Ends an approved revision on {@code end} for the revision replacing it, inside that approval (multi-level-bom.md M5):
+     * the caller holds the approval locks and owner access. The change is history like any period change.
+     */
+    void endForReplacement(BomHeader other, LocalDate end, String actor, String reason) {
+        revisionLock.lockHeader(other);
+        BomEffectivityChange change = new BomEffectivityChange();
+        change.setChangeId(ids.generate()); change.setBomId(other.getBomId()); change.setRequestId(java.util.UUID.randomUUID());
+        change.setPreviousEffectiveFrom(other.getEffectiveFrom()); change.setPreviousEffectiveTo(other.getEffectiveTo());
+        change.setEffectiveFrom(other.getEffectiveFrom()); change.setEffectiveTo(end);
+        change.setPeriodVersion(other.getEffectivePeriodVersion() + 1); change.setReason(reason);
+        change.setChangedBy(actor); change.setChangedAt(OffsetDateTime.now().truncatedTo(ChronoUnit.MICROS));
+        other.setEffectiveTo(end); other.setEffectivePeriodVersion(change.getPeriodVersion()); other.setUpdatedBy(actor);
+        headers.save(other); changes.saveAndFlush(change);
+    }
+
     private void requireNoOverlap(BomHeader header,LocalDate from,LocalDate to) {
         for (BomHeader other : headers.findAllByProjectIdAndTargetItemIdAndDeletedYnOrderByBomVersionDesc(
             header.getProjectId(),header.getTargetItemId(),"N")) {

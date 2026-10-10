@@ -123,7 +123,8 @@ public class BomController {
         @PathVariable("bomId") String bomId,
         @RequestBody(required = false) BomApproveRequest request
     ) {
-        return ApiResponse.ok(bomApprovalService.approve(bomId, note(request)));
+        return ApiResponse.ok(bomApprovalService.approve(bomId, note(request),
+            request != null && Boolean.TRUE.equals(request.endEarlier())));
     }
 
     @PostMapping("/{bomId}/reject")

@@ -12,7 +12,7 @@ import {
 import type { BomDto, BomLineType, BuildableQuantityDto, ItemDto, UnitDto } from '../../../shared/types/api'
 import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
-import { BOM_ACTION_LABELS, bomActions, groupByTarget, isEditable, overlappingApproved, periodLabel } from '../model/bomModel'
+import { BOM_ACTION_LABELS, bomActions, groupByTarget, isEditable, overlappingApproved, periodLabel, replacementEndDay } from '../model/bomModel'
 import { shortBy, usableByMaterial } from '../model/buildableModel'
 import { BomRevisionCompare } from './BomRevisionCompare'
 import { BomLineImport } from './BomLineImport'
@@ -275,6 +275,7 @@ function BomDetail({
 }) {
   const { add, remove } = useBomLineMutations(projectId)
   const actionMutation = useBomActionMutation(projectId)
+  const [endEarlier, setEndEarlier] = useState(false)
   const editable = isEditable(bom)
   const [line, setLine] = useState({
     childItemId: '', quantity: '', unit: unitCodes[0] ?? 'kg', lineType: 'material' as BomLineType, phantom: false,
@@ -309,7 +310,8 @@ function BomDetail({
     }
     if (action === 'retire' && !window.confirm('Retire this revision? New production runs will no longer use it.')) return
     try {
-      const result = await actionMutation.mutateAsync({ bomId: bom.bomId, action, note })
+      const result = await actionMutation.mutateAsync({ bomId: bom.bomId, action, note,
+        endEarlier: action === 'approve' && endDay !== null && endEarlier })
       if (action === 'revisions') onRevisionCreated(result.bomId)
     } catch {
       // Shown below.
@@ -319,6 +321,8 @@ function BomDetail({
   const error = add.error ?? remove.error ?? actionMutation.error
   // Approval keeps other approved revisions and refuses an overlap (docs/domain/multi-level-bom.md M1-M2).
   const overlaps = bom.bomStatus === 'draft' || bom.bomStatus === 'pending_approval' ? overlappingApproved(bom, revisions) : []
+  // The replacement helper: approve and end those revisions the day before this one starts, when that fits (M4-M6).
+  const endDay = bom.bomStatus === 'pending_approval' ? replacementEndDay(bom, overlaps) : null
   const revisionStatus = errorStatus(actionMutation.error)
   const revisionUnconfirmed = actionMutation.variables?.action === 'revisions' && Boolean(actionMutation.error)
     && !(revisionStatus != null && revisionStatus >= 400 && revisionStatus < 500)
@@ -437,6 +441,12 @@ function BomDetail({
           {overlaps.map((other) => `v${other.bomVersion} (${periodLabel(other)})`).join(', ')}. Approving does not retire
           them: end their period or retire them, and give this revision its own, before approving.
         </p>
+      )}
+      {endDay && (
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, margin: '0 0 8px' }}>
+          <input type="checkbox" checked={endEarlier} onChange={(event) => setEndEarlier(event.target.checked)} />
+          End {overlaps.map((other) => `v${other.bomVersion}`).join(', ')} on {endDay} when approving
+        </label>
       )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {bomActions(bom.bomStatus).map((action) => (

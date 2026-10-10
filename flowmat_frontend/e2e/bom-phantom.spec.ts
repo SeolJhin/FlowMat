@@ -92,3 +92,45 @@ test('a phantom line is tagged, expanded in requirements and offered only for su
   await expect.poll(() => added.length).toBe(1)
   expect(added[0]).toMatchObject({ childItemId: 'dough', quantity: 1, unit: 'kg', lineType: 'material', phantom: true })
 })
+
+test('a run line expanded through a phantom says via which sub-assembly', async ({ page }) => {
+  const items = [
+    { itemId: 'bread', itemCode: 'BREAD', itemName: 'bread' }, { itemId: 'dough', itemCode: 'DOUGH', itemName: 'dough' },
+    { itemId: 'flour', itemCode: 'FLOUR', itemName: 'flour' }, { itemId: 'salt', itemCode: 'SALT', itemName: 'salt' },
+  ].map((one) => ({ ...one, projectId: 'prj-ph', itemType: 'material', unitId: 'unit_kg', itemStatus: 'active' }))
+  const run = { productionRunId: 'run-ph', projectId: 'prj-ph', workflowId: null, workflowRevisionId: null, runNumber: 'RUN-PH',
+    runType: 'simulation', runStatus: 'running', targetItemId: 'bread', plannedOutputQty: 1, actualOutputQty: null,
+    workOrderId: null, bomId: 'bom-bread', bomVersion: 1 }
+  const line = (id: string, itemId: string, viaItemId: string | null) => ({ productionRunItemId: id, productionRunId: 'run-ph',
+    processId: null, processIoId: null, inventoryId: null, itemId, direction: 'input', plannedQty: 2, actualQty: null, unit: 'kg',
+    quantitySource: 'bom', conversionRate: 1, lotId: null, cancelled: false, cancelledBy: null, cancelledAt: null,
+    cancelReason: null, viaItemId })
+  await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
+    const request = route.request()
+    const { pathname } = new URL(request.url())
+    if (await answerAuth(route, pathname)) return
+    if (request.method() !== 'GET') throw new Error(`Unexpected write ${request.method()} ${pathname}`)
+    if (pathname === '/api/production-runs/run-ph') return ok(route, run)
+    if (pathname === '/api/production-runs/run-ph/items') return ok(route, [line('l1', 'flour', 'dough'), line('l2', 'salt', null)])
+    if (pathname === '/api/items') return ok(route, items)
+    if (pathname === '/api/production-runs/run-ph/cost') {
+      return ok(route, { productionRunId: 'run-ph', materialCost: 0, costComplete: true, outputQuantity: null, costPerUnit: null,
+        costBasis: 'CURRENT', costBasisAt: null, estimated: false, lines: [] })
+    }
+    if (pathname === '/api/production-runs/run-ph/setups') {
+      return ok(route, { productionRunId: 'run-ph', defaultEquipmentId: null, setupMinutes: 0, setupCost: 0, costComplete: true, lines: [] })
+    }
+    if (pathname.endsWith('/instruction')) return ok(route, { open: false, instruction: null, checks: [], ready: true })
+    if (pathname.endsWith('/quality-checklist')) {
+      return ok(route, { required: 0, requiredPassed: 0, requiredMissing: 0, failed: 0, lines: [] })
+    }
+    if (pathname.endsWith('/material-usage')) return ok(route, { bomId: null, lines: [] })
+    return ok(route, [])
+  })
+
+  await mockedLogin(page)
+  await page.goto('/projects/prj-ph/runs/run-ph')
+  const flour = page.getByRole('row').filter({ hasText: 'FLOUR · flour' })
+  await expect(flour).toContainText('via DOUGH · dough')
+  await expect(page.getByRole('row').filter({ hasText: 'SALT · salt' })).not.toContainText('via')
+})

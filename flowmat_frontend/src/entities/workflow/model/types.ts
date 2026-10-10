@@ -146,8 +146,9 @@ export interface CreateProcessIoInput {
   resourceType?: string
   schemaJson?: Record<string, unknown>
   validationRule?: string
-  quantity: number
-  unit: string
+  /** Needed by material and product ports and ports bound to an item only (docs/domain/port-measurement.md PM2-PM4). */
+  quantity?: number
+  unit?: string
   formula?: string
   colorScheme?: string
   requiredYn?: 'Y' | 'N'
@@ -157,6 +158,8 @@ export interface CreateProcessIoInput {
 export interface UpdateProcessIoInput extends Partial<Omit<CreateProcessIoInput, 'processId'>> {
   clearItem?: boolean
   clearSchema?: boolean
+  /** Empties quantity and unit; one sent along is set again (PM5). */
+  clearMeasure?: boolean
   processIoId: string
 }
 

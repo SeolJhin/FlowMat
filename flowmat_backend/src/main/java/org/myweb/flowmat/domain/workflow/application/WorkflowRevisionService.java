@@ -11,6 +11,7 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.annotation.application.CanvasAnnotationService;
+import org.myweb.flowmat.domain.workflow.api.dto.response.NodeExecutionPolicyResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowRevisionResponse;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowRevisionSnapshot;
 import org.myweb.flowmat.domain.workflow.api.dto.response.WorkflowRevisionSummaryResponse;
@@ -87,7 +88,12 @@ public class WorkflowRevisionService {
             processIos.stream().map(WorkflowCanvasServiceImpl::toProcessIoResponse).toList(),
             connections.stream().map(WorkflowCanvasServiceImpl::toConnectionResponse).toList(),
             annotationService.list(workflowId),
-            editorDocumentService.getDocument(workflowId)
+            editorDocumentService.getDocument(workflowId),
+            processes.stream().filter(Process::hasExecutionPolicy)
+                .map(process -> new NodeExecutionPolicyResponse(process.getProcessId(), process.getTimeoutSeconds(),
+                    process.getRetryLimit(), process.getRetryDelaySeconds(), process.getRetryBackoff(),
+                    process.getMaxRetryDelaySeconds(), process.getConcurrencyLimit()))
+                .toList()
         );
 
         WorkflowRevision revision = new WorkflowRevision();

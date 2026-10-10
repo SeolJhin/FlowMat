@@ -12,6 +12,7 @@
 |---|---|
 | [inventory-bom-lot-contract.md](inventory-bom-lot-contract.md) | 재고·BOM·LOT 1차 계약: 수량·단위, 거래 멱등성, 역분개, BOM 승인·revision, LOT 상태·계보 |
 | [process-port-connection-contract.md](process-port-connection-contract.md) | 공정 포트(ProcessIo)·연결 계약, 조건식·스키마 검증, 발행 관문, Flow Run 그래프 실행 계약(V39) |
+| [port-measurement.md](port-measurement.md) | 포트 수량·단위 선택(ADR-005 결정 1): 제조 재료·제품·품목 포트만 필수, `clearMeasure`(V68) |
 
 ## 정의와 실행 (Core)
 
@@ -19,6 +20,7 @@
 |---|---|
 | [workflow-revision.md](workflow-revision.md) | 워크플로 발행 revision: 스냅샷, 발행 관문, 폐기, 실행의 revision 고정 |
 | [flow-run.md](flow-run.md) | Flow Run: 실행·단계·시도·이벤트, 상태, 그래프 실행, 생산 실행 연결 |
+| [flow-run-execution-policy.md](flow-run-execution-policy.md) | 노드 실행 정책(ADR-004): 시간 제한·재시도 횟수와 간격·동시 실행 제한, 시간 제한 감시(V67) |
 
 ## 품목·원가
 

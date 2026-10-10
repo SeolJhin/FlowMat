@@ -142,7 +142,10 @@ public class WarehouseTaskService {
                 throw new BusinessException(ErrorCode.BAD_REQUEST, "Work order " + order.workOrderNumber() + " has no BOM and quantity to pick for.");
             }
             BigDecimal quantity = request.quantity() != null ? request.quantity() : order.targetQuantity();
-            BomRequirementResponse requirement = bomService.requirementsForRun(order.bomId(), projectId, order.targetItemId(), quantity);
+            // Phantoms expand through the revision of the order's planned day (docs/domain/multi-level-bom.md P3).
+            LocalDate phantomDay = order.plannedStartAt() == null ? null : projectCalendar.date(projectId, order.plannedStartAt().toInstant());
+            BomRequirementResponse requirement = bomService.requirementsForRun(order.bomId(), projectId, order.targetItemId(), quantity,
+                phantomDay);
             for (BomRequirementResponse.Line line : requirement.lines()) {
                 needs.merge(line.childItemId(), line.requiredItemQuantity(), BigDecimal::add);
             }

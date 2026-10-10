@@ -50,7 +50,7 @@ Revision 발행은 같은 검증을 수행한다. 오류가 있으면 409 `Workf
 
 | 규칙 | 이유 | 위반 응답 |
 |---|---|---|
-| PC-12. 포트 `direction`은 `input` 또는 `output`, `requiredYn`과 `allowShortageYn`은 `Y` 또는 `N`, `quantity`는 0 이상이어야 한다. 대소문자와 앞뒤 공백은 저장 전에 정규화한다. | 잘못된 값이 연결 및 필수 입력 검증을 우회하지 않게 한다. | 400, 해당 필드 이름을 포함한 메시지 |
+| PC-12. 포트 `direction`은 `input` 또는 `output`, `requiredYn`과 `allowShortageYn`은 `Y` 또는 `N`, `quantity`는 0 이상이어야 한다(2026-10-10부터 수량·단위는 material·product·품목 포트만 필수, [포트 수량·단위](port-measurement.md) PM2–PM3). 대소문자와 앞뒤 공백은 저장 전에 정규화한다. | 잘못된 값이 연결 및 필수 입력 검증을 우회하지 않게 한다. | 400, 해당 필드 이름을 포함한 메시지 |
 | PC-13. 포트 수정·삭제와 연결 생성·수정은 동일한 workflow 행 잠금을 사용한다. 포트 수정은 잠금 뒤 최신 포트 상태를 다시 읽고 연결 호환성을 검증한다. | 동시에 요청해도 호환되지 않는 연결을 남기지 않는다. | 충돌 시 409 `Port change would break connection(s): <ids>`; 이미 삭제된 포트는 404 |
 
 기존 DB의 잘못된 포트 값은 자동 변경하지 않는다. 워크플로 검증은 `PORT_INVALID` 오류로 표시하고 revision 발행을 막는다. 정상 API로 개별 값을 수정한다.

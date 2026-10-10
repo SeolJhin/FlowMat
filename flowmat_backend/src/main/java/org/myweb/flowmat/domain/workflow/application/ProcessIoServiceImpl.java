@@ -89,8 +89,9 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         processIo.setIoType(defaultIfBlank(request.ioType(), "material"));
         processIo.setRole(trimToNull(request.role()));
         processIo.setResourceType(defaultIfBlank(request.resourceType(), processIo.getIoType()));
-        processIo.setQuantity(normalizeQuantity(defaultIfNull(request.quantity(), BigDecimal.ZERO)));
-        processIo.setUnit(request.unit().trim());
+        // Left out stays empty; only ports that need them must give them (docs/domain/port-measurement.md PM4).
+        processIo.setQuantity(request.quantity() == null ? null : normalizeQuantity(request.quantity()));
+        processIo.setUnit(trimToNull(request.unit()));
         processIo.setFormula(trimToNull(request.formula()));
         processIo.setSchemaJson(writeSchema(request.schemaJson()));
         processIo.setValidationRule(trimToNull(request.validationRule()));
@@ -150,6 +151,11 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         }
         if (hasText(request.resourceType())) {
             processIo.setResourceType(request.resourceType().trim().toLowerCase(Locale.ROOT));
+        }
+        // clearMeasure empties both first; a quantity or unit sent with it is set again (PM5).
+        if (Boolean.TRUE.equals(request.clearMeasure())) {
+            processIo.setQuantity(null);
+            processIo.setUnit(null);
         }
         if (request.quantity() != null) {
             processIo.setQuantity(normalizeQuantity(request.quantity()));
@@ -278,13 +284,26 @@ public class ProcessIoServiceImpl implements ProcessIoService {
         normalizeDirection(port.getDirection());
         normalizeYn(port.getRequiredYn(), "Y", "requiredYn");
         normalizeYn(port.getAllowShortageYn(), "N", "allowShortageYn");
-        if (port.getQuantity() == null || port.getQuantity().signum() < 0) {
+        if (port.getQuantity() != null && port.getQuantity().signum() < 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "quantity must be zero or greater.");
         }
-        if (port.getQuantity().compareTo(MAX_QUANTITY) > 0
-            || port.getQuantity().stripTrailingZeros().scale() > 4) {
+        if (port.getQuantity() != null && (port.getQuantity().compareTo(MAX_QUANTITY) > 0
+            || port.getQuantity().stripTrailingZeros().scale() > 4)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "quantity must fit numeric(14,4).");
         }
+        // Manufacturing ports need both; others may leave them out, but a quantity needs its unit (PM2-PM3).
+        if (needsMeasure(port) && (port.getQuantity() == null || !hasText(port.getUnit()))) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Material and product ports need a quantity and unit.");
+        }
+        if (port.getQuantity() != null && !hasText(port.getUnit())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "A port quantity needs a unit.");
+        }
+    }
+
+    /** Material and product ports, and any port bound to an item (docs/domain/port-measurement.md PM2). */
+    private static boolean needsMeasure(ProcessIo port) {
+        String type = defaultIfBlank(port.getResourceType(), defaultIfBlank(port.getIoType(), "material"));
+        return "material".equals(type) || "product".equals(type) || hasText(port.getItemId());
     }
 
     private boolean breaksConnection(ProcessConnection connection) {
@@ -317,10 +336,6 @@ public class ProcessIoServiceImpl implements ProcessIoService {
 
     private static String defaultIfBlank(String value, String defaultValue) {
         return hasText(value) ? value.trim().toLowerCase(Locale.ROOT) : defaultValue;
-    }
-
-    private static BigDecimal defaultIfNull(BigDecimal value, BigDecimal defaultValue) {
-        return value != null ? value : defaultValue;
     }
 
     private static BigDecimal normalizeQuantity(BigDecimal quantity) {

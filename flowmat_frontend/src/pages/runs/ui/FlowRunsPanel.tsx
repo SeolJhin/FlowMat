@@ -54,6 +54,8 @@ type FlowRunAttempt = {
   retryAt: string | null
   errorCode: string | null
   errorMessage: string | null
+  /** When a running attempt times out (docs/domain/flow-run-execution-policy.md EP7). */
+  timeoutAt?: string | null
 }
 
 type FlowRunEvent = {
@@ -464,6 +466,8 @@ export function FlowRunsPanel({
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <strong>#{step.sequenceNo} {nodes.find((node) => node.processId === step.nodeId)?.processName ?? step.nodeId}</strong>
                 <span>{step.status}</span>
+                {/* A planned step that keeps its last failure waits to retry (docs/domain/flow-run-execution-policy.md EP10). */}
+                {step.status === 'planned' && step.errorCode && <span>waiting to retry</span>}
                 {step.scheduledAt && <span>Scheduled: {new Date(step.scheduledAt).toLocaleString()}</span>}
                 {step.sourceStepId && <span title={step.sourceStepId}>
                   from step #{steps.find((source) => source.stepId === step.sourceStepId)?.sequenceNo
@@ -588,6 +592,8 @@ export function FlowRunsPanel({
                       <strong>Attempt {attempt.attemptNo}: {attempt.status}{attempt.errorCode ? ` (${attempt.errorCode})` : ''}</strong>
                       {attempt.startedAt && <div>Started: {new Date(attempt.startedAt).toLocaleString()}</div>}
                       {attempt.endedAt && <div>Ended: {new Date(attempt.endedAt).toLocaleString()}</div>}
+                      {attempt.status === 'running' && attempt.timeoutAt
+                        && <div>Times out: {new Date(attempt.timeoutAt).toLocaleString()}</div>}
                       {attempt.retryAt && <div>Retry scheduled: {new Date(attempt.retryAt).toLocaleString()}</div>}
                       {attempt.errorMessage && <div>Reason: {attempt.errorMessage}</div>}
                     </div>

@@ -81,7 +81,7 @@
 { "dryRun": true, "replace": false, "rows": [{ "itemCode": "FLR-1", "quantity": "5000", "unit": "g" }] }
 ```
 
-- 파일 열: `item_code`(또는 `code`, `material`), `quantity`(`qty`), `unit`(`unit_code`), 선택 `note`, 선택 `type`(`line_type`, `kind`: 비우면 material, by_product, waste — [부산물](bom-by-products.md), 2026-10-03). 세 필수 열이 없으면 화면에서 바로 알려 줍니다.
+- 파일 열: `item_code`(또는 `code`, `material`), `quantity`(`qty`), `unit`(`unit_code`), 선택 `note`, 선택 `type`(`line_type`, `kind`: 비우면 material, by_product, waste — [부산물](bom-by-products.md), 2026-10-03), 선택 `phantom`(`is_phantom`: Y/N, [다단계 BOM](multi-level-bom.md) P1, 2026-10-10 2cr). 세 필수 열이 없으면 화면에서 바로 알려 줍니다.
 - 수량은 소수점에 `.`을 쓰며, 천 단위 쉼표는 세 자리마다 쓸 수 있습니다(예: `1,234.5`). 쉼표가 든 CSV 셀은 따옴표로 감싸야 합니다. `1,2` 같은 잘못된 쉼표 표기는 줄 오류입니다.
 - `replace=false`면 지금 자재에 더하고, `true`면 지금 자재를 모두 지우고 파일 내용으로 바꿉니다.
 - 줄마다 **승인 검증 중 한 줄에 관한 규칙**을 미리 봅니다(계약서 §5): 품목 코드가 있고 하나뿐, 수량은 소수점 네 자리 반올림 후 0보다 크고 `numeric(14,4)` 범위 안에 있음, 단위가 자재 단위로 바뀜, 이 BOM이 만드는 품목이 아님, 파일 안이나 남는 자재와 겹치지 않음, 그 자재에 승인된 BOM이 없음(1차는 단일 단계).

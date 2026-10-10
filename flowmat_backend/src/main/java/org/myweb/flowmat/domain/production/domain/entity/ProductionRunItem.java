@@ -44,6 +44,9 @@ public class ProductionRunItem {
     /** BOM snapshot: factor from the BOM line unit to the item unit, fixed when the run starts. */
     private BigDecimal conversionRate;
 
+    /** BOM snapshot: the phantom sub-assembly this planned line was expanded through; null otherwise (multi-level-bom.md P2). */
+    private String viaItemId;
+
     /** "Y" once the recording was cancelled: its stock movement is reversed and it no longer counts. */
     @JdbcTypeCode(SqlTypes.CHAR)
     private String cancelledYn = "N";

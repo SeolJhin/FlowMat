@@ -105,6 +105,18 @@ jobs:
           REAL_API_E2E: '1'
         run: npm run test:e2e -- e2e/data-flow-browser.spec.ts --workers=1
 
+      - name: Run real organization browser acceptance
+        working-directory: flowmat_frontend
+        env:
+          REAL_API_E2E: '1'
+          FLOWMAT_ORG_E2E_DISPOSABLE: '1'
+          FLOWMAT_ORG_E2E_MEMBER_ID: org-e2e-member
+          PGPASSWORD: flowmat-ci-password
+          PGOPTIONS: '-c flowmat.org_e2e_disposable=true'
+        run: |
+          psql --host=127.0.0.1 --port=5432 --username=flowmat --dbname=flowmat --set=ON_ERROR_STOP=1 --file=../scripts/ci/organization-e2e-fixture.sql
+          npm run test:e2e -- e2e/organizations-real-api.spec.ts --workers=1 --trace=off
+
       - name: Run browser E2E
         working-directory: flowmat_frontend
         run: npm run test:e2e

@@ -41,14 +41,17 @@ export interface BomExplosionDto {
   materialCost: number
   costComplete: boolean
   problems: string[]
+  /** The day whose revisions the levels below used (docs/domain/multi-level-bom.md M7). */
+  asOf?: string
 }
 
-export function useBomExplosionQuery(bomId: string | null, quantity: number) {
+/** {@code on}: YYYY-MM-DD, or blank for the project's today (M7). */
+export function useBomExplosionQuery(bomId: string | null, quantity: number, on = '') {
   return useQuery<BomExplosionDto>({
-    queryKey: ['bom-explosion', bomId, quantity],
+    queryKey: ['bom-explosion', bomId, quantity, on],
     queryFn: async () =>
       unwrapApiResponse(
-        await httpClient.get<ApiEnvelope<BomExplosionDto>>(`/boms/${encodeURIComponent(bomId ?? '')}/explosion?quantity=${quantity}`),
+        await httpClient.get<ApiEnvelope<BomExplosionDto>>(`/boms/${encodeURIComponent(bomId ?? '')}/explosion?quantity=${quantity}${on ? `&on=${encodeURIComponent(on)}` : ''}`),
       ),
     enabled: Boolean(bomId) && quantity > 0,
   })

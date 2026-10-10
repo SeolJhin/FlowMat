@@ -1,11 +1,8 @@
 org.myweb.flowmat.domain.bom.application.BomExplosionService uses org.myweb.flowmat.domain.catalog.repository.ItemRepository
-org.myweb.flowmat.domain.flowrun.application.FlowRunService uses org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository
-org.myweb.flowmat.domain.flowrun.application.FlowRunStepService uses org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository
 org.myweb.flowmat.domain.inventory.application.ExpiredStockService uses org.myweb.flowmat.domain.catalog.repository.ItemRepository
 org.myweb.flowmat.domain.inventory.application.ExpiredStockService uses org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository
 org.myweb.flowmat.domain.inventory.application.InventoryCountHistoryService uses org.myweb.flowmat.domain.catalog.repository.ItemRepository
 org.myweb.flowmat.domain.inventory.application.InventoryCountHistoryService uses org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository
-org.myweb.flowmat.domain.inventory.application.InventoryServiceImpl uses org.myweb.flowmat.domain.catalog.repository.ItemRepository
 org.myweb.flowmat.domain.inventory.application.InventoryTransactionServiceImpl uses org.myweb.flowmat.domain.catalog.repository.ItemRepository
 org.myweb.flowmat.domain.inventory.application.LotRecallService uses org.myweb.flowmat.domain.catalog.repository.ItemRepository
 org.myweb.flowmat.domain.inventory.application.LotRecallService uses org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository
@@ -29,9 +26,6 @@ org.myweb.flowmat.domain.production.application.RunMaterialUsageService uses org
 org.myweb.flowmat.domain.production.application.RunMaterialUsageService uses org.myweb.flowmat.domain.catalog.repository.ItemRepository
 org.myweb.flowmat.domain.production.application.RunMaterialUsageService uses org.myweb.flowmat.domain.catalog.repository.UnitMasterRepository
 org.myweb.flowmat.domain.production.application.WorkOrderEquipmentService uses org.myweb.flowmat.domain.catalog.repository.EquipmentRepository
-org.myweb.flowmat.domain.production.application.WorkOrderServiceImpl uses org.myweb.flowmat.domain.bom.repository.BomHeaderRepository
-org.myweb.flowmat.domain.production.application.WorkOrderServiceImpl uses org.myweb.flowmat.domain.catalog.repository.ItemRepository
-org.myweb.flowmat.domain.production.application.WorkOrderServiceImpl uses org.myweb.flowmat.domain.workflow.repository.WorkflowRepository
 org.myweb.flowmat.domain.project.application.ProjectAccessService uses org.myweb.flowmat.domain.workflow.repository.ProcessConnectionRepository
 org.myweb.flowmat.domain.project.application.ProjectAccessService uses org.myweb.flowmat.domain.workflow.repository.ProcessIoRepository
 org.myweb.flowmat.domain.project.application.ProjectAccessService uses org.myweb.flowmat.domain.workflow.repository.ProcessRepository

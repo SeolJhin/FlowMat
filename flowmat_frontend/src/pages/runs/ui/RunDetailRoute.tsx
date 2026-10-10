@@ -269,6 +269,14 @@ export function RunDetailRoute() {
                               BOM
                             </span>
                           )}
+                          {item.viaItemId && (
+                            <span
+                              title="Expanded through this phantom sub-assembly"
+                              style={{ marginLeft: 6, fontSize: 10, padding: '1px 6px', borderRadius: 999, background: 'var(--accent-bg)' }}
+                            >
+                              via {itemLabel.get(item.viaItemId) ?? item.viaItemId}
+                            </span>
+                          )}
                           {item.quantitySource === 'correction' && (
                             <span
                               title="Added by a correction of this finished run"

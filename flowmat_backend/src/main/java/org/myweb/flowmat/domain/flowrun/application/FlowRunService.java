@@ -22,9 +22,8 @@ import org.myweb.flowmat.domain.flowrun.repository.FlowRunRepository;
 import org.myweb.flowmat.domain.flowrun.repository.FlowRunStepAttemptRepository;
 import org.myweb.flowmat.domain.flowrun.repository.FlowRunStepRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.workflow.application.publicapi.WorkflowProductionQuery;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
-import org.myweb.flowmat.domain.workflow.domain.entity.WorkflowRevision;
-import org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
@@ -42,7 +41,7 @@ public class FlowRunService {
     private final FlowRunStepRepository stepRepository;
     private final FlowRunStepAttemptRepository attemptRepository;
     private final FlowRunEventRecorder eventRecorder;
-    private final WorkflowRevisionRepository revisionRepository;
+    private final WorkflowProductionQuery workflowQuery;
     private final ProjectAccessService projectAccessService;
     private final EntityManager entityManager;
     private final IdGenerator idGenerator;
@@ -62,11 +61,12 @@ public class FlowRunService {
         Workflow workflow = projectAccessService.requireWorkflowWriteAccess(request.workflowId().trim());
         // Retire holds this same lock, so a start observes the committed revision status.
         entityManager.lock(workflow, LockModeType.PESSIMISTIC_WRITE);
-        WorkflowRevision revision = revisionRepository
-            .findByWorkflowRevisionIdAndWorkflowId(request.workflowRevisionId().trim(), workflow.getWorkflowId())
+        // Read through the workflow context's public query, not its repository (ADR-002).
+        WorkflowProductionQuery.Revision revision = workflowQuery
+            .findRevision(request.workflowRevisionId().trim(), workflow.getWorkflowId())
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND,
                 "Workflow revision was not found for this workflow."));
-        if (!"published".equals(revision.getStatus())) {
+        if (!"published".equals(revision.status())) {
             throw new BusinessException(ErrorCode.CONFLICT, "Retired workflow revisions cannot start new runs.");
         }
         String runType = request.runType().trim().toLowerCase();
@@ -79,14 +79,14 @@ public class FlowRunService {
             if (!input.isObject()) {
                 throw new BusinessException(ErrorCode.BAD_REQUEST, "Graph inputPayload must be an object.");
             }
-            graph = FlowRunGraph.from(readJson(revision.getSnapshotJson()));
+            graph = FlowRunGraph.from(readJson(revision.snapshotJson()));
         }
 
         FlowRun run = new FlowRun();
         run.setFlowRunId(idGenerator.generate());
         run.setProjectId(workflow.getProjectId());
         run.setWorkflowId(workflow.getWorkflowId());
-        run.setWorkflowRevisionId(revision.getWorkflowRevisionId());
+        run.setWorkflowRevisionId(revision.workflowRevisionId());
         run.setRunType(runType);
         run.setExecutionMode(executionMode);
         run.setStatus("running");
@@ -159,11 +159,25 @@ public class FlowRunService {
         return stop(flowRunId, "failed", errorCode, request.errorMessage(), payload);
     }
 
+    /**
+     * Fails a running generic run whose row the caller holds locked, for an actor it has authorized; a null actor is the
+     * system, after a timeout (docs/domain/flow-run-execution-policy.md EP7).
+     */
+    public FlowRunResponse failLocked(FlowRun run, String errorCode, String errorMessage, String actorId) {
+        JsonNode payload = objectMapper.createObjectNode().put("errorCode", errorCode).put("errorMessage", errorMessage);
+        return stop(run, "failed", errorCode, errorMessage, payload, actorId);
+    }
+
     private FlowRunResponse stop(String flowRunId, String terminalStatus, String errorCode,
         String errorMessage, JsonNode payload) {
         FlowRun run = lockedWritableGenericRun(flowRunId);
+        return stop(run, terminalStatus, errorCode, errorMessage, payload, projectAccessService.requireCurrentUserId());
+    }
+
+    private FlowRunResponse stop(FlowRun run, String terminalStatus, String errorCode, String errorMessage, JsonNode payload,
+        String actor) {
+        String flowRunId = run.getFlowRunId();
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        String actor = projectAccessService.requireCurrentUserId();
         for (FlowRunStep step : stepRepository.findAllByFlowRunIdOrderBySequenceNoAsc(flowRunId)) {
             if (!"planned".equals(step.getStatus()) && !"running".equals(step.getStatus())) {
                 continue;

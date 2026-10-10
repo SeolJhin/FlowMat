@@ -26,7 +26,9 @@ public record BomExplosionResponse(
     List<Material> materials,
     BigDecimal materialCost,
     boolean costComplete,
-    List<String> problems
+    List<String> problems,
+    /** The project calendar day whose revisions were used below this one (docs/domain/multi-level-bom.md M7). */
+    java.time.LocalDate asOf
 ) {
 
     /** {@code bomId} and {@code bomVersion} are the material's own approved BOM when it is a sub-assembly. */

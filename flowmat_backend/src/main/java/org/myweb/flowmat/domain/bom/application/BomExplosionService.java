@@ -45,15 +45,20 @@ public class BomExplosionService {
     private final ProjectCalendarQuery projectCalendar;
 
     public BomExplosionResponse explode(String bomId, String quantityText) {
+        return explode(bomId, quantityText, null);
+    }
+
+    /** {@code on}: the day whose revisions the levels below use; null is the project's today (multi-level-bom.md M3, M7). */
+    public BomExplosionResponse explode(String bomId, String quantityText, java.time.LocalDate on) {
         BomHeader header = bomHeaderRepository.findByBomIdAndDeletedYn(bomId, NOT_DELETED)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         projectAccessService.requireProjectReadAccess(header.getProjectId());
         BigDecimal quantity = quantity(quantityText);
-        BomRequirementResponse top = bomService.requirementsForRun(bomId, header.getProjectId(), null, quantity);
+        java.time.LocalDate day = on != null ? on : projectCalendar.today(header.getProjectId());
+        BomRequirementResponse top = bomService.requirementsForRun(bomId, header.getProjectId(), null, quantity, day);
 
-        // Undated, so the revisions effective on the project's today (docs/domain/multi-level-bom.md M3).
-        Walk walk = new Walk(header.getProjectId(),
-            BomTree.approvedByItem(bomHeaderRepository, header.getProjectId(), projectCalendar.today(header.getProjectId())));
+        Walk walk = new Walk(header.getProjectId(), day,
+            BomTree.approvedByItem(bomHeaderRepository, header.getProjectId(), day));
         Set<String> path = new HashSet<>();
         path.add(header.getTargetItemId());
         walk.level(top, header.getTargetItemId(), 1, path);
@@ -85,7 +90,8 @@ public class BomExplosionService {
         }
         materials.sort(Comparator.comparing(BomExplosionResponse.Material::itemCode, Comparator.nullsLast(Comparator.naturalOrder())));
         return new BomExplosionResponse(header.getBomId(), header.getBomVersion(), header.getTargetItemId(),
-            code(items, header.getTargetItemId()), quantity, walk.deepest, lines, materials, scale(cost), complete, walk.problems);
+            code(items, header.getTargetItemId()), quantity, walk.deepest, lines, materials, scale(cost), complete, walk.problems,
+            day);
     }
 
     private record Node(int level, String parentItemId, String itemId, BigDecimal quantity, String unit, String bomId, Integer bomVersion) {
@@ -94,6 +100,7 @@ public class BomExplosionService {
     /** One explosion's state: the tree so far, bought materials added up, and the deepest level. */
     private final class Walk {
         private final String projectId;
+        private final java.time.LocalDate day;
         private final Map<String, BomHeader> approved;
         private final List<Node> lines = new ArrayList<>();
         private final Map<String, BigDecimal> bought = new LinkedHashMap<>();
@@ -101,8 +108,9 @@ public class BomExplosionService {
         private final List<String> problems = new ArrayList<>();
         private int deepest;
 
-        private Walk(String projectId, Map<String, BomHeader> approved) {
+        private Walk(String projectId, java.time.LocalDate day, Map<String, BomHeader> approved) {
             this.projectId = projectId;
+            this.day = day;
             this.approved = approved;
         }
 
@@ -122,7 +130,7 @@ public class BomExplosionService {
                 }
                 BomRequirementResponse below;
                 try {
-                    below = bomService.requirementsForRun(own.getBomId(), projectId, child, line.requiredItemQuantity());
+                    below = bomService.requirementsForRun(own.getBomId(), projectId, child, line.requiredItemQuantity(), day);
                 } catch (BusinessException exception) {
                     problems.add(child + ": " + exception.getMessage());
                     continue;

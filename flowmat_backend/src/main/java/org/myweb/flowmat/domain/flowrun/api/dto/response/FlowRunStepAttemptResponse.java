@@ -11,6 +11,8 @@ public record FlowRunStepAttemptResponse(
     OffsetDateTime endedAt,
     OffsetDateTime retryAt,
     String errorCode,
-    String errorMessage
+    String errorMessage,
+    /** When a running attempt times out; null without a time limit (docs/domain/flow-run-execution-policy.md EP7). */
+    OffsetDateTime timeoutAt
 ) {
 }

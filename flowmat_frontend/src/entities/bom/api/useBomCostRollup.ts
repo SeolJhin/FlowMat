@@ -25,15 +25,18 @@ export interface BomCostRollupLineDto {
 export interface BomCostRollupDto {
   /** Sub-assemblies (fewer levels) first. */
   items: BomCostRollupLineDto[]
+  /** The day whose revisions were rolled up (docs/domain/multi-level-bom.md M7). */
+  asOf?: string
 }
 
 /** Under ['boms', projectId] so BOM changes refresh it; an item's unit cost change is refreshed by the caller. */
-export function useBomCostRollupQuery(projectId: string) {
+/** {@code on}: YYYY-MM-DD, or blank for the project's today (M7). */
+export function useBomCostRollupQuery(projectId: string, on = '') {
   return useQuery<BomCostRollupDto>({
-    queryKey: ['boms', projectId, 'cost-rollup'],
+    queryKey: ['boms', projectId, 'cost-rollup', on],
     queryFn: async () =>
       unwrapApiResponse(
-        await httpClient.get<ApiEnvelope<BomCostRollupDto>>(`/boms/cost-rollup?projectId=${encodeURIComponent(projectId)}`),
+        await httpClient.get<ApiEnvelope<BomCostRollupDto>>(`/boms/cost-rollup?projectId=${encodeURIComponent(projectId)}${on ? `&on=${encodeURIComponent(on)}` : ''}`),
       ),
     enabled: Boolean(projectId),
     staleTime: 0,

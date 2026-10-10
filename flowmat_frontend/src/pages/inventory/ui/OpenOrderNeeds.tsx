@@ -8,6 +8,8 @@ import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import { isActiveItem } from '../model/itemStatusModel'
 import { leftAfterOrders, needLabel, needsCsv, packsFor, subAssemblyDrafts } from '../model/stockAlertModel'
+import { zoneDay } from '../model/bomModel'
+import { useProjectTimeZone } from '../../../entities/project/api/useProjectTimeZone'
 
 const cell = { padding: '4px 6px' } as const
 const num = { ...cell, textAlign: 'right', whiteSpace: 'nowrap' } as const
@@ -25,6 +27,7 @@ export function OpenOrderNeeds({ projectId }: { projectId: string }) {
   const shortMadeHere = (needs?.lines ?? []).some((line) => line.madeHere && line.shortage > 0)
   const bomsQuery = useBomsQuery(shortMadeHere ? projectId : '')
   const ordersQuery = useWorkOrdersQuery(shortMadeHere ? projectId : '')
+  const timeZone = useProjectTimeZone(projectId).query.data?.timeZone
   const saveOrder = useSaveWorkOrderMutation(projectId)
   const [drafted, setDrafted] = useState<{ error: boolean; text: string } | null>(null)
   const [drafting, setDrafting] = useState(false)
@@ -34,7 +37,7 @@ export function OpenOrderNeeds({ projectId }: { projectId: string }) {
   if (!needs || (needs.orders === 0 && needs.problems.length === 0)) return null
   const short = needs.lines.filter((line) => line.shortage > 0)
   const planned = bomsQuery.isSuccess && ordersQuery.isSuccess
-    ? subAssemblyDrafts(needs.lines, bomsQuery.data, ordersQuery.data, itemById)
+    ? subAssemblyDrafts(needs.lines, bomsQuery.data, ordersQuery.data, itemById, zoneDay(timeZone))
     : { drafts: [], skipped: [] }
   const after = new Map(needs.lines.map((line) => [line.itemId, leftAfterOrders(line, itemById.get(line.itemId)?.safetyStockQty)]))
   // Covered materials the orders take under their safety stock; the short ones are counted as short.

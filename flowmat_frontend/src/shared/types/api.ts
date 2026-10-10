@@ -127,6 +127,8 @@ export interface ProductionRunItemDto {
   productionRunCorrectionId?: string | null
   /** The correction that voided this recording (null when it was cancelled on the open run). */
   cancelledByCorrectionId?: string | null
+  /** A planned BOM line expanded through this phantom sub-assembly (docs/domain/multi-level-bom.md P2). */
+  viaItemId?: string | null
 }
 
 /** A run's material cost at today's unit costs (docs/domain/material-cost.md). Nothing is stored. */
@@ -476,6 +478,8 @@ export interface BomLineImportRowDto {
   note?: string
   /** material (blank), by_product or waste (docs/domain/bom-by-products.md). */
   lineType?: string
+  /** Y for a phantom sub-assembly, blank or N for none (docs/domain/multi-level-bom.md P1). */
+  phantom?: string
 }
 
 /** What a BOM line import did or would do; nothing is saved when any row has an error or it is a dry run. */
@@ -654,6 +658,8 @@ export interface BomWhereUsedTreeDto {
     routes: number
   }[]
   problems: string[]
+  /** The day whose revisions were walked (docs/domain/multi-level-bom.md M7). */
+  asOf?: string
 }
 
 /** A stock row outside its thresholds (docs/domain/stock-alert.md); it closes by itself when the row is back inside. */

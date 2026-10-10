@@ -44,6 +44,6 @@ public class WorkOrderQueryImpl implements WorkOrderQuery {
     private static WorkOrderView view(WorkOrder order) {
         return new WorkOrderView(order.getWorkOrderId(), order.getProjectId(), order.getWorkOrderNumber(),
             order.getWorkOrderStatus(), WorkOrderStatus.fromCode(order.getWorkOrderStatus()).acceptsRuns(), order.getBomId(),
-            order.getTargetItemId(), order.getTargetQuantity());
+            order.getTargetItemId(), order.getTargetQuantity(), order.getPlannedStartAt());
     }
 }

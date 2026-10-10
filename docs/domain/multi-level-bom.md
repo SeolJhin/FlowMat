@@ -197,15 +197,18 @@ S6 이유: 승인된 작업지시의 할당·준비 점검·자재 소요는 그
 |---|---|---|
 | M1 | 승인은 같은 품목의 다른 approved revision을 retire하지 않는다. 교체하려면 이전 revision의 기간을 끝내거나(owner, Effective periods) 명시적으로 retire한다 | §5, 기간 조정은 명시적 사용자 동작 |
 | M2 | 승인 대상의 기간이 같은 품목의 다른 approved revision과 하루라도 겹치면 409(`Revision 2 (open → open) overlaps approved v1 (open → open). Approving does not retire other revisions: …`). 양 끝 포함, 빈 끝은 열림. 기간 명령(E3)과 같은 판정 함수를 승인 lock(프로젝트 → 품목 → 헤더) 안에서 쓴다 | 겹치면 날짜별 선택이 모호해진다(E4의 409) |
-| M3 | 날짜가 없는 계산은 **프로젝트 오늘**에 유효한 revision을 쓴다: 다단계 전개, 반제품 원가 누적, 역전개 트리, MRP의 반제품 전개. 화면의 기본 BOM 채우기(실행 시작·작업지시 날짜 없음·재주문)는 브라우저 오늘의 유효 revision. 순환·깊이 검사(승인·자재 CSV·MRP 저수준 코드)는 기간과 무관하게 **모든** approved revision을 합쳐 본다 | 오늘이 아닌 날 유효한 revision으로 생기는 순환도 막는다 |
+| M3 | 날짜가 없는 계산은 **프로젝트 오늘**에 유효한 revision을 쓴다: 다단계 전개, 반제품 원가 누적, 역전개 트리, MRP의 반제품 전개. 화면의 기본 BOM 채우기(실행 시작·작업지시 날짜 없음·하위 작업지시 초안)는 프로젝트 업무 시간대의 오늘에 유효한 revision(2026-10-10 2ct, 시간대를 아직 모르면 브라우저 오늘). 순환·깊이 검사(승인·자재 CSV·MRP 저수준 코드)는 기간과 무관하게 **모든** approved revision을 합쳐 본다 | 오늘이 아닌 날 유효한 revision으로 생기는 순환도 막는다 |
+| M4 | **교체 도우미(2026-10-10, §2 2cu):** owner가 승인할 때 `endEarlier: true`(명시적 선택, 기본 없음)를 주면, 같은 품목의 겹치는 approved revision의 끝을 이 revision 시작일의 전날로 바꾸고 같은 트랜잭션에서 승인한다. 주지 않으면 M2 그대로 409 | 기간 두 번과 승인을 한 번에. §5의 "명시적 사용자 동작"을 지킨다 |
+| M5 | 끝낼 수 있는 것: 이 revision에 시작일 X가 있고, 겹치는 approved revision이 X보다 먼저 시작하며(열린 시작 포함) 이 revision에 끝이 있으면 그 안에서 끝나는 경우만. 아니면 아무것도 바꾸지 않고 409(`has no start day` / `cannot be ended before X`). 바꾼 기간은 기간 이력에 `Ended by approving vN, which starts X.`로 남는다. 승인 lock(프로젝트 → 품목 → 헤더) 안에서 끝낼 revision의 행도 잠근다 | 전부 아니면 없음, 이력 유지 |
+| M6 | 화면: 승인 대기 revision의 겹침 경고 아래, M5로 끝낼 수 있을 때만 **End v1 on 2030-01-31 when approving** 체크박스(기본 꺼짐). 켜고 Approve하면 `endEarlier`를 보낸다 | 끝나는 날을 미리 보이고 선택하게 |
 
-교체 흐름(예: 2월 1일부터 v1 → v2): editor가 v2 초안의 Effective periods에 시작일 `2030-02-01`을 넣고 제출 → owner가 v1의 끝을 `2030-01-31`로 바꾼 뒤 v2를 승인한다. 승인 대기 revision의 기간은 바꿀 수 없으므로(E2), 시작일 없이 제출된 revision은 반려 → 초안에서 기간 설정 → 재제출한다. 바로 바꾸려면 v1을 retire하고 v2를 승인한다(그 사이 approved가 없는 순간이 생긴다).
+교체 흐름(예: 2월 1일부터 v1 → v2): editor가 v2 초안의 Effective periods에 시작일 `2030-02-01`을 넣고 제출 → owner가 v1의 끝을 `2030-01-31`로 바꾼 뒤 v2를 승인한다. 승인 대기 revision의 기간은 바꿀 수 없으므로(E2), 시작일 없이 제출된 revision은 반려 → 초안에서 기간 설정 → 재제출한다. 바로 바꾸려면 v1을 retire하고 v2를 승인한다(그 사이 approved가 없는 순간이 생긴다). 한 번에(2cu): v2에 시작일이 있으면 승인 대기 상세의 **End v1 on 2030-01-31 when approving**을 켜고 Approve — v1의 끝과 v2 승인이 한 트랜잭션(M4–M6).
 
 화면: BOMs 목록의 revision 옆에 기간(`2030-02-01 → open`), 초안·승인 대기 상세에서 겹치는 approved revision을 승인 전에 경고한다(`bom-period-overlap`). 응답 `BomResponse.effectiveFrom/effectiveTo`를 더했다.
 
 검증(2026-10-10, 격리 복사본): `BomMultipleApprovalIntegrationTest` 2건(겹침 409·v1 유지·기간 조정 뒤 공존·날짜 경계 선택, 오늘 revision으로 전개·과거 revision을 거친 순환 거절), 기존 교체 흐름을 쓰던 `BomIntegrationTest`·`BomWhereUsedIntegrationTest`는 v1을 명시적으로 retire하도록 고침. 전체 백엔드 1,205건 중 그 두 기존 테스트만 실패 → 고친 뒤 BOM·자재·경계 68건 실패 0. 프런트 타입·lint·단위 290, 모의 BOM E2E 26.
 
-남은 것: 작업지시 날짜를 받는 트리/MRP/원가(지금은 오늘 기준), 팬텀(`BomLine.phantom`), 교체를 한 번에 하는 화면 도우미(지금은 기간 두 번과 승인), 화면 기본 채우기의 브라우저 오늘과 프로젝트 오늘의 차이.
+남은 것: 작업지시 날짜를 받는 트리/원가(지금은 오늘 기준, MRP의 반제품 전개와 팬텀은 작업지시 계획일), ~~교체를 한 번에 하는 화면 도우미~~ → M4–M6(2cu). ~~팬텀~~ → 아래 2ci·2cn·2cr·2cs. ~~화면 기본 채우기의 브라우저 오늘~~ → 2ct(`bomModel.zoneDay`: 프로젝트 시간대의 오늘, `bomModel.test.ts` 경계 2건).
 
 ## 팬텀 반제품 설계 제안 (2026-10-10, 리드 — 구현 전)
 
@@ -225,7 +228,11 @@ S6 이유: 승인된 작업지시의 할당·준비 점검·자재 소요는 그
 
 검증(2026-10-10, 격리 복사본): `BomPhantomIntegrationTest` 2건(오늘 flour 6 via dough, 2030-02-10 계획 작업지시 실행은 sugar 3, 작업지시 없는 실행은 flour, 전개에 dough 없음 / 부산물 팬텀 400, 자기 BOM 없는 팬텀 승인 거절, revision이 플래그 유지), BOM·작업지시·실행·MRP·만들 수 있는 양·할당·경계 320건 실패 0. 프런트 타입·lint·단위 245, 모의 E2E `bom-phantom.spec.ts` 포함 기본 모의 E2E 123 통과·17 의도적 제외.
 
-남은 것: 준비 점검(`WorkOrderReadinessService`, 오류 담당 P0 파일)과 재고 할당(`StockAllocationService`)은 아직 오늘 기준 revision으로 팬텀을 푼다. 작업지시 계획 시작일을 넘기는 한 줄 변경은 P0 파일이 풀린 뒤 한다. 자재 CSV의 팬텀 열, 실행 상세의 via 표시.
+후속(2026-10-10, §2 2cn): 준비 점검(`WorkOrderReadinessService`)·재고 할당(`StockAllocationService`)·작업지시 피킹(`WarehouseTaskService`)도 작업지시 계획 시작일의 프로젝트 날짜로 팬텀 revision을 고른다(실행이 고정할 자재와 같음). 피킹은 inventory 컨텍스트라 공개 `WorkOrderView`에 `plannedStartAt`을 더했다. 계획 시작일이 없으면 오늘. 검증: `BomPhantomIntegrationTest`에 2030-02-10 작업지시의 준비 점검 자재·할당 계획이 sugar 1줄(3)인지 추가, 격리 복사본 `BomPhantom`·`*StockAllocation*`·`*WorkOrder*`·`*WarehouseTask*`·경계 170건 실패 0.
+
+자재 CSV 팬텀 열(2026-10-10, §2 2cr): `phantom`(`is_phantom`) 열에 Y/yes/true/1 또는 N/no/false/0·빈칸. 다른 값, 부산물·폐기물 팬텀, 자기 승인 BOM이 없는 팬텀은 그 행의 오류로 미리 보인다(승인 규칙과 같음). `BomLineImportIntegrationTest`·`bomModel.test.ts`.
+
+실행 상세의 via(2026-10-10, §2 2cs): 실행 시작의 BOM 계획 줄이 팬텀을 거쳐 펼쳐졌으면 그 팬텀을 `production_run_item.via_item_id`(V69, 외래 키 없음)에 함께 고정하고, `GET /production-runs/{id}/items`의 `viaItemId`, Runs 상세의 **via DOUGH** 표시로 보인다. 기록·보정 줄은 NULL. `BomPhantomIntegrationTest`·`e2e/bom-phantom.spec.ts`.
 
 ## Revision 미확인 요청의 새로고침 복구 (2026-10-08, §2 2bw)
 

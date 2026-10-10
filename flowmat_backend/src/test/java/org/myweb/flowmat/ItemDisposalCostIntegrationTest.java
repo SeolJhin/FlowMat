@@ -1,7 +1,10 @@
 package org.myweb.flowmat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -107,6 +110,46 @@ class ItemDisposalCostIntegrationTest extends IntegrationTestSupport {
         // A run without a BOM has no waste to price; outsiders see nothing.
         call(get("/production-runs/" + run(null) + "/waste-disposal-cost"), null).andExpect(jsonPath("$.data.lines.length()").value(0));
         callAs(user("outsider"), get("/production-runs/" + run + "/waste-disposal-cost"), null).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void aWorkOrdersWasteIsEstimatedForWhatIsStillToMake() throws Exception {
+        String product = item("1");
+        String peel = item("9");
+        String unknown = item("9");
+        String byProduct = item("5");
+        String bom = bom(product);
+        line(bom, item("2"), "material");
+        line(bom, peel, "waste");
+        line(bom, unknown, "waste");
+        line(bom, byProduct, "by_product");
+        disposal(peel, "4");
+        String order = data(call(post("/work-orders"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"workflowId\":\"" + DEMO_WORKFLOW
+            + "\",\"workOrderTitle\":\"Waste estimate\",\"targetItemId\":\"" + product + "\",\"targetQuantity\":3,\"bomId\":\""
+            + bom + "\"}").andExpect(status().isOk())).path("workOrderId").asText();
+
+        // 3 kg still to make: 3 kg of peel at 4, and waste with no disposal cost left out of the known subtotal (WD8).
+        call(get("/work-orders/" + order + "/waste-disposal-estimate"), null).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.quantity").value(3.0))
+            .andExpect(jsonPath("$.data.disposalCost").value(12.0))
+            .andExpect(jsonPath("$.data.costComplete").value(false))
+            .andExpect(jsonPath("$.data.lines.length()").value(2))
+            .andExpect(jsonPath("$.data.lines[?(@.itemId == '" + peel + "')].cost").value(hasItem(12.0)))
+            .andExpect(jsonPath("$.data.lines[?(@.itemId == '" + unknown + "')].cost").value(hasItem(nullValue())));
+
+        // A finished physical run of the order made 1 kg, so 2 kg remain.
+        String id = UUID.randomUUID().toString();
+        jdbc.update("insert into production_run(production_run_id,project_id,workflow_id,run_number,run_type,run_status,bom_id,planned_output_qty,actual_output_qty,work_order_id) values(?,?,?,?,'actual','finished',?,1,1,?)",
+            id, DEMO_PROJECT, DEMO_WORKFLOW, "DISP-" + id.substring(0, 8), bom, order);
+        call(get("/work-orders/" + order + "/waste-disposal-estimate"), null)
+            .andExpect(jsonPath("$.data.quantity").value(2.0))
+            .andExpect(jsonPath("$.data.disposalCost").value(8.0));
+
+        callAs(user("outsider"), get("/work-orders/" + order + "/waste-disposal-estimate"), null).andExpect(status().isForbidden());
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode data(ResultActions result) throws Exception {
+        return new com.fasterxml.jackson.databind.ObjectMapper().readTree(result.andReturn().getResponse().getContentAsString()).path("data");
     }
 
     private static String path(String item) {

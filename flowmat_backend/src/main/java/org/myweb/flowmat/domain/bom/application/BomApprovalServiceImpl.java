@@ -39,6 +39,7 @@ public class BomApprovalServiceImpl implements BomApprovalService {
     private final BomRevisionLock revisionLock;
     private final UnitConverter unitConverter;
     private final ProjectAccessService projectAccessService;
+    private final BomEffectivityService effectivityService;
 
     @Override
     public BomResponse submit(String bomId) {
@@ -59,11 +60,14 @@ public class BomApprovalServiceImpl implements BomApprovalService {
     }
 
     @Override
-    public BomResponse approve(String bomId, String note) {
+    public BomResponse approve(String bomId, String note, boolean endEarlier) {
         BomHeader header = findBom(bomId);
         projectAccessService.requireProjectOwnerAccess(header.getProjectId());
         List<BomLine> lines = lines(header);
         requireApprovable(header, lines);
+        if (endEarlier) {
+            endEarlierRevisions(header);
+        }
         // Approved revisions of an item live side by side for separate periods: approval retires none of them and refuses
         // an overlap (DECISIONS-2026-10-05 section 5, docs/domain/multi-level-bom.md M1-M2).
         requireNoOverlap(header);
@@ -100,6 +104,41 @@ public class BomApprovalServiceImpl implements BomApprovalService {
         header.setUpdatedBy(projectAccessService.requireCurrentUserId());
         appendNote(header, note);
         return BomServiceImpl.toResponse(bomHeaderRepository.save(header), lines(header));
+    }
+
+    /**
+     * The replacement helper (docs/domain/multi-level-bom.md M4-M6): every approved revision of the item that overlaps this
+     * one must start before this one's start day and must not run past its end; each is ended the day before, with its
+     * period history, under the approval locks. Anything else is refused before a change, so a replacement is all or nothing.
+     */
+    private void endEarlierRevisions(BomHeader header) {
+        java.time.LocalDate from = header.getEffectiveFrom();
+        if (from == null) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Revision " + header.getBomVersion()
+                + " has no start day, so there is no day before it to end other revisions on; give it a start in Effective periods.");
+        }
+        List<BomHeader> replaced = new ArrayList<>();
+        for (BomHeader other : bomHeaderRepository.findAllByProjectIdAndTargetItemIdAndDeletedYnOrderByBomVersionDesc(
+            header.getProjectId(), header.getTargetItemId(), NOT_DELETED)) {
+            if (other.getBomId().equals(header.getBomId()) || BomStatus.fromCode(other.getBomStatus()) != BomStatus.APPROVED
+                || !BomEffectivityService.overlaps(header.getEffectiveFrom(), header.getEffectiveTo(), other.getEffectiveFrom(),
+                    other.getEffectiveTo())) {
+                continue;
+            }
+            boolean startsBefore = other.getEffectiveFrom() == null || other.getEffectiveFrom().isBefore(from);
+            boolean endsWithin = header.getEffectiveTo() == null
+                || (other.getEffectiveTo() != null && !other.getEffectiveTo().isAfter(header.getEffectiveTo()));
+            if (!startsBefore || !endsWithin) {
+                throw new BusinessException(ErrorCode.CONFLICT, "Approved v" + other.getBomVersion() + " (" + period(other)
+                    + ") cannot be ended before " + from + (startsBefore ? ": it runs past this revision's end." : ": it starts on or after that day."));
+            }
+            replaced.add(other);
+        }
+        String actor = projectAccessService.requireCurrentUserId();
+        for (BomHeader other : replaced) {
+            effectivityService.endForReplacement(other, from.minusDays(1), actor,
+                "Ended by approving v" + header.getBomVersion() + ", which starts " + from + ".");
+        }
     }
 
     /** Refuses approval while another approved revision of the item covers any of the same days. */

@@ -1,6 +1,12 @@
 package org.myweb.flowmat.domain.bom.api;
 
 import lombok.RequiredArgsConstructor;
+import java.time.LocalDate;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomCostRollupResponse;
 import org.myweb.flowmat.domain.bom.application.BomCostRollupService;
 import org.myweb.flowmat.global.response.ApiResponse;
@@ -16,7 +22,13 @@ public class BomCostRollupController {
     private final BomCostRollupService bomCostRollupService;
 
     @GetMapping("/boms/cost-rollup")
-    public ApiResponse<BomCostRollupResponse> rollup(@RequestParam("projectId") String projectId) {
-        return ApiResponse.ok(bomCostRollupService.rollup(projectId));
+    public ApiResponse<BomCostRollupResponse> rollup(@RequestParam("projectId") String projectId,
+        @RequestParam(value = "on", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate on) {
+        return ApiResponse.ok(bomCostRollupService.rollup(projectId, on));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> invalidDay(MethodArgumentTypeMismatchException exception) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.error("on must be a calendar date such as 2030-02-01."));
     }
 }

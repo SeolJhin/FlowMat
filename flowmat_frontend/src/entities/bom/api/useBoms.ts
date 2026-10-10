@@ -55,13 +55,14 @@ export function useBomWhereUsedQuery(projectId: string, itemId: string | null) {
 }
 
 /** Where the item is used at every level, through approved BOMs up to the top products. */
-export function useBomWhereUsedTreeQuery(projectId: string, itemId: string | null) {
+/** {@code on}: YYYY-MM-DD, or blank for the project's today (docs/domain/multi-level-bom.md M7). */
+export function useBomWhereUsedTreeQuery(projectId: string, itemId: string | null, on = '') {
   return useQuery<BomWhereUsedTreeDto>({
-    queryKey: ['boms', projectId, 'where-used-all-levels', itemId],
+    queryKey: ['boms', projectId, 'where-used-all-levels', itemId, on],
     queryFn: async () =>
       unwrapApiResponse(
         await httpClient.get<ApiEnvelope<BomWhereUsedTreeDto>>(
-          `/boms/where-used/all-levels?projectId=${encodeURIComponent(projectId)}&itemId=${encodeURIComponent(itemId ?? '')}`,
+          `/boms/where-used/all-levels?projectId=${encodeURIComponent(projectId)}&itemId=${encodeURIComponent(itemId ?? '')}${on ? `&on=${encodeURIComponent(on)}` : ''}`,
         ),
       ),
     enabled: Boolean(projectId && itemId),
@@ -151,8 +152,10 @@ const pendingRevisions = createRevisionReceipts(() => typeof window === 'undefin
 export function useBomActionMutation(projectId: string) {
   const onSuccess = useInvalidateBoms(projectId)
   return useMutation({
-    mutationFn: async ({ bomId, action, note }: { bomId: string; action: BomAction; note?: string }) => {
-      if (action !== 'revisions') return unwrapApiResponse(await httpClient.post<ApiEnvelope<BomDto>>(`${path(bomId)}/${action}`, note ? { note } : {}))
+    mutationFn: async ({ bomId, action, note, endEarlier }: { bomId: string; action: BomAction; note?: string; endEarlier?: boolean }) => {
+      // endEarlier: approve and end the revisions this one replaces the day before it starts (multi-level-bom.md M4-M6).
+      if (action !== 'revisions') return unwrapApiResponse(await httpClient.post<ApiEnvelope<BomDto>>(`${path(bomId)}/${action}`,
+        { ...(note ? { note } : {}), ...(action === 'approve' && endEarlier ? { endEarlier: true } : {}) }))
       const requestId = pendingRevisions.requestId(projectId, bomId)
       try {
         const result = unwrapApiResponse(await httpClient.post<ApiEnvelope<BomDto>>(`${path(bomId)}/revisions`, { requestId }))

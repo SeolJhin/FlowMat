@@ -57,15 +57,20 @@ public class BomCostRollupService {
     }
 
     public BomCostRollupResponse rollup(String projectId) {
+        return rollup(projectId, null);
+    }
+
+    /** {@code on}: the day whose revisions are rolled up; null is the project's today (multi-level-bom.md M3, M7). */
+    public BomCostRollupResponse rollup(String projectId, java.time.LocalDate on) {
         if (projectId == null || projectId.isBlank()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "projectId is required.");
         }
         String project = projectId.trim();
         projectAccessService.requireProjectReadAccess(project);
-        // Undated, so the revisions effective on the project's today (docs/domain/multi-level-bom.md M3).
-        Map<String, BomHeader> approved = BomTree.approvedByItem(bomHeaderRepository, project, projectCalendar.today(project));
+        java.time.LocalDate day = on != null ? on : projectCalendar.today(project);
+        Map<String, BomHeader> approved = BomTree.approvedByItem(bomHeaderRepository, project, day);
         if (approved.isEmpty()) {
-            return new BomCostRollupResponse(List.of());
+            return new BomCostRollupResponse(List.of(), day);
         }
         Map<String, String> itemByBom = approved.values().stream()
             .collect(Collectors.toMap(BomHeader::getBomId, BomHeader::getTargetItemId));
@@ -91,7 +96,7 @@ public class BomCostRollupService {
         }
         result.sort(Comparator.comparingInt(BomCostRollupResponse.Line::levels)
             .thenComparing(BomCostRollupResponse.Line::itemCode, Comparator.nullsLast(Comparator.naturalOrder())));
-        return new BomCostRollupResponse(result);
+        return new BomCostRollupResponse(result, day);
     }
 
     /** Cost of one unit of a made item; memoised, since a sub-assembly can sit under many products. */

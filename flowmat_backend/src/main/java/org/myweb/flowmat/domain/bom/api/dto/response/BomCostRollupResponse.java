@@ -9,7 +9,7 @@ import java.util.List;
  *
  * @param items made items, sub-assemblies (fewer levels) first
  */
-public record BomCostRollupResponse(List<Line> items) {
+public record BomCostRollupResponse(List<Line> items, java.time.LocalDate asOf) {
 
     /**
      * @param unit the item's unit, which both costs are per

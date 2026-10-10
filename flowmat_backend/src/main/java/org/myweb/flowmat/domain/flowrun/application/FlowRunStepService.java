@@ -3,6 +3,8 @@ package org.myweb.flowmat.domain.flowrun.application;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
@@ -18,7 +20,6 @@ import org.myweb.flowmat.domain.flowrun.api.dto.request.FlowRunStepCompleteReque
 import org.myweb.flowmat.domain.flowrun.api.dto.request.FlowRunStepCreateRequest;
 import org.myweb.flowmat.domain.flowrun.api.dto.request.FlowRunStepFailRequest;
 import org.myweb.flowmat.domain.flowrun.api.dto.request.FlowRunStepScheduleRequest;
-import org.myweb.flowmat.domain.flowrun.api.dto.request.FlowRunFailRequest;
 import org.myweb.flowmat.domain.flowrun.api.dto.response.FlowRunEventResponse;
 import org.myweb.flowmat.domain.flowrun.api.dto.response.FlowRunRoutePreviewResponse;
 import org.myweb.flowmat.domain.flowrun.api.dto.response.FlowRunStepAttemptResponse;
@@ -32,11 +33,11 @@ import org.myweb.flowmat.domain.flowrun.repository.FlowRunRepository;
 import org.myweb.flowmat.domain.flowrun.repository.FlowRunStepAttemptRepository;
 import org.myweb.flowmat.domain.flowrun.repository.FlowRunStepRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
-import org.myweb.flowmat.domain.workflow.domain.entity.WorkflowRevision;
-import org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository;
+import org.myweb.flowmat.domain.workflow.application.publicapi.WorkflowProductionQuery;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,18 +45,17 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class FlowRunStepService {
-    private static final int MAX_GRAPH_RETRIES = 3;
-
     private final FlowRunRepository runRepository;
     private final FlowRunStepRepository stepRepository;
     private final FlowRunStepAttemptRepository attemptRepository;
     private final FlowRunEventRepository eventRepository;
     private final FlowRunEventRecorder eventRecorder;
-    private final WorkflowRevisionRepository revisionRepository;
+    private final WorkflowProductionQuery workflowQuery;
     private final ProjectAccessService accessService;
     private final IdGenerator idGenerator;
     private final ObjectMapper objectMapper;
     private final FlowRunService runService;
+    private final JdbcTemplate jdbc;
 
     @Transactional
     public FlowRunStepResponse create(String runId, FlowRunStepCreateRequest request) {
@@ -65,9 +65,7 @@ public class FlowRunStepService {
                 "Graph run steps are created from the published revision.");
         }
         String nodeId = request.nodeId().trim();
-        WorkflowRevision revision = revisionRepository.findById(run.getWorkflowRevisionId())
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        JsonNode processes = readJson(revision.getSnapshotJson()).path("processes");
+        JsonNode processes = snapshot(run).path("processes");
         boolean belongsToRevision = processes.isArray() &&
             java.util.stream.StreamSupport.stream(processes.spliterator(), false)
                 .anyMatch(node -> nodeId.equals(node.path("processId").asText()));
@@ -92,16 +90,40 @@ public class FlowRunStepService {
         return response(step);
     }
 
+    /**
+     * Opens the next attempt. In a graph run a step waiting to retry starts no earlier than its retryAt, and the node's
+     * concurrency limit is checked under the revision+node lock (docs/domain/flow-run-execution-policy.md EP5-EP6).
+     */
     @Transactional
     public FlowRunStepResponse start(String runId, String stepId) {
-        FlowRunStep step = writableStep(runId, stepId);
+        FlowRun run = writableRun(runId); // The parent row serializes all step transitions and sequence allocation.
+        FlowRunStep step = requireStep(runId, stepId);
         if (!"planned".equals(step.getStatus())) {
             throw new BusinessException(ErrorCode.CONFLICT, "Only a planned step can start.");
         }
-        if (step.getScheduledAt() != null && step.getScheduledAt().isAfter(OffsetDateTime.now(ZoneOffset.UTC))) {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        if (step.getScheduledAt() != null && step.getScheduledAt().isAfter(now)) {
             throw new BusinessException(ErrorCode.CONFLICT, "Step cannot start before its scheduledAt.");
         }
-        beginAttempt(step, "step_started");
+        String actor = accessService.requireCurrentUserId();
+        if (!"graph".equals(run.getExecutionMode())) {
+            beginAttempt(step, "step_started", null, actor);
+            return response(step);
+        }
+        OffsetDateTime retryAt = pendingRetryAt(step);
+        if (retryAt != null && retryAt.isAfter(now)) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Step cannot start before its retryAt.");
+        }
+        FlowRunGraph.NodePolicy policy = graph(run).policy(step.getNodeId());
+        Integer limit = policy.concurrencyLimit();
+        if (limit != null) {
+            long running = runningOnNode(run, step.getNodeId());
+            if (running >= limit) {
+                throw new BusinessException(ErrorCode.CONFLICT,
+                    "Node " + step.getNodeId() + " already has " + running + " running steps (limit " + limit + ").");
+            }
+        }
+        beginAttempt(step, "step_started", policy.timeoutSeconds(), actor);
         return response(step);
     }
 
@@ -112,6 +134,12 @@ public class FlowRunStepService {
             throw new BusinessException(ErrorCode.CONFLICT, "Only a planned step can be rescheduled.");
         }
         OffsetDateTime scheduledAt = parseScheduledAt(request.scheduledAt());
+        // A step waiting to retry keeps its delay (EP5).
+        OffsetDateTime retryAt = pendingRetryAt(step);
+        if (retryAt != null && (scheduledAt == null || scheduledAt.isBefore(retryAt))) {
+            throw new BusinessException(ErrorCode.CONFLICT,
+                "Step waits to retry until " + retryAt + "; schedule it at or after then.");
+        }
         step.setScheduledAt(scheduledAt);
         stepRepository.saveAndFlush(step);
         appendEvent(runId, stepId, "step_scheduled", objectMapper.createObjectNode()
@@ -129,7 +157,7 @@ public class FlowRunStepService {
         if (!"failed".equals(step.getStatus())) {
             throw new BusinessException(ErrorCode.CONFLICT, "Only a failed step can be retried.");
         }
-        beginAttempt(step, "step_retried");
+        beginAttempt(step, "step_retried", null, accessService.requireCurrentUserId());
         return response(step);
     }
 
@@ -137,7 +165,7 @@ public class FlowRunStepService {
     public FlowRunStepResponse complete(String runId, String stepId, FlowRunStepCompleteRequest request) {
         FlowRun run = writableRun(runId);
         FlowRunStep step = requireStep(runId, stepId);
-        FlowRunStepAttempt attempt = runningAttempt(step);
+        FlowRunStepAttempt attempt = runningAttempt(step, request == null ? null : request.attemptNo());
         JsonNode output = request != null && request.outputSnapshot() != null
             ? request.outputSnapshot() : objectMapper.createObjectNode();
         List<FlowRunGraph.Decision> decisions = "graph".equals(run.getExecutionMode())
@@ -174,7 +202,7 @@ public class FlowRunStepService {
             throw new BusinessException(ErrorCode.CONFLICT, "Only a running graph step can be previewed.");
         }
         FlowRunStep step = requireStep(runId, stepId);
-        runningAttempt(step);
+        runningAttempt(step, request == null ? null : request.attemptNo());
         JsonNode output = request != null && request.outputSnapshot() != null
             ? request.outputSnapshot() : objectMapper.createObjectNode();
         return graph(run).preview(step.getNodeId(), output).stream()
@@ -187,35 +215,40 @@ public class FlowRunStepService {
     public FlowRunStepResponse fail(String runId, String stepId, FlowRunStepFailRequest request) {
         FlowRun run = writableRun(runId);
         FlowRunStep step = requireStep(runId, stepId);
-        FlowRunStepAttempt attempt = runningAttempt(step);
-        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        String code = request.errorCode().trim();
-        attempt.setStatus("failed");
-        attempt.setEndedAt(now);
-        attempt.setErrorCode(code);
-        attempt.setErrorMessage(request.errorMessage());
-        step.setStatus("failed");
-        step.setEndedAt(now);
-        step.setErrorCode(code);
-        step.setErrorMessage(request.errorMessage());
-        attemptRepository.save(attempt);
-        stepRepository.save(step);
-        JsonNode payload = objectMapper.createObjectNode().put("errorCode", code)
-            .put("errorMessage", request.errorMessage());
-        appendEvent(runId, stepId, "step_failed", payload);
-        if ("graph".equals(run.getExecutionMode())) {
-            String policy = graph(run).failurePolicy(step.getSourceConnectionId());
-            if ("skip".equals(policy)) {
-                step.setStatus("skipped");
-                stepRepository.save(step);
-                appendEvent(runId, stepId, "step_skipped", payload);
-            } else if ("retry".equals(policy) && attempt.getAttemptNo() <= MAX_GRAPH_RETRIES) {
-                beginAttempt(step, "step_retried");
-            } else {
-                runService.fail(runId, new FlowRunFailRequest(code, request.errorMessage()));
-            }
-        }
+        FlowRunStepAttempt attempt = runningAttempt(step, request.attemptNo());
+        recordFailure(run, step, attempt, request.errorCode().trim(), request.errorMessage(),
+            accessService.requireCurrentUserId());
         return response(step);
+    }
+
+    /**
+     * Fails a running graph attempt whose node time limit passed, as the system (EP7). Checked again under the run lock,
+     * so overlapping sweeps record it once; false when there was nothing to do.
+     */
+    @Transactional
+    public boolean timeOut(String attemptId) {
+        String runId = attemptRepository.findFlowRunIdByAttemptId(attemptId).orElse(null);
+        if (runId == null) return false;
+        FlowRun run = runRepository.findLockedByFlowRunId(runId).orElse(null);
+        if (run == null || !"running".equals(run.getStatus()) || run.getProductionRunId() != null
+            || !"graph".equals(run.getExecutionMode())) {
+            return false;
+        }
+        // Loaded only after the lock, so a report or another sweep that ended it is seen.
+        FlowRunStepAttempt attempt = attemptRepository.findById(attemptId).orElse(null);
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        if (attempt == null || !"running".equals(attempt.getStatus()) || attempt.getTimeoutAt() == null
+            || attempt.getTimeoutAt().isAfter(now)) {
+            return false;
+        }
+        FlowRunStep step = requireStep(runId, attempt.getStepId());
+        if (!"running".equals(step.getStatus())) return false;
+        long seconds = Duration.between(attempt.getStartedAt(), attempt.getTimeoutAt()).getSeconds();
+        eventRecorder.record(runId, step.getStepId(), "step_timed_out", objectMapper.createObjectNode()
+            .put("attemptNo", attempt.getAttemptNo()).put("timeoutAt", attempt.getTimeoutAt().toString()), null);
+        recordFailure(run, step, attempt, "TIMEOUT",
+            "Attempt " + attempt.getAttemptNo() + " ran longer than " + seconds + " seconds.", null);
+        return true;
     }
 
     public List<FlowRunStepResponse> list(String runId) {
@@ -272,7 +305,7 @@ public class FlowRunStepService {
             .map(attempt -> new FlowRunStepAttemptResponse(
                 attempt.getAttemptId(), attempt.getStepId(), attempt.getAttemptNo(), attempt.getStatus(),
                 attempt.getStartedAt(), attempt.getEndedAt(), attempt.getRetryAt(),
-                attempt.getErrorCode(), attempt.getErrorMessage()))
+                attempt.getErrorCode(), attempt.getErrorMessage(), attempt.getTimeoutAt()))
             .toList();
     }
 
@@ -283,6 +316,80 @@ public class FlowRunStepService {
                 event.getStepId(), event.getEventType(), readJson(event.getPayloadJson()),
                 event.getRequestId(), event.getOccurredAt(), event.getActorType(), event.getActorId()))
             .toList();
+    }
+
+    /**
+     * Ends the running attempt as failed and follows the connection's failure policy with the node's retry policy
+     * (EP4, EP6). {@code actorId} null is the system, for a timeout (EP7).
+     */
+    private void recordFailure(FlowRun run, FlowRunStep step, FlowRunStepAttempt attempt, String code, String message,
+        String actorId) {
+        // Stored to the microsecond, so the retryAt answered here is the one saved.
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        attempt.setStatus("failed");
+        attempt.setEndedAt(now);
+        attempt.setErrorCode(code);
+        attempt.setErrorMessage(message);
+        step.setStatus("failed");
+        step.setEndedAt(now);
+        step.setErrorCode(code);
+        step.setErrorMessage(message);
+        attemptRepository.save(attempt);
+        stepRepository.save(step);
+        JsonNode payload = objectMapper.createObjectNode().put("errorCode", code).put("errorMessage", message);
+        eventRecorder.record(run.getFlowRunId(), step.getStepId(), "step_failed", payload, actorId);
+        if (!"graph".equals(run.getExecutionMode())) {
+            return;
+        }
+        FlowRunGraph graph = graph(run);
+        String policy = graph.failurePolicy(step.getSourceConnectionId());
+        FlowRunGraph.NodePolicy node = graph.policy(step.getNodeId());
+        if ("skip".equals(policy)) {
+            step.setStatus("skipped");
+            stepRepository.save(step);
+            eventRecorder.record(run.getFlowRunId(), step.getStepId(), "step_skipped", payload, actorId);
+        } else if ("retry".equals(policy) && attempt.getAttemptNo() <= node.retryLimit()) {
+            long delay = node.delayBeforeRetry(attempt.getAttemptNo());
+            if (delay > 0) {
+                waitToRetry(step, attempt, now.plusSeconds(delay), null, actorId);
+            } else if (node.concurrencyLimit() != null && runningOnNode(run, step.getNodeId()) >= node.concurrencyLimit()) {
+                waitToRetry(step, attempt, null, "concurrency_limit", actorId);
+            } else {
+                beginAttempt(step, "step_retried", node.timeoutSeconds(), actorId);
+            }
+        } else {
+            runService.failLocked(run, code, message, actorId);
+        }
+    }
+
+    /** Back to planned until {@code retryAt}, or until an executor starts it when the limit blocked the retry (EP4, EP6). */
+    private void waitToRetry(FlowRunStep step, FlowRunStepAttempt attempt, OffsetDateTime retryAt, String reason,
+        String actorId) {
+        attempt.setRetryAt(retryAt);
+        attemptRepository.save(attempt);
+        step.setStatus("planned");
+        step.setScheduledAt(retryAt);
+        step.setEndedAt(null);
+        stepRepository.save(step);
+        ObjectNode payload = objectMapper.createObjectNode().put("attemptNo", attempt.getAttemptNo())
+            .put("retryAt", retryAt == null ? null : retryAt.toString());
+        if (reason != null) payload.put("reason", reason);
+        eventRecorder.record(step.getFlowRunId(), step.getStepId(), "step_retry_scheduled", payload, actorId);
+    }
+
+    /** The retryAt of the failed attempt a planned step waits on, if any (EP5). */
+    private OffsetDateTime pendingRetryAt(FlowRunStep step) {
+        return attemptRepository.findTopByStepIdOrderByAttemptNoDesc(step.getStepId())
+            .filter(attempt -> "failed".equals(attempt.getStatus()))
+            .map(FlowRunStepAttempt::getRetryAt)
+            .orElse(null);
+    }
+
+    /** Running steps of the node in the revision's open graph runs, counted under the revision+node lock (EP6). */
+    private long runningOnNode(FlowRun run, String nodeId) {
+        jdbc.queryForObject("select pg_advisory_xact_lock(hashtextextended(?, 0))", Object.class,
+            "flow-run-node|" + run.getWorkflowRevisionId() + "|" + nodeId);
+        return stepRepository.countRunningGraphSteps(run.getWorkflowRevisionId(), nodeId);
     }
 
     private FlowRun writableRun(String runId) {
@@ -311,10 +418,15 @@ public class FlowRunStepService {
         return requireStep(runId, stepId);
     }
 
-    private FlowRunGraph graph(FlowRun run) {
-        WorkflowRevision revision = revisionRepository.findById(run.getWorkflowRevisionId())
+    /** The run's published revision, read through the workflow context's public query (ADR-002, EP11). */
+    private JsonNode snapshot(FlowRun run) {
+        return workflowQuery.findRevision(run.getWorkflowRevisionId(), run.getWorkflowId())
+            .map(revision -> readJson(revision.snapshotJson()))
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        return FlowRunGraph.from(readJson(revision.getSnapshotJson()));
+    }
+
+    private FlowRunGraph graph(FlowRun run) {
+        return FlowRunGraph.from(snapshot(run));
     }
 
     private void createRoutedStep(String runId, String sourceStepId, FlowRunGraph.Route route, JsonNode input) {
@@ -340,7 +452,8 @@ public class FlowRunStepService {
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
-    private void beginAttempt(FlowRunStep step, String eventType) {
+    /** {@code timeoutSeconds}: the node's time limit in a graph run (EP7); null for none. */
+    private void beginAttempt(FlowRunStep step, String eventType, Integer timeoutSeconds, String actorId) {
         int nextNumber = attemptRepository.findTopByStepIdOrderByAttemptNoDesc(step.getStepId())
             .map(previous -> previous.getAttemptNo() + 1).orElse(1);
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
@@ -350,6 +463,7 @@ public class FlowRunStepService {
         attempt.setAttemptNo(nextNumber);
         attempt.setStatus("running");
         attempt.setStartedAt(now);
+        attempt.setTimeoutAt(timeoutSeconds == null ? null : now.plusSeconds(timeoutSeconds));
         attemptRepository.save(attempt);
         step.setStatus("running");
         if (step.getStartedAt() == null) {
@@ -359,8 +473,8 @@ public class FlowRunStepService {
         step.setErrorCode(null);
         step.setErrorMessage(null);
         stepRepository.save(step);
-        appendEvent(step.getFlowRunId(), step.getStepId(), eventType,
-            objectMapper.createObjectNode().put("attemptNo", nextNumber));
+        eventRecorder.record(step.getFlowRunId(), step.getStepId(), eventType,
+            objectMapper.createObjectNode().put("attemptNo", nextNumber), actorId);
     }
 
     private FlowRunStepAttempt runningAttempt(FlowRunStep step) {
@@ -371,6 +485,15 @@ public class FlowRunStepService {
             .orElseThrow(() -> new IllegalStateException("Running step has no attempt."));
         if (!"running".equals(attempt.getStatus())) {
             throw new IllegalStateException("Running step's latest attempt is not running.");
+        }
+        return attempt;
+    }
+
+    /** A report naming an attempt that is no longer running is late, after a timeout or retry (EP8). */
+    private FlowRunStepAttempt runningAttempt(FlowRunStep step, Integer attemptNo) {
+        FlowRunStepAttempt attempt = runningAttempt(step);
+        if (attemptNo != null && attemptNo.intValue() != attempt.getAttemptNo()) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Attempt " + attemptNo + " is no longer running.");
         }
         return attempt;
     }

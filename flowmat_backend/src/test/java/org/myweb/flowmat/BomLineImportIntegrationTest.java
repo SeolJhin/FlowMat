@@ -117,6 +117,38 @@ class BomLineImportIntegrationTest extends IntegrationTestSupport {
             .andExpect(jsonPath("$.data.lines[?(@.childItemId == '" + pulp + "')].lineType").value(hasItem("waste")));
     }
 
+    @Test
+    void aPhantomColumnMarksSubAssembliesUsedThroughTheirOwnBom() throws Exception {
+        String tag = UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
+        String bread = item("BLI-BREAD2-" + tag, "unit_ea");
+        String dough = item("BLI-DOUGH-" + tag, "unit_kg");
+        String flour = item("BLI-FLOUR2-" + tag, "unit_kg");
+        item("BLI-CRUMB-" + tag, "unit_kg");
+        String doughBom = id(call(post("/boms"), json(Map.of("projectId", DEMO_PROJECT, "targetItemId", dough, "bomName", "Dough " + tag,
+            "baseQuantity", 1, "baseUnit", "kg"))), "bomId");
+        call(post("/boms/" + doughBom + "/lines"), json(Map.of("childItemId", flour, "quantity", 1, "unit", "kg"))).andExpect(status().isOk());
+        call(post("/boms/" + doughBom + "/submit")).andExpect(status().isOk());
+        call(post("/boms/" + doughBom + "/approve")).andExpect(status().isOk());
+        String breadBom = id(call(post("/boms"), json(Map.of("projectId", DEMO_PROJECT, "targetItemId", bread, "bomName", "Bread " + tag,
+            "baseQuantity", 1, "baseUnit", "ea"))), "bomId");
+
+        importLines(breadBom, true, false,
+                row("itemCode", "BLI-DOUGH-" + tag, "quantity", "2", "unit", "kg", "phantom", "maybe"),
+                row("itemCode", "BLI-FLOUR2-" + tag, "quantity", "1", "unit", "kg", "phantom", "Y"),
+                row("itemCode", "BLI-CRUMB-" + tag, "quantity", "0.1", "unit", "kg", "lineType", "waste", "phantom", "yes"))
+            .andExpect(jsonPath("$.data.errors").value(3))
+            .andExpect(jsonPath("$.data.rows[0].message").value("Phantom must be Y or N, not maybe"))
+            .andExpect(jsonPath("$.data.rows[1].message").value("BLI-FLOUR2-" + tag + " is a phantom but has no approved BOM of its own"))
+            .andExpect(jsonPath("$.data.rows[2].message").value("Only a material line can be a phantom"));
+        importLines(breadBom, false, false,
+                row("itemCode", "BLI-DOUGH-" + tag, "quantity", "2", "unit", "kg", "phantom", " Yes "),
+                row("itemCode", "BLI-CRUMB-" + tag, "quantity", "0.1", "unit", "kg", "lineType", "waste", "phantom", "N"))
+            .andExpect(jsonPath("$.data.applied").value(true));
+        call(get("/boms/" + breadBom))
+            .andExpect(jsonPath("$.data.lines[?(@.childItemId == '" + dough + "')].phantom").value(hasItem(true)))
+            .andExpect(jsonPath("$.data.lines[?(@.childItemId == '" + dough + "')].lineType").value(hasItem("material")));
+    }
+
     // ---- helpers ----
 
     @SafeVarargs

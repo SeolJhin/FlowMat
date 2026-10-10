@@ -8,6 +8,8 @@ export interface CreateProjectInput {
   ownerId: string
   projectDesc?: string
   visibility?: string
+  /** A team organization the creator belongs to; empty means their personal one (docs/domain/organization.md OR6). */
+  organizationId?: string
 }
 
 async function createProject(input: CreateProjectInput): Promise<ProjectDto> {

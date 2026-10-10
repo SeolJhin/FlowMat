@@ -14,10 +14,11 @@ import { useBomBuildableQuery, useBomsQuery } from '../../../entities/bom/api/us
 import { useEffectiveBomQuery } from '../../../entities/bom/api/useBomEffectivity'
 import { useProjectTimeZone } from '../../../entities/project/api/useProjectTimeZone'
 import { projectDay } from '../model/workOrderBomModel'
-import { approvedRevision } from '../../inventory/model/bomModel'
+import { approvedRevision, zoneDay } from '../../inventory/model/bomModel'
 import { ItemScanInput } from '../../inventory/ui/ItemScanInput'
 import { pickableItems } from '../../inventory/model/itemStatusModel'
 import { WorkOrderReadiness } from './WorkOrderReadiness'
+import { WorkOrderWasteEstimate } from './WorkOrderWasteEstimate'
 import { plannedSupply } from '../model/readinessModel'
 import { WorkOrderEquipmentPicker } from './WorkOrderEquipmentPicker'
 import { WorkOrderPlanSuggestion } from './WorkOrderPlanSuggestion'
@@ -150,7 +151,7 @@ export function WorkOrdersPanel({
         ...EMPTY_FORM,
         workOrderTitle: `${made.itemCode} for open work orders`,
         targetItemId: made.itemId,
-        bomId: approvedRevision(boms, made.itemId)?.bomId ?? '',
+        bomId: approvedRevision(boms, made.itemId, zoneDay(timeZone))?.bomId ?? '',
         targetQuantity: searchParams.get('quantity') ?? '',
       })
       setMadeFor('Filled in from open work order needs: what stock and open orders leave short. Check it, then create.')
@@ -171,7 +172,7 @@ export function WorkOrdersPanel({
       ...EMPTY_FORM,
       workOrderTitle: `${material.itemCode} for ${order.workOrderNumber}`,
       targetItemId: material.itemId,
-      bomId: approvedRevision(boms, material.itemId)?.bomId ?? '',
+      bomId: approvedRevision(boms, material.itemId, zoneDay(timeZone))?.bomId ?? '',
       targetQuantity: String(quantity),
       plannedEndAt: toLocalInput(order.plannedStartAt),
     })
@@ -180,7 +181,7 @@ export function WorkOrdersPanel({
 
   function selectTargetItem(targetItemId: string) {
     setBomPicked(false)
-    setForm((f) => ({ ...f, targetItemId, bomId: f.plannedStartAt ? '' : approvedRevision(boms, targetItemId)?.bomId ?? '' }))
+    setForm((f) => ({ ...f, targetItemId, bomId: f.plannedStartAt ? '' : approvedRevision(boms, targetItemId, zoneDay(timeZone))?.bomId ?? '' }))
   }
 
   /**
@@ -191,7 +192,7 @@ export function WorkOrdersPanel({
     setForm((f) => {
       const current = f.bomId ? bomById.get(f.bomId) : undefined
       if (bomPicked || !f.targetItemId || (current && current.bomStatus !== 'approved')) return { ...f, plannedStartAt }
-      return { ...f, plannedStartAt, bomId: plannedStartAt ? '' : approvedRevision(boms, f.targetItemId)?.bomId ?? '' }
+      return { ...f, plannedStartAt, bomId: plannedStartAt ? '' : approvedRevision(boms, f.targetItemId, zoneDay(timeZone))?.bomId ?? '' }
     })
   }
 
@@ -403,6 +404,7 @@ export function WorkOrdersPanel({
                           planned={plannedSupply(orders, order.workOrderId)}
                           onMake={(material, quantity) => makeSubAssembly(order, material, quantity)} />
                         <WorkOrderAllocations order={order} projectId={projectId} />
+                        <WorkOrderWasteEstimate workOrderId={order.workOrderId} />
                       </td>
                     </tr>
                   )}

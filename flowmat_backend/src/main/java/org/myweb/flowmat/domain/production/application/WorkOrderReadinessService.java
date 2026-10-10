@@ -237,7 +237,10 @@ public class WorkOrderReadinessService {
     private List<Material> materials(WorkOrder order, BomHeader bom, BigDecimal remaining, List<Check> checks) {
         BomRequirementResponse requirement;
         try {
-            requirement = bomService.requirementsForRun(bom.getBomId(), order.getProjectId(), order.getTargetItemId(), remaining);
+            // Phantoms expand as the order's run will freeze them: the planned day's revision (docs/domain/multi-level-bom.md P3).
+            LocalDate phantomDay = order.getPlannedStartAt() == null ? null
+                : projectCalendar.date(order.getProjectId(), order.getPlannedStartAt().toInstant());
+            requirement = bomService.requirementsForRun(bom.getBomId(), order.getProjectId(), order.getTargetItemId(), remaining, phantomDay);
         } catch (BusinessException exception) {
             checks.add(new Check("materials", FAIL, "Materials could not be calculated: " + exception.getMessage()));
             return List.of();

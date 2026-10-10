@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useBomCostRollupQuery } from '../../../entities/bom/api/useBomCostRollup'
 import { useUpdateItemMutation } from '../../../entities/catalog/api/useUpdateItemMutation'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import { costGapPercent } from '../model/bomExplosionModel'
+import { AsOfInput } from './AsOfInput'
 
 const cell = { padding: '5px 6px' } as const
 const num = { ...cell, textAlign: 'right', whiteSpace: 'nowrap' } as const
@@ -14,14 +16,16 @@ const num = { ...cell, textAlign: 'right', whiteSpace: 'nowrap' } as const
  * one-level BOM cost and stock value then pick up. Hidden when the project has no approved BOM.
  */
 export function BomCostRollup({ projectId, onOpen }: { projectId: string; onOpen: (bomId: string) => void }) {
-  const rollupQuery = useBomCostRollupQuery(projectId)
+  const [on, setOn] = useState('')
+  const rollupQuery = useBomCostRollupQuery(projectId, on)
   const updateItem = useUpdateItemMutation()
   const queryClient = useQueryClient()
   const lines = rollupQuery.data?.items ?? []
   if (rollupQuery.isError) {
     return <p style={{ color: '#dc2626', fontSize: 12 }}>{errorMessage(rollupQuery.error, 'Failed to roll up costs.')}</p>
   }
-  if (lines.length === 0) return null
+  // Hidden without approved BOMs today; kept once a day is chosen, so the day can be changed back.
+  if (lines.length === 0 && !on) return null
   const differing = lines.filter((line) => line.complete && line.currentUnitCost !== Number(line.rolledUpCost)).length
 
   async function use(itemId: string, cost: number) {
@@ -46,6 +50,8 @@ export function BomCostRollup({ projectId, onOpen }: { projectId: string; onOpen
         Bought materials&apos; unit costs, through every approved BOM level. A sub-assembly counts at its own roll-up, not its
         stored unit cost. By-products earn no credit.
       </p>
+      <AsOfInput label="Cost roll-up as of" value={on} onChange={setOn} />
+      {on && lines.length === 0 && rollupQuery.isSuccess && <p className="inspector-hint">No approved BOM is effective on {on}.</p>}
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
           <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left' }}>
@@ -92,9 +98,9 @@ export function BomCostRollup({ projectId, onOpen }: { projectId: string; onOpen
                   {line.complete && !same && (
                     <button
                       type="button"
-                      disabled={updateItem.isPending}
+                      disabled={updateItem.isPending || Boolean(on)}
                       onClick={() => void use(line.itemId, Number(line.rolledUpCost))}
-                      title="Set the item's unit cost to the rolled-up cost"
+                      title={on ? "Clear the day to set unit costs from today's roll-up" : "Set the item's unit cost to the rolled-up cost"}
                       style={{ fontSize: 11 }}
                     >
                       Use

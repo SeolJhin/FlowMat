@@ -20,6 +20,8 @@ public record ProcessIoUpdateRequest(
     @Size(max = 50) String resourceType,
     JsonNode schemaJson,
     Boolean clearSchema,
-    @Size(max = 2000) String validationRule
+    @Size(max = 2000) String validationRule,
+    /** Empties the quantity and unit; one sent along is set again (docs/domain/port-measurement.md PM5). */
+    Boolean clearMeasure
 ) {
 }

@@ -66,6 +66,12 @@ test('a short sub-assembly fills in a work order for what open orders do not mak
         checks: [{ code: 'materials', status: 'fail', message: '2 materials are short.' }],
         materials: [material('sponge', 'SPONGE', 'ea', 20, 3), material('flour', 'FLOUR', 'kg', 4, 1)] })
     }
+    if (pathname === '/api/work-orders/wo-cake/waste-disposal-estimate') {
+      // Waste still to come at today's disposal costs (docs/domain/bom-by-products.md WD8-WD9).
+      return ok(route, { workOrderId: 'wo-cake', bomId: 'cake-bom', quantity: 10, disposalCost: 2, costComplete: true,
+        lines: [{ itemId: 'crumb', itemCode: 'CRUMB', itemName: 'crumb', quantity: 0.5, unit: 'kg', unitDisposalCost: 4, cost: 2 }],
+        problem: null })
+    }
     return ok(route, [])
   })
 
@@ -74,6 +80,9 @@ test('a short sub-assembly fills in a work order for what open orders do not mak
 
   await page.getByRole('row', { name: /Cakes/ }).getByRole('button', { name: 'Readiness' }).click()
   const readiness = page.locator('[aria-label="Readiness"]')
+  const waste = page.getByRole('region', { name: 'Waste disposal estimate' })
+  await expect(waste).toContainText('CRUMB: 0.5 kg · 2')
+  await expect(waste).toContainText('Estimated disposal cost: 2')
   const sponge = readiness.getByRole('row', { name: /SPONGE/ })
   // 17 short, 5 already planned by WO-0002: make 12.
   await expect(sponge).toContainText('Make 12')

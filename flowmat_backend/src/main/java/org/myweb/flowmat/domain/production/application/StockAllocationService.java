@@ -290,8 +290,11 @@ public class StockAllocationService {
         if (remaining.signum() <= 0) {
             return needs;
         }
+        // Phantoms expand as the order's run will freeze them: the planned day's revision (docs/domain/multi-level-bom.md P3).
+        LocalDate phantomDay = order.getPlannedStartAt() == null ? null
+            : projectCalendar.date(order.getProjectId(), order.getPlannedStartAt().toInstant());
         BomRequirementResponse requirement = bomService.requirementsForRun(order.getBomId(), order.getProjectId(), order.getTargetItemId(),
-            remaining);
+            remaining, phantomDay);
         Map<String, BigDecimal> used = openRunInputs.forOrder(order.getWorkOrderId());
         for (BomRequirementResponse.Line line : requirement.lines()) {
             BigDecimal need = scale(line.requiredItemQuantity().subtract(used.getOrDefault(line.childItemId(), BigDecimal.ZERO)));

@@ -66,13 +66,25 @@ class BomPhantomIntegrationTest extends IntegrationTestSupport {
             "plannedStartAt", "2030-02-10T00:00:00Z"));
         String orderId = data(call(post("/work-orders"), order)).path("workOrderId").asText();
         call(post("/work-orders/" + orderId + "/approve"), null).andExpect(status().isOk());
+        // Readiness and allocation ask for what the run will freeze: sugar, not today's flour.
+        call(get("/work-orders/" + orderId + "/readiness"), null)
+            .andExpect(jsonPath("$.data.materials.length()").value(1))
+            .andExpect(jsonPath("$.data.materials[0].itemId").value(sugar));
+        call(post("/work-orders/" + orderId + "/allocations"), null)
+            .andExpect(jsonPath("$.data.plan.length()").value(1))
+            .andExpect(jsonPath("$.data.plan[0].itemId").value(sugar))
+            .andExpect(jsonPath("$.data.plan[0].needed").value(3.0));
         String run = data(call(post("/production-runs/start"), Map.of("projectId", DEMO_PROJECT, "workflowId", DEMO_WORKFLOW,
             "workOrderId", orderId, "plannedOutputQty", 3))).path("productionRunId").asText();
         List<Map<String, Object>> planned = jdbc.queryForList(
-            "select item_id, planned_qty from production_run_item where production_run_id = ? and quantity_source = 'bom'", run);
+            "select item_id, planned_qty, via_item_id from production_run_item where production_run_id = ? and quantity_source = 'bom'", run);
         assertEquals(1, planned.size());
         assertEquals(sugar, planned.get(0).get("item_id"));
         assertEquals(0, new BigDecimal("3").compareTo((BigDecimal) planned.get(0).get("planned_qty")));
+        // The run keeps where the line came from, for its detail screen.
+        assertEquals(dough, planned.get(0).get("via_item_id"));
+        call(get("/production-runs/" + run + "/items"), null)
+            .andExpect(jsonPath("$.data[?(@.itemId == '" + sugar + "')].viaItemId").value(hasItem(dough)));
 
         // A run without an order uses today's revision.
         String loose = data(call(post("/production-runs/start"), Map.of("projectId", DEMO_PROJECT, "workflowId", DEMO_WORKFLOW,

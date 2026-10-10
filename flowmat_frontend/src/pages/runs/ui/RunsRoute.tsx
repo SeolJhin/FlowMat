@@ -11,7 +11,8 @@ import { useWorkOrdersQuery } from '../../../entities/production/api/useWorkOrde
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { runnableWorkOrders } from '../model/workOrderActions'
 import { useBomsQuery } from '../../../entities/bom/api/useBoms'
-import { approvedRevision } from '../../inventory/model/bomModel'
+import { approvedRevision, zoneDay } from '../../inventory/model/bomModel'
+import { useProjectTimeZone } from '../../../entities/project/api/useProjectTimeZone'
 import { RunStatusBadge, formatQty } from './runDisplay'
 import { WorkOrdersPanel } from './WorkOrdersPanel'
 import { FlowRunsPanel } from './FlowRunsPanel'
@@ -51,7 +52,9 @@ export function RunsRoute() {
   // An order with a BOM always plans from it (the server uses the order's BOM), so the checkbox only applies without one.
   const orderBomId = workOrders.find((order) => order.workOrderId === form.workOrderId)?.bomId ?? null
   const orderBom = orderBomId ? boms.find((candidate) => candidate.bomId === orderBomId) : undefined
-  const bom = !orderBomId && form.targetItemId ? approvedRevision(boms, form.targetItemId) : undefined
+  // A run without an order plans from the revision effective on the project's today, as the server does.
+  const timeZone = useProjectTimeZone(projectId ?? '').query.data?.timeZone
+  const bom = !orderBomId && form.targetItemId ? approvedRevision(boms, form.targetItemId, zoneDay(timeZone)) : undefined
 
   function setView(next: 'runs' | 'work-orders' | 'flow-runs') {
     const params: Record<string, string> = {}

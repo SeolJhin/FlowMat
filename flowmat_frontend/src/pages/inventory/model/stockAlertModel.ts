@@ -1,5 +1,5 @@
 import type { BomDto, ItemDto, MaterialRequirementDto, ReorderLineDto, StockAlertDto, WorkOrderDto } from '../../../shared/types/api'
-import { approvedRevision } from './bomModel'
+import { approvedRevision, localDay } from './bomModel'
 import { isActiveItem } from './itemStatusModel'
 import { csvCell } from './ledgerModel'
 
@@ -164,6 +164,8 @@ export function subAssemblyDrafts(
   boms: Pick<BomDto, 'bomId' | 'targetItemId' | 'bomStatus'>[],
   orders: Pick<WorkOrderDto, 'workOrderNumber' | 'workOrderStatus' | 'targetItemId'>[],
   items: Map<string, ItemDto>,
+  /** The project's today (bomModel.zoneDay); the revision effective then is the one the drafts take. */
+  day: string = localDay(),
 ): { drafts: { itemId: string; itemCode: string; quantity: number; bomId: string }[]; skipped: string[] } {
   const drafts: { itemId: string; itemCode: string; quantity: number; bomId: string }[] = []
   const skipped: string[] = []
@@ -172,7 +174,7 @@ export function subAssemblyDrafts(
     const code = line.itemCode ?? line.itemId
     const draft = orders.find((order) => order.workOrderStatus === 'draft' && order.targetItemId === line.itemId)
     const item = items.get(line.itemId)
-    const bom = approvedRevision(boms as BomDto[], line.itemId)
+    const bom = approvedRevision(boms as BomDto[], line.itemId, day)
     if (draft) skipped.push(`${code} already has draft ${draft.workOrderNumber}`)
     else if (item && !isActiveItem(item)) skipped.push(`${code} is ${item.itemStatus}`)
     else if (!bom) skipped.push(`${code} has no approved BOM`)

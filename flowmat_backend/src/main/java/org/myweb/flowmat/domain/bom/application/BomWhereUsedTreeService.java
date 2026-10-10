@@ -55,6 +55,11 @@ public class BomWhereUsedTreeService {
     }
 
     public BomWhereUsedTreeResponse allLevels(String projectId, String itemId) {
+        return allLevels(projectId, itemId, null);
+    }
+
+    /** {@code on}: the day whose revisions are walked; null is the project's today (multi-level-bom.md M3, M7). */
+    public BomWhereUsedTreeResponse allLevels(String projectId, String itemId, java.time.LocalDate on) {
         if (projectId == null || projectId.isBlank() || itemId == null || itemId.isBlank()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "projectId and itemId are required.");
         }
@@ -63,8 +68,8 @@ public class BomWhereUsedTreeService {
         CatalogItemView start = catalogQuery.findProjectItem(project, itemId.trim())
             .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "Item does not exist in this project."));
 
-        // Undated, so the revisions effective on the project's today (docs/domain/multi-level-bom.md M3).
-        Map<String, BomHeader> approvedByBom = BomTree.approvedByItem(bomHeaderRepository, project, projectCalendar.today(project))
+        java.time.LocalDate day = on != null ? on : projectCalendar.today(project);
+        Map<String, BomHeader> approvedByBom = BomTree.approvedByItem(bomHeaderRepository, project, day)
             .values().stream()
             .collect(Collectors.toMap(BomHeader::getBomId, Function.identity()));
         List<BomLine> lines = approvedByBom.isEmpty() ? List.of() : bomLineRepository.findAllByBomIdIn(approvedByBom.keySet()).stream()
@@ -102,7 +107,7 @@ public class BomWhereUsedTreeService {
             })
             .sorted(Comparator.comparing(BomWhereUsedTreeResponse.TopProduct::itemCode))
             .toList();
-        return new BomWhereUsedTreeResponse(start.itemId(), start.itemCode(), unit(start), uses, topProducts, problems);
+        return new BomWhereUsedTreeResponse(start.itemId(), start.itemCode(), unit(start), uses, topProducts, problems, day);
     }
 
     private static final class TopTotal {

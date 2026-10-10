@@ -44,4 +44,19 @@ public class Process extends CreatedUpdatedAuditEntity {
 
     @Column(name = "version_nonce")
     private int versionNonce;
+
+    // Execution policy (docs/domain/flow-run-execution-policy.md EP1); null uses the default behavior.
+    private Integer timeoutSeconds;
+    private Integer retryLimit;
+    private Integer retryDelaySeconds;
+    private String retryBackoff;
+    private Integer maxRetryDelaySeconds;
+    private Integer concurrencyLimit;
+    private long executionPolicyVersion;
+
+    /** Whether any execution policy value is set, so the node is listed in a published revision (EP3). */
+    public boolean hasExecutionPolicy() {
+        return timeoutSeconds != null || retryLimit != null || retryDelaySeconds != null || retryBackoff != null
+            || maxRetryDelaySeconds != null || concurrencyLimit != null;
+    }
 }

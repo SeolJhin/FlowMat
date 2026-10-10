@@ -49,6 +49,21 @@ export function localDay(now: Date = new Date()): string {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
 }
 
+/**
+ * Today in the project's business time zone, YYYY-MM-DD, as the server picks revisions (docs/domain/project-time-zone.md,
+ * multi-level-bom.md M3); this browser's day when the zone is not known yet or not valid here.
+ */
+export function zoneDay(timeZone: string | null | undefined, now: Date = new Date()): string {
+  if (timeZone) {
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now)
+    } catch {
+      // An unknown zone falls back to this browser's day.
+    }
+  }
+  return localDay(now)
+}
+
 /** Whether a revision's effective period includes the day (YYYY-MM-DD); both ends count and a missing end is open. */
 export function coversDay(bom: Pick<BomDto, 'effectiveFrom' | 'effectiveTo'>, day: string): boolean {
   return (!bom.effectiveFrom || bom.effectiveFrom <= day) && (!bom.effectiveTo || day <= bom.effectiveTo)
@@ -70,6 +85,22 @@ export function overlappingApproved(bom: BomDto, revisions: BomDto[]): BomDto[] 
     && other.bomStatus === 'approved'
     && (!bom.effectiveTo || !other.effectiveFrom || other.effectiveFrom <= bom.effectiveTo)
     && (!other.effectiveTo || !bom.effectiveFrom || bom.effectiveFrom <= other.effectiveTo))
+}
+
+/**
+ * The day the replacement helper would end the overlapping approved revisions on, or null when it cannot: this revision
+ * needs a start day, and each overlap must start before it and not run past this revision's end
+ * (docs/domain/multi-level-bom.md M4-M6).
+ */
+export function replacementEndDay(bom: Pick<BomDto, 'effectiveFrom' | 'effectiveTo'>, overlaps: BomDto[]): string | null {
+  const from = bom.effectiveFrom
+  if (!from || overlaps.length === 0) return null
+  const fits = overlaps.every((other) => (!other.effectiveFrom || other.effectiveFrom < from)
+    && (!bom.effectiveTo || (other.effectiveTo != null && other.effectiveTo <= bom.effectiveTo)))
+  if (!fits) return null
+  const day = new Date(`${from}T00:00:00Z`)
+  day.setUTCDate(day.getUTCDate() - 1)
+  return day.toISOString().slice(0, 10)
 }
 
 /** A revision's effective period for display. */
@@ -143,11 +174,13 @@ const BOM_LINE_COLUMNS: Record<string, keyof BomLineImportRowDto> = {
   type: 'lineType',
   line_type: 'lineType',
   kind: 'lineType',
+  phantom: 'phantom',
+  is_phantom: 'phantom',
 }
 
 /**
  * A draft's lines from CSV text: item_code, quantity and unit columns by name, in any order; an optional type column says
- * material (blank), by_product or waste.
+ * material (blank), by_product or waste, and an optional phantom column Y or N.
  */
 export function bomLinesFromCsv(text: string): { ok: true; rows: BomLineImportRowDto[] } | { ok: false; error: string } {
   let parsed: string[][]

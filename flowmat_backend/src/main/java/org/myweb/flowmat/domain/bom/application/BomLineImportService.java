@@ -161,10 +161,18 @@ public class BomLineImportService {
         } catch (BusinessException e) {
             problems.add("Type must be material, by_product or waste, not " + row.lineType().trim());
         }
+        Boolean phantom = phantom(row.phantom(), problems);
+        if (Boolean.TRUE.equals(phantom) && lineType != null && !BomTree.MATERIAL.equals(lineType)) {
+            problems.add("Only a material line can be a phantom");
+        }
         if (matches.size() != 1) {
             return null;
         }
         CatalogItemView material = matches.get(0);
+        // A phantom is used through its own BOM, as approval checks (docs/domain/multi-level-bom.md P1).
+        if (Boolean.TRUE.equals(phantom) && BomTree.MATERIAL.equals(lineType) && !tree.containsKey(material.itemId())) {
+            problems.add(code + " is a phantom but has no approved BOM of its own");
+        }
         if (!ItemStatusRule.isActive(material.itemStatus())) {
             problems.add(ItemStatusRule.refusal(material.itemCode(), material.itemStatus(), "use it in a BOM"));
         }
@@ -186,8 +194,23 @@ public class BomLineImportService {
             }
         }
         return problems.isEmpty()
-            ? new BomLineCreateRequest(material.itemId(), quantity, unit, null, null, null, null, trimToNull(row.note()), lineType)
+            ? new BomLineCreateRequest(material.itemId(), quantity, unit, null, null, null, null, trimToNull(row.note()), lineType,
+                phantom)
             : null;
+    }
+
+    /** Y, yes, true or 1 is a phantom; blank, N, no, false or 0 is not; anything else is a row problem. */
+    private static Boolean phantom(String value, List<String> problems) {
+        String text = trimToNull(value);
+        if (text == null) return null;
+        return switch (text.toLowerCase(java.util.Locale.ROOT)) {
+            case "y", "yes", "true", "1" -> true;
+            case "n", "no", "false", "0" -> false;
+            default -> {
+                problems.add("Phantom must be Y or N, not " + text);
+                yield null;
+            }
+        };
     }
 
     private static String trimToNull(String value) {

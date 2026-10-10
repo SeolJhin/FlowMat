@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { useBomExplosionQuery } from '../../../entities/bom/api/useBomExplosion'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import { explosionSummary } from '../model/bomExplosionModel'
+import { AsOfInput } from './AsOfInput'
 
 const cell = { padding: '4px 6px' } as const
 const num = { ...cell, textAlign: 'right', whiteSpace: 'nowrap' } as const
@@ -12,16 +14,18 @@ const num = { ...cell, textAlign: 'right', whiteSpace: 'nowrap' } as const
  * is not taken off.
  */
 export function BomExplosion({ bomId, quantity }: { bomId: string; quantity: number }) {
-  const query = useBomExplosionQuery(bomId, quantity)
+  const [on, setOn] = useState('')
+  const query = useBomExplosionQuery(bomId, quantity, on)
   const explosion = query.data
 
   return (
     <details style={{ marginTop: 10 }}>
       <summary style={{ cursor: 'pointer', fontSize: 13 }}>Through sub-assemblies (all levels)</summary>
+      <AsOfInput label="Explosion as of" value={on} onChange={setOn} />
       {query.isError && <p role="alert" style={{ color: '#dc2626', fontSize: 12 }}>{errorMessage(query.error, 'Could not explode the BOM.')}</p>}
       {explosion && (
         <div role="region" aria-label="BOM explosion" style={{ display: 'grid', gap: 8, fontSize: 12, marginTop: 6 }}>
-          <span>{explosionSummary(explosion)}</span>
+          <span>{explosionSummary(explosion)}{explosion.asOf ? ` · as of ${explosion.asOf}` : ''}</span>
           {explosion.problems.length > 0 && <p role="note" style={{ color: '#b45309', margin: 0 }}>Not counted: {explosion.problems.join('; ')}</p>}
           <table aria-label="Exploded materials" style={{ width: '100%', borderCollapse: 'collapse' }}>
             <tbody>

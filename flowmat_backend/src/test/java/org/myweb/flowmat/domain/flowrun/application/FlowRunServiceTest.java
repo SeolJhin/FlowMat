@@ -24,9 +24,8 @@ import org.myweb.flowmat.domain.flowrun.repository.FlowRunRepository;
 import org.myweb.flowmat.domain.flowrun.repository.FlowRunStepRepository;
 import org.myweb.flowmat.domain.flowrun.repository.FlowRunStepAttemptRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.workflow.application.publicapi.WorkflowProductionQuery;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
-import org.myweb.flowmat.domain.workflow.domain.entity.WorkflowRevision;
-import org.myweb.flowmat.domain.workflow.repository.WorkflowRevisionRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.id.IdGenerator;
 
@@ -37,7 +36,7 @@ class FlowRunServiceTest {
     @Mock private FlowRunStepRepository stepRepository;
     @Mock private FlowRunStepAttemptRepository attemptRepository;
     @Mock private FlowRunEventRecorder eventRecorder;
-    @Mock private WorkflowRevisionRepository revisionRepository;
+    @Mock private WorkflowProductionQuery workflowQuery;
     @Mock private ProjectAccessService accessService;
     @Mock private EntityManager entityManager;
     @Mock private IdGenerator idGenerator;
@@ -48,7 +47,7 @@ class FlowRunServiceTest {
     @BeforeEach
     void setUp() {
         service = new FlowRunService(runRepository, stepRepository, attemptRepository,
-            eventRecorder, revisionRepository,
+            eventRecorder, workflowQuery,
             accessService, entityManager, idGenerator, objectMapper);
     }
 
@@ -57,12 +56,9 @@ class FlowRunServiceTest {
         Workflow workflow = new Workflow();
         workflow.setWorkflowId("workflow-1");
         workflow.setProjectId("project-1");
-        WorkflowRevision revision = new WorkflowRevision();
-        revision.setWorkflowRevisionId("revision-1");
-        revision.setStatus("published");
         when(accessService.requireWorkflowWriteAccess("workflow-1")).thenReturn(workflow);
-        when(revisionRepository.findByWorkflowRevisionIdAndWorkflowId("revision-1", "workflow-1"))
-            .thenReturn(Optional.of(revision));
+        when(workflowQuery.findRevision("revision-1", "workflow-1"))
+            .thenReturn(Optional.of(new WorkflowProductionQuery.Revision("revision-1", "published", null, 1)));
         when(accessService.requireCurrentUserId()).thenReturn("authenticated-user");
         when(idGenerator.generate()).thenReturn("run-1");
         when(runRepository.saveAndFlush(any(FlowRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -82,11 +78,9 @@ class FlowRunServiceTest {
     void refusesRetiredRevisionBeforeSavingRun() {
         Workflow workflow = new Workflow();
         workflow.setWorkflowId("workflow-1");
-        WorkflowRevision revision = new WorkflowRevision();
-        revision.setStatus("retired");
         when(accessService.requireWorkflowWriteAccess("workflow-1")).thenReturn(workflow);
-        when(revisionRepository.findByWorkflowRevisionIdAndWorkflowId("revision-1", "workflow-1"))
-            .thenReturn(Optional.of(revision));
+        when(workflowQuery.findRevision("revision-1", "workflow-1"))
+            .thenReturn(Optional.of(new WorkflowProductionQuery.Revision("revision-1", "retired", null, 1)));
 
         assertThrows(BusinessException.class,
             () -> service.start(new FlowRunStartRequest("workflow-1", "revision-1", "test", null)));

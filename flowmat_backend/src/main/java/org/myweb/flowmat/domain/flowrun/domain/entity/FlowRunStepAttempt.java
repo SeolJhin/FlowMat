@@ -19,6 +19,8 @@ public class FlowRunStepAttempt {
     private OffsetDateTime startedAt;
     private OffsetDateTime endedAt;
     private OffsetDateTime retryAt;
+    /** When this attempt times out (docs/domain/flow-run-execution-policy.md EP7); null without a time limit. */
+    private OffsetDateTime timeoutAt;
     private String errorCode;
     private String errorMessage;
 }

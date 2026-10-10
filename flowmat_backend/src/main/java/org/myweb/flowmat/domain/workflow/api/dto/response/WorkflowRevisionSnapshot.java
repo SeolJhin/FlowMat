@@ -15,6 +15,8 @@ public record WorkflowRevisionSnapshot(
     List<ProcessIoResponse> processIos,
     List<ProcessConnectionResponse> connections,
     List<CanvasAnnotationResponse> annotations,
-    EditorDocumentResponse editorDocument
+    EditorDocumentResponse editorDocument,
+    /** Nodes with an execution policy, as fixed at publish (docs/domain/flow-run-execution-policy.md EP3). */
+    List<NodeExecutionPolicyResponse> nodePolicies
 ) {
 }

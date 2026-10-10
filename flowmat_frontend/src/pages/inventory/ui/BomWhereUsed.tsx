@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { AsOfInput } from './AsOfInput'
 import { useBomWhereUsedQuery, useBomWhereUsedTreeQuery } from '../../../entities/bom/api/useBoms'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
@@ -94,7 +95,19 @@ export function BomWhereUsed({
  * products and how much of the item one of them takes, then every route, indented by level.
  */
 function WhereUsedAllLevels({ projectId, itemId, onOpen }: { projectId: string; itemId: string; onOpen: (bomId: string) => void }) {
-  const treeQuery = useBomWhereUsedTreeQuery(projectId, itemId)
+  const [on, setOn] = useState('')
+  return (
+    <div style={{ marginTop: 8 }}>
+      <AsOfInput label="Where used as of" value={on} onChange={setOn} />
+      <WhereUsedTree projectId={projectId} itemId={itemId} on={on} onOpen={onOpen} />
+    </div>
+  )
+}
+
+function WhereUsedTree({ projectId, itemId, on, onOpen }: {
+  projectId: string; itemId: string; on: string; onOpen: (bomId: string) => void
+}) {
+  const treeQuery = useBomWhereUsedTreeQuery(projectId, itemId, on)
   const tree = treeQuery.data
   if (treeQuery.isError) {
     return <p style={{ color: '#dc2626', fontSize: 12 }}>{errorMessage(treeQuery.error, 'Failed to look it up.')}</p>

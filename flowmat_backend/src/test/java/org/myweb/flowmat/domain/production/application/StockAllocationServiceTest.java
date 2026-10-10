@@ -134,7 +134,7 @@ class StockAllocationServiceTest {
         order.setTargetItemId("product");
         order.setTargetQuantity(BigDecimal.ONE);
         BigDecimal required = new BigDecimal("0.001");
-        when(bomService.requirementsForRun("bom", "project", "product", BigDecimal.ONE)).thenReturn(
+        when(bomService.requirementsForRun("bom", "project", "product", BigDecimal.ONE, null)).thenReturn(
             new BomRequirementResponse("bom", 1, "product", BigDecimal.ONE, BigDecimal.ONE,
                 List.of(new BomRequirementResponse.Line("line", "item", required, "kg", required,
                     "kg", required, BigDecimal.ONE, null, null)), null, false, List.of()));

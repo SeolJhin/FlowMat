@@ -78,6 +78,8 @@ test('a sub-assembly is marked, exploded and shown in open order needs', async (
       // A cake is 2 sponges; a sponge is 0.2 kg flour (at 2) and 2 eggs (at 0.5).
       const cakes = Number(url.searchParams.get('quantity'))
       return ok(route, {
+        // The day the client asked for comes back as the day used (docs/domain/multi-level-bom.md M7).
+        asOf: url.searchParams.get('on') ?? undefined,
         bomId: 'cake-bom', bomVersion: 1, targetItemId: 'cake', targetItemCode: 'CAKE', quantity: cakes, levels: 2,
         lines: [
           { level: 1, parentItemId: 'cake', itemId: 'sponge', itemCode: 'SPONGE', itemName: 'sponge', quantity: 2 * cakes, unit: 'ea',
@@ -122,6 +124,9 @@ test('a sub-assembly is marked, exploded and shown in open order needs', async (
   const bought = explosion.getByRole('table', { name: 'Bought materials' })
   await expect(bought.getByRole('row', { name: /FLOUR/ })).toContainText('4 kg')
   await expect(bought.getByRole('row', { name: /EGG/ })).toContainText('40 ea')
+  await expect(explosion).not.toContainText('as of')
+  await page.getByLabel('Explosion as of').fill('2030-02-10')
+  await expect(explosion).toContainText('as of 2030-02-10')
 
   await page.goto('/projects/prj-e2e/inventory?tab=stock')
   const needs = page.getByRole('region', { name: 'Open work order needs' })

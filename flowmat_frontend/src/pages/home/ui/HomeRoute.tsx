@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { FlowCanvasBackground } from './FlowCanvasBackground'
 import { useCreateProjectMutation } from '../../../entities/project/api/useCreateProjectMutation'
 import { useProjectsQuery } from '../../../entities/project/api/useProjectsQuery'
+import { useOrganizationsQuery } from '../../../entities/organization/api/useOrganizations'
 import { useCreateWorkflowMutation } from '../../../entities/workflow/api/useCreateWorkflowMutation'
 import { useWorkflowsQuery } from '../../../entities/workflow/api/useWorkflowsQuery'
 import {
@@ -47,6 +48,10 @@ function Dashboard({ onLogout, onRequestDormant, isLoggingOut }: DashboardProps)
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [projectName, setProjectName] = useState('')
   const [projectDesc, setProjectDesc] = useState('')
+  const [organizationId, setOrganizationId] = useState('')
+  // Team organizations only; without a choice the project goes to the creator's personal one (OR6).
+  const teamOrganizations = (useOrganizationsQuery().data ?? []).filter((organization) => organization.organizationType === 'team')
+  const chosenOrganizationId = teamOrganizations.some((organization) => organization.organizationId === organizationId) ? organizationId : ''
   const [workflowName, setWorkflowName] = useState('')
   const [workflowDesc, setWorkflowDesc] = useState('')
 
@@ -114,6 +119,7 @@ function Dashboard({ onLogout, onRequestDormant, isLoggingOut }: DashboardProps)
       ownerId: currentUser.userId,
       projectDesc,
       visibility: 'private',
+      organizationId: chosenOrganizationId || undefined,
     })
 
     setProjectName('')
@@ -162,6 +168,13 @@ function Dashboard({ onLogout, onRequestDormant, isLoggingOut }: DashboardProps)
             >
               Dormant
             </button>
+
+            <Link
+              to="/organizations"
+              className="rounded-[10px] px-3.5 py-2 text-[13px] font-medium text-[#9694a3] transition hover:bg-[#1a1b24] hover:text-[#f2f1f6]"
+            >
+              Organizations
+            </Link>
 
             {permissionsQuery.data?.canManageUsers && (
               <Link
@@ -234,6 +247,22 @@ function Dashboard({ onLogout, onRequestDormant, isLoggingOut }: DashboardProps)
               rows={2}
               className="mb-2 w-full resize-none rounded-[11px] border-2 border-[#26272f] bg-[#12131a] px-3.5 py-2.5 text-sm text-[#f2f1f6] outline-none placeholder:text-[#5f5d6b] focus:border-[#9b82ff] focus:shadow-[0_0_0_3px_rgba(124,92,255,0.28)]"
             />
+
+            {teamOrganizations.length > 0 && (
+              <select
+                aria-label="조직"
+                value={chosenOrganizationId}
+                onChange={(event) => setOrganizationId(event.target.value)}
+                className="mb-2 w-full rounded-[11px] border-2 border-[#26272f] bg-[#12131a] px-3.5 py-2.5 text-sm text-[#f2f1f6] outline-none focus:border-[#9b82ff]"
+              >
+                <option value="">개인 작업 공간 (기본)</option>
+                {teamOrganizations.map((organization) => (
+                  <option key={organization.organizationId} value={organization.organizationId}>
+                    {organization.organizationName}
+                  </option>
+                ))}
+              </select>
+            )}
 
             <button
               type="submit"

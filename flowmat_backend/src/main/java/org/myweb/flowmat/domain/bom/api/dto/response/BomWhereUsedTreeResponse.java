@@ -19,7 +19,9 @@ public record BomWhereUsedTreeResponse(
     String unit,
     List<Use> uses,
     List<TopProduct> topProducts,
-    List<String> problems
+    List<String> problems,
+    /** The project calendar day whose revisions were used (docs/domain/multi-level-bom.md M7). */
+    java.time.LocalDate asOf
 ) {
 
     /**

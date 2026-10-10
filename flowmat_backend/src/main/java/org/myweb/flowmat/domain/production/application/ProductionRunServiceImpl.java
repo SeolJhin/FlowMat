@@ -191,6 +191,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
                 planned.setPlannedQty(line.requiredItemQuantity());
                 planned.setUnit(line.itemUnit());
                 planned.setConversionRate(line.conversionRate());
+                planned.setViaItemId(line.viaItemId());
                 planned.setQuantitySource("bom");
                 productionRunItemRepository.save(planned);
             }
@@ -726,7 +727,8 @@ public class ProductionRunServiceImpl implements ProductionRunService {
             item.getCancelledAt(),
             item.getCancelReason(),
             item.getProductionRunCorrectionId(),
-            item.getCancelledByCorrectionId()
+            item.getCancelledByCorrectionId(),
+            item.getViaItemId()
         );
     }
 

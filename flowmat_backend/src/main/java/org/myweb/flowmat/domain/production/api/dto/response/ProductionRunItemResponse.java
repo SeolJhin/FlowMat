@@ -26,6 +26,8 @@ public record ProductionRunItemResponse(
     /** The correction that added this recording. */
     String productionRunCorrectionId,
     /** The correction that voided this recording; null when it was cancelled on the open run. */
-    String cancelledByCorrectionId
+    String cancelledByCorrectionId,
+    /** For a planned BOM line: the phantom sub-assembly it was expanded through (docs/domain/multi-level-bom.md P2). */
+    String viaItemId
 ) {
 }

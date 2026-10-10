@@ -29,6 +29,9 @@ const AdminRoute = lazy(() =>
 const EditorDemoRoute = lazy(() =>
   import('../../pages/editor-demo/ui/EditorDemoRoute').then((m) => ({ default: m.EditorDemoRoute }))
 )
+const OrganizationsRoute = lazy(() =>
+  import('../../pages/organizations/ui/OrganizationsRoute').then((m) => ({ default: m.OrganizationsRoute }))
+)
 const ProjectSettingsRoute = lazy(() =>
   import('../../pages/project-settings/ui/ProjectSettingsRoute').then((m) => ({ default: m.ProjectSettingsRoute }))
 )
@@ -77,6 +80,8 @@ export const router = createBrowserRouter([
           { path: '/admin', element: withSuspense(<AdminRoute />) },
         ],
       },
+      { path: '/organizations', element: withSuspense(<OrganizationsRoute />) },
+      { path: '/organizations/:organizationId', element: withSuspense(<OrganizationsRoute />) },
       { path: '/projects/:projectId/settings', element: withSuspense(<ProjectSettingsRoute />) },
       { path: '/projects/:projectId/workflows/:workflowId', element: withSuspense(<WorkspaceRoute />) },
       { path: '/projects/:projectId/inventory', element: withSuspense(<InventoryRoute />) },

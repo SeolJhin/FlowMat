@@ -64,17 +64,15 @@ Runs 화면의 Flow Runs 탭(`FlowRunsPanel`)
 
 ## 검증
 
-- 통합 테스트: `FlowRunIntegrationTest`(생산 실행 연결 포함), `FlowRunStepIntegrationTest`, `FlowRunGraphIntegrationTest`
-- 단위 테스트: `FlowRunServiceTest`, `FlowRunGraphTest`, `LinkedFlowRunServiceTest`
+- 통합 테스트: `FlowRunIntegrationTest`(생산 실행 연결 포함), `FlowRunStepIntegrationTest`, `FlowRunGraphIntegrationTest`, `FlowRunExecutionPolicyIntegrationTest`(2cp)
+- 단위 테스트: `FlowRunServiceTest`, `FlowRunGraphTest`, `FlowRunGraphPolicyTest`(2cp), `LinkedFlowRunServiceTest`
 - 비제조 흐름: `DataFlowRunIntegrationTest`(2026-10-03). 새 프로젝트에서 Item 없는 포트로 File → Transform → Data를 `actual`로 끝까지 돌리고, 제조 행(품목·재고·LOT·BOM·작업지시·생산 실행)이 생기지 않음을 확인한다
 
 ## 아직 없는 것
 
-다음은 [결정 인계](../architecture/decision-handoff.md) §3에서 보류 중이다. 시간 제한·재시도 간격·동시 실행 제한은 [ADR-004](../architecture/adr/ADR-004-flow-run-execution-policy.md) 초안(**Proposed**, 2026-10-03)이 있다.
+시간 제한·재시도 횟수와 간격·동시 실행 제한은 [ADR-004](../architecture/adr/ADR-004-flow-run-execution-policy.md)(Accepted 2026-10-05)대로 [노드 실행 정책](flow-run-execution-policy.md)에 구현했다(2026-10-10, §2 2cp, V67, 로컬 검증만). 다음은 아직 없다.
 
-- 노드 자동 실행기
-- 시간 제한
-- 재시도 간격
-- 동시 실행 제한
+- 노드 자동 실행기(서버는 단계를 시작하지 않는다)
+- 정책 편집 화면, 수동 실행·생산 연결 실행의 정책, 제한 초과 대기열
 - 여러 진입 연결의 합류
 - 수량 분할

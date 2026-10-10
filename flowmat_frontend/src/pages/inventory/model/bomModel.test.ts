@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { BomDto } from '../../../shared/types/api'
 import {
   approvedRevision, bomActions, bomLinesFromCsv, compareBoms, costChange, groupByTarget, isEditable, overlappingApproved,
-  periodLabel,
+  localDay, periodLabel, replacementEndDay, zoneDay,
 } from './bomModel'
 
 function bom(overrides: Partial<BomDto>): BomDto {
@@ -113,6 +113,39 @@ describe('compareBoms', () => {
   })
 })
 
+describe('replacementEndDay', () => {
+  it('is the day before the start when every overlap began earlier and ends within', () => {
+    const v1 = bom({ bomId: 'v1', bomStatus: 'approved', bomVersion: 1 })
+    expect(replacementEndDay({ effectiveFrom: '2030-03-01', effectiveTo: null }, [v1])).toBe('2030-02-28')
+    expect(replacementEndDay({ effectiveFrom: '2032-03-01', effectiveTo: null }, [v1])).toBe('2032-02-29')
+    expect(replacementEndDay({ effectiveFrom: null, effectiveTo: null }, [v1])).toBeNull()
+    expect(replacementEndDay({ effectiveFrom: '2030-03-01', effectiveTo: null }, [])).toBeNull()
+    expect(replacementEndDay({ effectiveFrom: '2030-03-01', effectiveTo: null },
+      [{ ...v1, effectiveFrom: '2030-03-01' }])).toBeNull()
+    expect(replacementEndDay({ effectiveFrom: '2030-03-01', effectiveTo: '2030-06-30' }, [v1])).toBeNull()
+    expect(replacementEndDay({ effectiveFrom: '2030-03-01', effectiveTo: '2030-06-30' },
+      [{ ...v1, effectiveTo: '2030-05-31' }])).toBe('2030-02-28')
+  })
+})
+
+describe('zoneDay', () => {
+  it("is the project's day in its time zone, else this browser's", () => {
+    const late = new Date('2030-01-31T16:00:00Z')
+    expect(zoneDay('Asia/Seoul', late)).toBe('2030-02-01')
+    expect(zoneDay('America/New_York', late)).toBe('2030-01-31')
+    expect(zoneDay(undefined, late)).toBe(localDay(late))
+    expect(zoneDay('Not/AZone', late)).toBe(localDay(late))
+  })
+
+  it('picks the revision effective on that day', () => {
+    const v1 = bom({ bomId: 'v1', bomStatus: 'approved', bomVersion: 1, effectiveTo: '2030-01-31' })
+    const v2 = bom({ bomId: 'v2', bomStatus: 'approved', bomVersion: 2, effectiveFrom: '2030-02-01' })
+    const late = new Date('2030-01-31T16:00:00Z')
+    expect(approvedRevision([v1, v2], 'item-a', zoneDay('Asia/Seoul', late))?.bomId).toBe('v2')
+    expect(approvedRevision([v1, v2], 'item-a', zoneDay('America/New_York', late))?.bomId).toBe('v1')
+  })
+})
+
 describe('bomLinesFromCsv', () => {
   it('reads material lines by column name', () => {
     expect(bomLinesFromCsv('Unit,Qty,Item Code,colour\ng,5000,FLR-1,white\nkg,0.2,SALT,\n')).toEqual({
@@ -132,6 +165,18 @@ describe('bomLinesFromCsv', () => {
         { itemCode: 'PEEL', quantity: '0.5', unit: 'kg', lineType: 'by_product' },
       ],
     })
+  })
+
+  it('reads an optional phantom column', () => {
+    expect(bomLinesFromCsv('item_code,quantity,unit,Is Phantom\nDOUGH,2,kg,Y\nSALT,0.1,kg,\n')).toEqual({
+      ok: true,
+      rows: [
+        { itemCode: 'DOUGH', quantity: '2', unit: 'kg', phantom: 'Y' },
+        { itemCode: 'SALT', quantity: '0.1', unit: 'kg', phantom: '' },
+      ],
+    })
+    expect(bomLinesFromCsv('item_code,quantity,unit,phantom,is_phantom\nDOUGH,2,kg,Y,N\n'))
+      .toEqual({ ok: false, error: 'Use only one phantom column, including aliases.' })
   })
 
   it.each([

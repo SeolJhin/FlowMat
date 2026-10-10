@@ -96,6 +96,25 @@ class BomMultipleApprovalIntegrationTest extends IntegrationTestSupport {
             .andExpect(jsonPath("$.data.materials[*].itemId").value(hasItem(sugar)))
             .andExpect(jsonPath("$.data.materials[*].itemId").value(not(hasItem(flour))));
 
+        // Asked for a day in the old period, the views use that day's dough revision instead (M7).
+        String past = today.minusDays(20).toString();
+        call(get("/boms/" + breadBom + "/explosion").param("quantity", "1").param("on", past))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.asOf").value(past))
+            .andExpect(jsonPath("$.data.lines[?(@.itemId == '" + dough + "')].bomId").value(hasItem(oldDough)))
+            .andExpect(jsonPath("$.data.materials[*].itemId").value(hasItem(flour)));
+        call(get("/boms/where-used/all-levels").param("projectId", DEMO_PROJECT).param("itemId", flour).param("on", past))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.topProducts[*].itemId").value(hasItem(bread)));
+        call(get("/boms/where-used/all-levels").param("projectId", DEMO_PROJECT).param("itemId", flour))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.uses.length()").value(0));
+        call(get("/boms/cost-rollup").param("projectId", DEMO_PROJECT).param("on", past))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.asOf").value(past));
+        call(get("/boms/cost-rollup").param("projectId", DEMO_PROJECT).param("on", "2030-13-01"))
+            .andExpect(status().isBadRequest());
+
         // Cake was made from bread until ten days ago. A bread revision made from cake would loop through that past
         // revision, so it is refused although today's cake revision does not use bread.
         String oldCake = draftBom(cake, bread, "ea");
@@ -109,6 +128,45 @@ class BomMultipleApprovalIntegrationTest extends IntegrationTestSupport {
         call(post("/boms/" + breadFromCake + "/submit"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.message").value(containsString("cannot contain itself")));
+    }
+
+    @Test
+    void theReplacementHelperEndsTheEarlierRevisionTheDayBeforeInOneStep() throws Exception {
+        String product = item("unit_ea");
+        String flour = item("unit_kg");
+        String sugar = item("unit_kg");
+        String v1 = approve(draftBom(product, flour, "kg"));
+        String v2 = revision(v1, sugar, "kg");
+        call(post("/boms/" + v2 + "/submit")).andExpect(status().isOk());
+        // Without a start day there is no day before to end v1 on.
+        call(post("/boms/" + v2 + "/approve"), "{\"endEarlier\":true}")
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.message").value(containsString("has no start day")));
+        call(post("/boms/" + v2 + "/reject"), "{\"note\":\"Give it a start date\"}").andExpect(status().isOk());
+        period(v2, "2030-02-01", null);
+        call(post("/boms/" + v2 + "/submit")).andExpect(status().isOk());
+
+        // Plain approval still refuses the overlap (M2); with the helper it ends v1 on 2030-01-31 in the same step.
+        call(post("/boms/" + v2 + "/approve")).andExpect(status().isConflict());
+        call(post("/boms/" + v2 + "/approve"), "{\"endEarlier\":true,\"note\":\"Sugar from February\"}")
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.bomStatus").value("approved"));
+        call(get("/boms/" + v1)).andExpect(jsonPath("$.data.bomStatus").value("approved"))
+            .andExpect(jsonPath("$.data.effectiveTo").value("2030-01-31"));
+        call(get("/boms/" + v1 + "/effectivity"))
+            .andExpect(jsonPath("$.data.history[0].effectiveTo").value("2030-01-31"))
+            .andExpect(jsonPath("$.data.history[0].reason").value("Ended by approving v2, which starts 2030-02-01."));
+        effective(product, "2030-01-31").andExpect(jsonPath("$.data.bomId").value(v1));
+        effective(product, "2030-02-01").andExpect(jsonPath("$.data.bomId").value(v2));
+
+        // A revision that starts on or after the new one's start is not ended for it: all or nothing.
+        String v3 = revision(v2, flour, "kg");
+        period(v3, "2030-01-15", "2030-03-31");
+        call(post("/boms/" + v3 + "/submit")).andExpect(status().isOk());
+        call(post("/boms/" + v3 + "/approve"), "{\"endEarlier\":true}")
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.message").value(containsString("cannot be ended before 2030-01-15")));
+        call(get("/boms/" + v1)).andExpect(jsonPath("$.data.effectiveTo").value("2030-01-31"));
     }
 
     // ---- helpers ----

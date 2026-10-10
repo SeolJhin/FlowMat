@@ -21,6 +21,24 @@ final class FlowRunGraph {
     record Route(String connectionId, String targetNodeId) {}
     record Decision(String connectionId, String targetNodeId, boolean willRoute) {}
 
+    /**
+     * A node's execution policy from its published revision; nodes without one run as before: no time limit, 3 retries
+     * at once, no concurrency limit (docs/domain/flow-run-execution-policy.md EP1, EP3).
+     */
+    record NodePolicy(Integer timeoutSeconds, int retryLimit, int retryDelaySeconds, boolean exponential,
+        Integer maxRetryDelaySeconds, Integer concurrencyLimit) {
+        static final NodePolicy DEFAULT = new NodePolicy(null, 3, 0, false, null, null);
+
+        /** Seconds to wait before retry {@code retryNumber} (1 first): fixed, or doubled each time up to the cap (EP4). */
+        long delayBeforeRetry(int retryNumber) {
+            if (retryDelaySeconds == 0) return 0;
+            if (!exponential) return retryDelaySeconds;
+            // The delay is at most 86 400 (< 2^17) and the shift at most 40, so this cannot overflow.
+            long delay = (long) retryDelaySeconds << Math.min(Math.max(retryNumber - 1, 0), 40);
+            return maxRetryDelaySeconds == null ? delay : Math.min(delay, maxRetryDelaySeconds);
+        }
+    }
+
     private record PortRef(String processId, String direction) {}
 
     private record Edge(String id, String target, String fromIoId, String toIoId,
@@ -31,14 +49,16 @@ final class FlowRunGraph {
     private final Map<String, Edge> byId;
     private final Map<String, ConditionExpression> portRules;
     private final Map<String, PortSchema> portSchemas;
+    private final Map<String, NodePolicy> policies;
 
     private FlowRunGraph(List<String> roots, Map<String, List<Edge>> outgoing, Map<String, Edge> byId,
-        Map<String, ConditionExpression> portRules, Map<String, PortSchema> portSchemas) {
+        Map<String, ConditionExpression> portRules, Map<String, PortSchema> portSchemas, Map<String, NodePolicy> policies) {
         this.roots = List.copyOf(roots);
         this.outgoing = outgoing;
         this.byId = byId;
         this.portRules = portRules;
         this.portSchemas = portSchemas;
+        this.policies = policies;
     }
 
     static FlowRunGraph from(JsonNode snapshot) {
@@ -52,6 +72,19 @@ final class FlowRunGraph {
             String id = requiredText(process, "processId");
             if (indegree.putIfAbsent(id, 0) != null) {
                 throw conflict("Published revision has duplicate process IDs.");
+            }
+        }
+        Map<String, NodePolicy> policies = new HashMap<>();
+        JsonNode nodePolicies = snapshot.path("nodePolicies");
+        if (!nodePolicies.isMissingNode() && !nodePolicies.isNull()) {
+            if (!nodePolicies.isArray()) {
+                throw conflict("Published revision has invalid nodePolicies.");
+            }
+            for (JsonNode policy : nodePolicies) {
+                String processId = requiredText(policy, "processId");
+                if (!indegree.containsKey(processId) || policies.putIfAbsent(processId, policy(policy, processId)) != null) {
+                    throw conflict("Published revision has an invalid node policy: " + processId);
+                }
             }
         }
         Map<String, String> portUnits = new HashMap<>();
@@ -139,11 +172,15 @@ final class FlowRunGraph {
         if (visited != indegree.size()) {
             throw conflict("Graph revisions with cycles cannot execute.");
         }
-        return new FlowRunGraph(roots, outgoing, byId, portRules, portSchemas);
+        return new FlowRunGraph(roots, outgoing, byId, portRules, portSchemas, policies);
     }
 
     List<String> roots() {
         return roots;
+    }
+
+    NodePolicy policy(String nodeId) {
+        return policies.getOrDefault(nodeId, NodePolicy.DEFAULT);
     }
 
     String failurePolicy(String sourceConnectionId) {
@@ -248,6 +285,29 @@ final class FlowRunGraph {
         if (node.isTextual()) return node.textValue();
         if (node.isBoolean()) return node.booleanValue();
         return null;
+    }
+
+    private static NodePolicy policy(JsonNode node, String processId) {
+        Integer timeout = bounded(node, "timeoutSeconds", 1, 604_800, processId);
+        Integer limit = bounded(node, "retryLimit", 0, 10, processId);
+        Integer delay = bounded(node, "retryDelaySeconds", 0, 86_400, processId);
+        String backoff = textOrNull(node.path("retryBackoff"));
+        if (backoff != null && !"fixed".equals(backoff) && !"exponential".equals(backoff)) {
+            throw conflict("Published revision has an invalid node policy: " + processId);
+        }
+        Integer cap = bounded(node, "maxRetryDelaySeconds", 0, 604_800, processId);
+        Integer concurrency = bounded(node, "concurrencyLimit", 1, 1000, processId);
+        return new NodePolicy(timeout, limit == null ? NodePolicy.DEFAULT.retryLimit() : limit, delay == null ? 0 : delay,
+            "exponential".equals(backoff), cap, concurrency);
+    }
+
+    private static Integer bounded(JsonNode node, String field, int min, int max, String processId) {
+        JsonNode value = node.path(field);
+        if (value.isMissingNode() || value.isNull()) return null;
+        if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < min || value.intValue() > max) {
+            throw conflict("Published revision has an invalid node policy: " + processId);
+        }
+        return value.intValue();
     }
 
     private static String requiredText(JsonNode node, String field) {

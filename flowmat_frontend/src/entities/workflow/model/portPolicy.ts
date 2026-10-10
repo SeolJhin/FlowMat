@@ -58,13 +58,19 @@ export function toPortFormState(port: CanvasPortViewModel): PortFormState {
     resourceType: port.resourceType ?? ioType,
     schemaJson: port.schemaJson ? JSON.stringify(port.schemaJson, null, 2) : '',
     validationRule: port.validationRule ?? '',
-    quantity: port.quantity || '0',
+    quantity: port.quantity ?? '',
     unit: port.unit ?? '',
     formula: port.formula ?? '',
     colorScheme: port.colorScheme ?? DEFAULT_COLOR_BY_DIRECTION[port.direction],
     requiredYn: port.required ? 'Y' : 'N',
     allowShortageYn: port.allowShortage ? 'Y' : 'N',
   }
+}
+
+/** Material and product ports and ports bound to an item need a quantity and unit (docs/domain/port-measurement.md PM2). */
+export function portNeedsMeasure(state: Pick<PortFormState, 'resourceType' | 'ioType' | 'itemId'>): boolean {
+  const type = (state.resourceType.trim() || state.ioType.trim() || DEFAULT_IO_TYPE).toLowerCase()
+  return type === 'material' || type === 'product' || Boolean(state.itemId.trim())
 }
 
 export function applyItemDefaults(state: PortFormState, item: ItemDto | undefined): PortFormState {
@@ -88,8 +94,9 @@ export function toCreateProcessIoInput(processId: string, state: PortFormState):
     resourceType: state.resourceType.trim().toLowerCase(),
     schemaJson: parseSchemaJson(state.schemaJson),
     validationRule: normalizeOptionalText(state.validationRule),
-    quantity: normalizeQuantity(state.quantity),
-    unit: state.unit.trim(),
+    // Left blank, they are left out; only ports that need them must have them (PM4).
+    quantity: state.quantity.trim() ? normalizeQuantity(state.quantity) : undefined,
+    unit: normalizeOptionalText(state.unit),
     formula: normalizeOptionalText(state.formula),
     colorScheme: state.colorScheme.trim().toLowerCase(),
     requiredYn: state.requiredYn,
@@ -111,8 +118,10 @@ export function toUpdateProcessIoInput(state: PortFormState): UpdateProcessIoInp
     schemaJson: parseSchemaJson(state.schemaJson),
     clearSchema: !state.schemaJson.trim(),
     validationRule: state.validationRule.trim(),
-    quantity: normalizeQuantity(state.quantity),
-    unit: state.unit.trim(),
+    // A blank quantity or unit is emptied on the server; the other is set again (PM5).
+    ...(!state.quantity.trim() || !state.unit.trim() ? { clearMeasure: true } : {}),
+    quantity: state.quantity.trim() ? normalizeQuantity(state.quantity) : undefined,
+    unit: normalizeOptionalText(state.unit),
     formula: state.formula.trim(),
     colorScheme: state.colorScheme.trim().toLowerCase(),
     requiredYn: state.requiredYn,
@@ -121,8 +130,12 @@ export function toUpdateProcessIoInput(state: PortFormState): UpdateProcessIoInp
 }
 
 export function hasValidPortSelection(state: PortFormState): boolean {
-  return Boolean(state.unit.trim()) && Boolean(state.resourceType.trim())
-    && isValidQuantity(state.quantity)
+  const quantity = state.quantity.trim()
+  const unit = state.unit.trim()
+  // PM2-PM3: material and product need both; any other port may leave both out, but a quantity needs a unit.
+  const measured = portNeedsMeasure(state) ? Boolean(quantity) && Boolean(unit) : !quantity || Boolean(unit)
+  return measured && Boolean(state.resourceType.trim())
+    && (!quantity || isValidQuantity(quantity))
     && state.ioName.trim().length <= 100 && state.ioType.trim().length <= 30
     && state.role.trim().length <= 50 && state.resourceType.trim().length <= 50
     && state.unit.trim().length <= 20 && state.colorScheme.trim().length <= 30

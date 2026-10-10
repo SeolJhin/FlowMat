@@ -6,6 +6,7 @@ import {
   applyItemDefaults,
   createDefaultPortFormState,
   hasValidPortSelection,
+  portNeedsMeasure,
   isValidSchemaJson,
   toCreateProcessIoInput,
   toPortFormState,
@@ -336,6 +337,7 @@ export function NodeInspector({
                   type="number"
                   min="0"
                   step="0.0001"
+                  required={portNeedsMeasure(portForm)}
                   value={portForm.quantity}
                   onChange={(event) => setPortForm((current) => ({ ...current, quantity: event.target.value }))}
                 />
@@ -343,9 +345,14 @@ export function NodeInspector({
 
               <label style={{ display: 'grid', gap: '4px' }}>
                 <span>Unit</span>
-                <input maxLength={20} value={portForm.unit} onChange={(event) => setPortForm((current) => ({ ...current, unit: event.target.value }))} />
+                <input maxLength={20} required={portNeedsMeasure(portForm)} value={portForm.unit} onChange={(event) => setPortForm((current) => ({ ...current, unit: event.target.value }))} />
               </label>
             </div>
+            <small className="inspector-hint">
+              {portNeedsMeasure(portForm)
+                ? 'Material, product and item ports need a quantity and unit.'
+                : 'Quantity and unit are optional for this resource type; a quantity needs a unit.'}
+            </small>
 
             <label style={{ display: 'grid', gap: '4px' }}>
               <span>Formula</span>

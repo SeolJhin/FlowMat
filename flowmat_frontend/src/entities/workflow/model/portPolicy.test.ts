@@ -1,9 +1,36 @@
 import { describe, expect, it } from 'vitest'
-import { createDefaultPortFormState, hasValidPortSelection, toCreateProcessIoInput, toPortFormState, toUpdateProcessIoInput } from './portPolicy'
+import {
+  createDefaultPortFormState, hasValidPortSelection, portNeedsMeasure, toCreateProcessIoInput, toPortFormState, toUpdateProcessIoInput,
+} from './portPolicy'
 import { toPortViewModel } from './toWorkflowCanvasViewModel'
 import type { ProcessIoDto } from '../../../shared/types/api'
 
 describe('port contract form', () => {
+  it('needs a quantity and unit only on material, product and item ports (docs/domain/port-measurement.md)', () => {
+    const data = { ...createDefaultPortFormState('output'), ioType: 'data', resourceType: 'data', quantity: '', unit: '' }
+    expect(portNeedsMeasure(data)).toBe(false)
+    expect(hasValidPortSelection(data)).toBe(true)
+    expect(toCreateProcessIoInput('process-1', data)).toMatchObject({ quantity: undefined, unit: undefined })
+    expect(hasValidPortSelection({ ...data, quantity: '3' })).toBe(false)
+    expect(hasValidPortSelection({ ...data, unit: 'kWh' })).toBe(true)
+    // A blank value is cleared on update; the other one is sent again.
+    expect(toUpdateProcessIoInput({ ...data, processIoId: 'port-1', unit: 'kWh' }))
+      .toMatchObject({ clearMeasure: true, quantity: undefined, unit: 'kWh' })
+    expect(toUpdateProcessIoInput({ ...data, processIoId: 'port-1', quantity: '2', unit: 'kWh' }).clearMeasure).toBeUndefined()
+
+    const material = { ...data, ioType: 'material', resourceType: 'material' }
+    expect(portNeedsMeasure(material)).toBe(true)
+    expect(hasValidPortSelection(material)).toBe(false)
+    expect(hasValidPortSelection({ ...material, quantity: '0', unit: 'kg' })).toBe(true)
+    expect(portNeedsMeasure({ ...data, itemId: 'item-1' })).toBe(true)
+    expect(portNeedsMeasure({ ...data, resourceType: ' Product ' })).toBe(true)
+
+    const stored = toPortViewModel({ processIoId: 'port-2', processId: 'process-1', itemId: null, ioName: 'Rows',
+      direction: 'output', ioType: 'data', role: null, resourceType: 'data', schemaJson: null, validationRule: null,
+      quantity: null, unit: null, formula: null, colorScheme: null, requiredYn: 'Y', allowShortageYn: 'N' } as unknown as ProcessIoDto)
+    expect(toPortFormState(stored)).toMatchObject({ quantity: '', unit: '' })
+  })
+
   it('can edit a stored port with nullable display fields', () => {
     const port: ProcessIoDto = {
       processIoId: 'port-1', processId: 'process-1', itemId: 'item-1',
