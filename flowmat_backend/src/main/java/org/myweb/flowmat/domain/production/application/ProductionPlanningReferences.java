@@ -22,6 +22,7 @@ public class ProductionPlanningReferences {
     private final CatalogUnitQuery units;
     private final StockFactsQuery stocks;
     private final BomPlanningQuery boms;
+    private final org.myweb.flowmat.domain.workflow.application.publicapi.WorkflowProductionQuery workflows;
     private final ObjectMapper mapper;
     public Optional<Item> item(String id) { return items.findActiveItem(id).map(f -> read(f.json(),Item.class)); }
     public List<Item> items(Collection<String> ids) { return items.findItems(ids).stream().map(f -> read(f.json(),Item.class)).toList(); }
@@ -31,6 +32,9 @@ public class ProductionPlanningReferences {
     public List<Inventory> lockItemStock(String project,String item) { return stocks.lockItemStock(project,item).stream().map(f -> read(f.json(),Inventory.class)).toList(); }
     public List<LotMaster> lots(Collection<String> ids) { return stocks.lots(ids).stream().map(f -> read(f.json(),LotMaster.class)).toList(); }
     public Optional<BomHeader> bom(String id) { return boms.findActive(id).map(f -> read(f.json(),BomHeader.class)); }
+    public Optional<org.myweb.flowmat.domain.workflow.domain.entity.Workflow> workflow(String id) {
+        return workflows.findWorkflow(id).map(f -> read(f.json(),org.myweb.flowmat.domain.workflow.domain.entity.Workflow.class));
+    }
     private <T> T read(String json,Class<T> type) {
         try { return mapper.readValue(json,type); }
         catch(JsonProcessingException error) { throw new IllegalStateException("Invalid internal planning facts.",error); }

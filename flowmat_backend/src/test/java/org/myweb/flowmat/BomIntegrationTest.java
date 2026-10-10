@@ -87,12 +87,13 @@ class BomIntegrationTest extends IntegrationTestSupport {
             .andExpect(jsonPath("$.data.bomId").value(v1))
             .andExpect(jsonPath("$.data.bomVersion").value(1))).path("productionRunId").asText();
 
-        // v2 doubles the material; approving it retires v1.
+        // v2 doubles the material and replaces v1, which is retired explicitly: approval retires nothing (M1).
         String v2 = data(call(post("/boms/" + v1 + "/revisions")).andExpect(status().isOk())).path("bomId").asText();
         String v2LineId = data(call(get("/boms/" + v2))).path("lines").get(0).path("bomLineId").asText();
         call(delete("/boms/" + v2 + "/lines/" + v2LineId)).andExpect(status().isOk());
         call(post("/boms/" + v2 + "/lines"), line(material, "40", "kg")).andExpect(status().isOk());
         call(post("/boms/" + v2 + "/submit")).andExpect(status().isOk());
+        call(post("/boms/" + v1 + "/retire")).andExpect(status().isOk());
         call(post("/boms/" + v2 + "/approve")).andExpect(status().isOk()).andExpect(jsonPath("$.data.bomVersion").value(2));
         call(get("/boms/" + v1)).andExpect(jsonPath("$.data.bomStatus").value("retired"));
 

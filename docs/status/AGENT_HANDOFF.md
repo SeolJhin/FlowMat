@@ -1,12 +1,23 @@
 # Agent 인계 (세션 1 구역)
 
+> **2026-10-09 최신 상태:** 사용자 `수정 허가`로 project 시간대/settings/공개 Query, production 마감/workflow 공개 Query 및 첨부 storage/config/build.gradle 범위를 진행했다. 2bx–2bz 완료. 최종 격리 백엔드 **1,193 실패·오류·건너뜀 0**, 라인 **82.13%**·분기 **68.81%**·커버리지 기준/bootJar. 프런트 **590**·타입·lint·빌드, 전체 기본 모의 E2E **116 통과/16 의도적 제외**. 첨부 transport 라인 100%·분기 90%, 서버 첨부 서비스 라인 98.25%, 내용 검증 96%, S3 구현/설정 100%. Stage B 동결 80→54(새 위반 0), 원본/격리 src 불일치 0. 최초 전체 1,184 중 7 실패는 fixture 1·새 의존성 mock 6으로 수정했고, 후속 25 중 2 실패는 누락 업로드 500·시간대 동시 덮어쓰기의 실제 버그로 수정했다. V1–V58 수정/repair 없음, 새 V59는 전용 SQL rollback·Testcontainers에만 적용. 이 세션은 개발 DB의 BOM·기존 서버·브랜치/커밋/푸시를 건드리지 않았다. 새 번호 V60(직전 최고 재확인). D2 품목 삭제 한 건은 미응답으로 유지한다.
+
+## 2026-10-09 인계
+
+- 산출물: `C:/Users/Public/Documents/ESTsoft/CreatorTemp/flowmat-cost-20261005/final-calendar-attachment-validation-20261009.json`, `final-calendar-attachment-20261009.log`, `frontend-all-20261009.log`, `frontend-lint-20261009.log`, `frontend-build-20261009.log`, `attachment-frontend-coverage-20261009.log`, `all-mock-calendar-attachment-20261009.log`. 브라우저 결과는 `all-mock-calendar-attachment-results/`.
+- 새 V59 SQL은 최소 parent table을 둔 포트 없는 전용 PostgreSQL에서 BEGIN/ROLLBACK(생성 1→롤백 0)으로 확인했고 전체 실제 스키마는 Testcontainers로 검증했다. V58/V59를 기존 개발 DB에 적용하지 않았다.
+- 검증용 4189 서버는 PID·시작 시각·스크립트와 확인한 자식 4개만 종료했다. 포트 없는 flowmat-attachment-rehearsal-20261009도 ID·작업 label·빈 host binding 대조 후 제거했다. 사용자 서버/컨테이너는 건드리지 않았다.
+- 소스는 unstaged. 수정한 계약·상태 문서만 staging. UTF-8 BOM 0, diff 공백 오류 0. 사용자 HEAD 9162c6d는 바꾸지 않았다.
+- 다음 승인 구현: 유효일 BOM은 `BomRevisionQuery.findEffective(projectId,itemId,on)` 기반은 있으나 아직 WorkOrderService에서 plannedStartAt의 프로젝트 날짜로 선택하지 않는다. 다중 approved·기간 overlap 거절·자동 retire 제거 및 phantom line 전개가 남아 있다. 이 부분은 지금 완료로 표시하지 않는다. 수정 전 status·최대 migration 번호 확인을 계속 지킨다.
+- 지침 첨부는 서버 확인을 잃은 경우 동일 File/UUID로 재시도한다. 새로고침은 File 객체를 저장하지 않으므로 파일 목록으로 확인한다. 외부 버킷 검증/운영 파일 이관·보존기간·미참조 회수·바이러스 검사·실사용/부하 검증은 별도다. 기본 모의 browser 16개 제외는 실 API/수동 조건 스펙이며, 실제 API BOM 생성 스펙은 실행하지 않는다.
+
 > **2026-10-08 최신 상태:** 사용자 HEAD 0a38981 원격 backend/frontend/browser/security CI 성공. 2bq/2br 인계 보완·2bs 설비 원가/추정·2bt 다차원 setup 속성·2bu 계획 갱신·2bv 저장 규칙 미리보기·2bw revision 새로고침 복구 완료. 최종 전체 격리 백엔드 1,165 실패·오류·건너뜀 0·라인 81.89%·분기 68.70%·기준/빌드, 프런트 572·타입·기존 JS/JSX lint·빌드. 전체 기본 모의 E2E 110 통과/16 의도적 제외. V56/V57은 SQL BEGIN/ROLLBACK·Testcontainers에만 적용. 개발 DB BOM·기존 V1–V55·기존 서버·브랜치/커밋/푸시 변경 없음. 다음 V58(직전 최고 재확인). 재개 시 존재한 EquipmentSequence·테스트·equipment-changeover 문서·package-lock 변경 보존. project 시간대/workflow actualEndAt/D2 및 첨부 공용 storage/config/build.gradle 범위 회신 대기. 검증용 4189 프런트와 포트 없는 flowmat-setup-rehearsal-20261008 컨테이너는 소유 확인 후 종료·제거했다. 사용자 서버는 건드리지 않았다.
 
 ## 2026-10-08 검증 산출물과 다음 범위
 
 - 산출물: `C:/Users/Public/Documents/ESTsoft/CreatorTemp/flowmat-cost-20261005/`의 `with-preview-validation-20261008.json`, `with-preview-jacoco-20261008.xml`, `full-with-preview-validation-20261008.log`, `frontend-revision-reload-tests-20261008.log`, `frontend-revision-reload-build-20261008.log`, `all-mock-revision-reload-20261008.log`. 브라우저 trace·스크린샷은 `all-mock-revision-reload-20261008/`.
 - 원격 CI 성공은 기존 HEAD 0a38981에 대한 결과다. 이번 커밋 전 구현은 로컬 격리 전체 검증을 통과했으며 원격에는 보내지 않았다.
-- 다음 구현: 프로젝트 시간대 설정/공개 Query, workflow 실제 마감 시각, 지침 첨부 Local-S3. 정책은 이미 승인됐으며 공유 영역 수정 범위 회신을 기다린다. D2 품목 삭제 집계는 확인 전 15/15로 표시하지 않는다. 새 일을 임의로 추가하거나 미응답을 승인으로 간주하지 않는다.
+- 다음 구현: 프로젝트 시간대 설정/공개 Query, workflow 실제 마감 시각, 지침 첨부 Local-S3. 정책과 공유 영역 수정은 사용자 허가 후 2bx–2bz에서 구현했다. D2 품목 삭제 집계는 확인 전 15/15로 표시하지 않는다. 새 일을 임의로 추가하거나 미응답을 승인으로 간주하지 않는다.
 - 코드는 스테이징하지 않는다. 이 작업의 도메인 계약·상태 문서만 스테이징한다. 재개 시 존재한 `docs/domain/equipment-changeover.md`는 다른 작업자의 변경이므로 제외한다.
 
 > **2026-10-06 부산물 가치 후속:** 2bp 구현·검증 완료. 전체 격리 백엔드 1,128 실패·오류·건너뜀 0·라인 81.60%·분기 68.09%·기준/빌드, 프런트 476·타입·기존 lint·빌드, 전체 기본 모의 브라우저 99 통과/16 제외 및 조회 복구 추가 뒤 관련 5 통과. 재료비 차감 없이 고정 BOM 부산물 실제량 × D+ 가격을 별도 표시, 폐기 비용/배출 모델은 미구현. 다음은 2bq 전환 규칙 삭제·수정 동시성 재현. BOM revision 생성 requestId는 아직 없으며 응답 유실 방어 후속 필요. 프로젝트 시간대/마감 공개 API 허가 답변 대기 유지. 개발 DB·기존 서버·V1–V55 변경 없음.

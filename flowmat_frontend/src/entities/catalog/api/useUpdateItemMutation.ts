@@ -14,6 +14,8 @@ export interface UpdateItemInput {
   itemStatus?: string
   /** Can only change while the item has no stock records (409 otherwise). */
   lotManageYn?: 'Y' | 'N'
+  /** Applies to LOTs registered from now on (docs/domain/lot-release.md). */
+  lotReleaseRequiredYn?: 'Y' | 'N'
   /** Omitted: unchanged. 0 stops watching. */
   safetyStockQty?: number
   /** Omitted: unchanged. */

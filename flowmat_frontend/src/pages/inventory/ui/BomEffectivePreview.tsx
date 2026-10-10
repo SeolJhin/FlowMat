@@ -21,7 +21,7 @@ export function BomEffectivePreview({ projectId, boms }: { projectId: string; bo
   }
   return <section aria-label="BOM effective revision preview" style={{ marginTop: 18 }}>
     <h4>Find revision for a date</h4>
-    <p>This preview does not change a work order or execution. Planned-date revision selection is not available yet.</p>
+    <p>This preview does not change a work order or execution. A work order without a chosen BOM gets the revision effective on its planned start.</p>
     <form onSubmit={submit} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end' }}>
       <label>Preview product <select value={target} required onChange={(event) => { setTarget(event.target.value); setSearch(null); setMessage(null) }}>
         <option value="">Choose a product</option>{[...products.entries()].map(([id, name]) => <option key={id} value={id}>{name}</option>)}

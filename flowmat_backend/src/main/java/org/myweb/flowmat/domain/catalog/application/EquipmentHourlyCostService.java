@@ -10,14 +10,18 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.api.dto.request.EquipmentHourlyCostRequest;
+import org.myweb.flowmat.domain.catalog.api.dto.response.EquipmentHourlyCostChangeResponse;
 import org.myweb.flowmat.domain.catalog.api.dto.response.EquipmentHourlyCostResponse;
 import org.myweb.flowmat.domain.catalog.application.publicapi.EquipmentCostQuery;
 import org.myweb.flowmat.domain.catalog.domain.entity.Equipment;
 import org.myweb.flowmat.domain.catalog.domain.entity.EquipmentHourlyCost;
+import org.myweb.flowmat.domain.catalog.domain.entity.EquipmentHourlyCostHistory;
+import org.myweb.flowmat.domain.catalog.repository.EquipmentHourlyCostHistoryRepository;
 import org.myweb.flowmat.domain.catalog.repository.EquipmentRepository;
 import org.myweb.flowmat.domain.catalog.repository.EquipmentHourlyCostRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
@@ -34,6 +38,7 @@ public class EquipmentHourlyCostService implements EquipmentCostQuery {
     private final EquipmentHourlyCostRepository costs;
     private final ProjectAccessService access;
     private final EntityManager entities;
+    private final EquipmentHourlyCostHistoryRepository history;
 
     public EquipmentHourlyCostResponse get(String equipmentId) {
         Equipment found = live(equipmentId);
@@ -67,12 +72,27 @@ public class EquipmentHourlyCostService implements EquipmentCostQuery {
             throw new BusinessException(ErrorCode.CONFLICT, "expectedVersion changed; reload the current hourlyCost before saving a different rate.");
         }
         if (version == Long.MAX_VALUE) throw new BusinessException(ErrorCode.CONFLICT, "expectedVersion has reached its limit.");
+        BigDecimal previous = current == null ? null : current.getHourlyCost();
         if (current == null) { current = new EquipmentHourlyCost(); current.setEquipmentId(equipmentId); }
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         current.setHourlyCost(cost);
         current.setVersion(version + 1);
         current.setUpdatedBy(actor);
-        current.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
-        return response(costs.save(current));
+        current.setUpdatedAt(now);
+        EquipmentHourlyCost saved = costs.save(current);
+        // A change of the rate is history, so a corrected setup can take the rate of its day (AS9).
+        if (!same(previous, cost)) {
+            EquipmentHourlyCostHistory change = new EquipmentHourlyCostHistory();
+            change.setEquipmentHourlyCostHistoryId(java.util.UUID.randomUUID().toString());
+            change.setEquipmentId(equipmentId);
+            change.setPreviousHourlyCost(previous);
+            change.setHourlyCost(cost);
+            change.setVersion(version + 1);
+            change.setChangedBy(actor);
+            change.setChangedAt(now);
+            history.save(change);
+        }
+        return response(saved);
     }
 
     @Override
@@ -84,6 +104,45 @@ public class EquipmentHourlyCostService implements EquipmentCostQuery {
         Map<String, BigDecimal> result = new HashMap<>();
         costs.findAllById(allowed).forEach(one -> { if (one.getHourlyCost() != null) result.put(one.getEquipmentId(), one.getHourlyCost()); });
         return result;
+    }
+
+    @Override
+    public Optional<EquipmentRate> findHourlyRate(String projectId, String equipmentId) {
+        if (equipmentId == null) return Optional.empty();
+        return equipment.findByEquipmentIdAndDeletedYn(equipmentId, "N")
+            .filter(one -> Objects.equals(projectId, one.getProjectId()))
+            .map(one -> costs.findById(one.getEquipmentId())
+                .map(cost -> new EquipmentRate(one.getEquipmentId(), cost.getHourlyCost(), cost.getVersion()))
+                .orElse(new EquipmentRate(one.getEquipmentId(), null, 0)));
+    }
+
+    /** The latest 50 rate changes, newest first (AS9). Project read. */
+    public java.util.List<EquipmentHourlyCostChangeResponse> history(String equipmentId) {
+        Equipment found = live(equipmentId);
+        access.requireProjectReadAccess(found.getProjectId());
+        return history.findAllByEquipmentIdOrderByChangedAtDescEquipmentHourlyCostHistoryIdDesc(equipmentId).stream().limit(50)
+            .map(row -> new EquipmentHourlyCostChangeResponse(row.getPreviousHourlyCost(), row.getHourlyCost(), row.getVersion(),
+                row.getChangedBy(), row.getChangedAt()))
+            .toList();
+    }
+
+    @Override
+    public Optional<EquipmentRateAt> findHourlyRateAt(String projectId, String equipmentId, OffsetDateTime at) {
+        if (equipmentId == null) return Optional.empty();
+        Equipment found = equipment.findByEquipmentIdAndDeletedYn(equipmentId, "N")
+            .filter(one -> Objects.equals(projectId, one.getProjectId())).orElse(null);
+        if (found == null) return Optional.empty();
+        EquipmentHourlyCost now = costs.findById(equipmentId).orElse(null);
+        var rows = history.findAllByEquipmentIdOrderByChangedAtDescEquipmentHourlyCostHistoryIdDesc(equipmentId);
+        if (at == null || rows.isEmpty()) {
+            return Optional.of(new EquipmentRateAt(equipmentId, now == null ? null : now.getHourlyCost(), now == null ? 0 : now.getVersion(), true));
+        }
+        var selected = rows.stream().filter(row -> !row.getChangedAt().isAfter(at)).findFirst().orElse(null);
+        if (selected != null) {
+            return Optional.of(new EquipmentRateAt(equipmentId, selected.getHourlyCost(), selected.getVersion(), false));
+        }
+        var earliest = rows.getLast();
+        return Optional.of(new EquipmentRateAt(equipmentId, earliest.getPreviousHourlyCost(), earliest.getVersion() - 1, true));
     }
 
     private Equipment live(String id) {

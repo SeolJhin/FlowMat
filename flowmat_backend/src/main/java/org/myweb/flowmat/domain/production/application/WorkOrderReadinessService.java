@@ -16,9 +16,9 @@ import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
 import org.myweb.flowmat.domain.bom.application.BomService;
 import org.myweb.flowmat.domain.bom.domain.entity.BomHeader;
-import org.myweb.flowmat.domain.catalog.application.EquipmentChangeoverService;
-import org.myweb.flowmat.domain.catalog.application.EquipmentScheduleService;
-import org.myweb.flowmat.domain.catalog.domain.entity.Equipment;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
+import org.myweb.flowmat.domain.catalog.application.publicapi.EquipmentWindow;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogEquipmentView;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
@@ -57,9 +57,7 @@ public class WorkOrderReadinessService {
     private final ProductionRunRepository productionRunRepository;
     private final BomService bomService;
     private final OpenRunInputs openRunInputs;
-    private final EquipmentRepository equipmentRepository;
-    private final EquipmentScheduleService equipmentScheduleService;
-    private final EquipmentChangeoverService equipmentChangeoverService;
+    private final CatalogQuery catalog;
     private final StockAllocationRepository stockAllocationRepository;
 
     /** LOTs expiring within this many days are called out (same setting as the stock alerts). */
@@ -135,17 +133,17 @@ public class WorkOrderReadinessService {
      * running orders are planned on it at the same time.
      */
     private void equipmentChecks(WorkOrder order, BigDecimal remaining, List<Check> checks) {
-        Equipment equipment = equipmentRepository.findByEquipmentIdAndDeletedYn(order.getEquipmentId(), NOT_DELETED).orElse(null);
+        CatalogEquipmentView equipment = catalog.findProjectEquipment(order.getProjectId(), order.getEquipmentId()).orElse(null);
         if (equipment == null) {
             checks.add(new Check("equipment", FAIL, "The assigned equipment no longer exists; assign other equipment."));
             return;
         }
-        String name = "Equipment " + (equipment.getEquipmentCode() != null ? equipment.getEquipmentCode() : equipment.getEquipmentName());
-        if ("inactive".equals(equipment.getEquipmentStatus())) {
+        String name = "Equipment " + (equipment.equipmentCode() != null ? equipment.equipmentCode() : equipment.equipmentName());
+        if ("inactive".equals(equipment.equipmentStatus())) {
             checks.add(new Check("equipment", FAIL, name + " is inactive; assign other equipment."));
             return;
         }
-        if ("maintenance".equals(equipment.getEquipmentStatus())) {
+        if ("maintenance".equals(equipment.equipmentStatus())) {
             checks.add(new Check("equipment", FAIL, name + " is under maintenance."));
             return;
         }
@@ -155,22 +153,26 @@ public class WorkOrderReadinessService {
             checks.add(new Check("equipment", WARN, name + " is assigned; set the planned start and end to check its time."));
             return;
         }
-        if (Duration.between(start, end).compareTo(EquipmentScheduleService.LONGEST_WINDOW) > 0) {
+        if (Duration.between(start, end).compareTo(Duration.ofDays(366)) > 0) {
             checks.add(new Check("equipment", WARN, "The planned window is longer than 366 days, so " + name + "'s time is not checked."));
             return;
         }
 
-        List<WorkOrder> sameEquipment = workOrderRepository.findAllByEquipmentIdAndDeletedYn(equipment.getEquipmentId(), NOT_DELETED)
+        List<WorkOrder> sameEquipment = workOrderRepository.findAllByEquipmentIdAndDeletedYn(equipment.equipmentId(), NOT_DELETED)
             .stream()
             .filter(other -> !other.getWorkOrderId().equals(order.getWorkOrderId()))
             .toList();
         Changeover changeover = changeover(order, equipment, start, sameEquipment);
         BigDecimal changeoverHours = changeover == null ? BigDecimal.ZERO : changeover.hours();
 
-        EquipmentScheduleService.Availability availability = equipmentScheduleService.window(equipment, start, end);
+        EquipmentWindow availability = catalog.equipmentWindow(equipment.equipmentId(), start, end).orElse(null);
+        if (availability == null) {
+            checks.add(new Check("equipment", FAIL, "The assigned equipment no longer exists; assign other equipment."));
+            return;
+        }
         String has = plain(availability.availableHours()) + " h available in the planned window"
             + (availability.downtimeHours().signum() > 0 ? " (" + plain(availability.downtimeHours()) + " h down)" : "");
-        BigDecimal rate = equipment.getCapacityPerHour();
+        BigDecimal rate = equipment.capacityPerHour();
         if (rate == null || rate.signum() <= 0) {
             checks.add(new Check("equipment", availability.availableHours().signum() > 0 ? OK : WARN,
                 name + " has " + has + "; it has no capacity per hour, so the output is not checked."));
@@ -216,7 +218,7 @@ public class WorkOrderReadinessService {
      * on the same equipment that starts last before this order starts. Null without a target item on either, or when no
      * rule applies.
      */
-    private Changeover changeover(WorkOrder order, Equipment equipment, OffsetDateTime start, List<WorkOrder> sameEquipment) {
+    private Changeover changeover(WorkOrder order, CatalogEquipmentView equipment, OffsetDateTime start, List<WorkOrder> sameEquipment) {
         if (order.getTargetItemId() == null) {
             return null;
         }
@@ -224,9 +226,8 @@ public class WorkOrderReadinessService {
         if (previous == null) {
             return null;
         }
-        return equipmentChangeoverService.changeover(equipment.getEquipmentId(), previous.getTargetItemId(), order.getTargetItemId())
-            .map(match -> new Changeover(previous, match.minutes()))
-            .orElse(null);
+        java.util.OptionalInt minutes = catalog.changeoverMinutes(equipment.equipmentId(), previous.getTargetItemId(), order.getTargetItemId());
+        return minutes.isPresent() ? new Changeover(previous, minutes.getAsInt()) : null;
     }
 
     private String itemCode(String itemId) {

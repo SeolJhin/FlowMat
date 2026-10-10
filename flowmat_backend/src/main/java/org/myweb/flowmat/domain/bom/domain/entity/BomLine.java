@@ -26,6 +26,13 @@ public class BomLine extends BaseTimeEntity {
     private String bomId;
     private String childItemId;
     private String lineType;
+
+    /**
+     * "Y": the material is a phantom sub-assembly, replaced by its own BOM's materials wherever this BOM is used
+     * (docs/domain/multi-level-bom.md P1-P2). "N" unless set, like the column.
+     */
+    @JdbcTypeCode(SqlTypes.CHAR)
+    private String phantomYn = "N";
     private BigDecimal quantity;
     private String unit;
     private BigDecimal scrapRate;

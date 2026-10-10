@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { BomDto } from '../../../shared/types/api'
-import { approvedRevision, bomActions, bomLinesFromCsv, compareBoms, costChange, groupByTarget, isEditable } from './bomModel'
+import {
+  approvedRevision, bomActions, bomLinesFromCsv, compareBoms, costChange, groupByTarget, isEditable, overlappingApproved,
+  periodLabel,
+} from './bomModel'
 
 function bom(overrides: Partial<BomDto>): BomDto {
   return {
@@ -162,5 +165,25 @@ describe('costChange', () => {
     expect(costChange(100, 112)).toEqual({ delta: 12, percent: 12 })
     expect(costChange(3, 2)).toEqual({ delta: -1, percent: -33.3 })
     expect(costChange(0, 5)).toEqual({ delta: 5, percent: null })
+  })
+})
+
+describe('approved revisions for separate periods', () => {
+  const january = bom({ bomId: 'jan', bomStatus: 'approved', effectiveFrom: null, effectiveTo: '2030-01-31' })
+  const february = bom({ bomId: 'feb', bomVersion: 2, bomStatus: 'approved', effectiveFrom: '2030-02-01', effectiveTo: null })
+
+  it('picks the one effective on the day, ends included', () => {
+    expect(approvedRevision([january, february], 'item-a', '2030-01-31')?.bomId).toBe('jan')
+    expect(approvedRevision([january, february], 'item-a', '2030-02-01')?.bomId).toBe('feb')
+    expect(approvedRevision([february], 'item-a', '2030-01-15')).toBeUndefined()
+  })
+
+  it('finds the approved revisions an approval would overlap', () => {
+    const draft = bom({ bomId: 'd', bomVersion: 3, effectiveFrom: '2030-01-15', effectiveTo: null })
+    expect(overlappingApproved(draft, [january, february, draft]).map((one) => one.bomId)).toEqual(['jan', 'feb'])
+    const later = bom({ bomId: 'l', bomVersion: 3, effectiveFrom: '2030-03-01', effectiveTo: null })
+    const ended = { ...february, effectiveTo: '2030-02-28' }
+    expect(overlappingApproved(later, [january, ended])).toEqual([])
+    expect(periodLabel(january)).toBe('open → 2030-01-31')
   })
 })

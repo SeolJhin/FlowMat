@@ -56,6 +56,7 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
     private final InventoryTransactionRepository inventoryTransactionRepository;
     private final LotMasterRepository lotMasterRepository;
     private final IdGenerator idGenerator;
+    private final RunSetupService runSetupService;
 
     @Override
     public List<RunCorrectionResponse> listCorrections(String productionRunId) {
@@ -159,6 +160,16 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
             }
         }
         productionRunService.rebuildLotGenealogy(run, formerOutputLots);
+        // Setups last: they move no stock (docs/domain/equipment-setup-cost.md AS7-AS8).
+        String setupNote = "Correction #" + no + ": " + reason;
+        for (ProductionRunCorrectionLine line : lines) {
+            if (ProductionRunCorrectionLine.CANCEL_SETUP.equals(line.getLineKind())) {
+                runSetupService.cancelForCorrection(run, line.getTargetRunSetupId(), setupNote, actor);
+            } else if (ProductionRunCorrectionLine.ADD_SETUP.equals(line.getLineKind())) {
+                line.setCreatedRunSetupId(runSetupService.addForCorrection(run, line.getProductionRunCorrectionLineId(),
+                    line.getEquipmentId(), line.getSetupMinutes(), setupNote, actor).getRunSetupId());
+            }
+        }
 
         OffsetDateTime now = OffsetDateTime.now();
         correction.setStatus(ProductionRunCorrection.APPLIED);
@@ -192,6 +203,7 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
         }
         List<ProductionRunCorrectionLine> lines = new ArrayList<>();
         Set<String> voided = new HashSet<>();
+        Set<String> cancelledSetups = new HashSet<>();
         boolean outputSet = false;
         int lineNo = 1;
         for (RunCorrectionLineRequest request : requested) {
@@ -238,8 +250,19 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
                     line.setBeforeQty(run.getActualOutputQty());
                     line.setAfterQty(afterQty);
                 }
-                default -> throw new BusinessException(ErrorCode.BAD_REQUEST,
-                    "Unknown correction kind '" + request.kind() + "'. Use void_item, add_item or set_output_qty.");
+                case ProductionRunCorrectionLine.CANCEL_SETUP -> {
+                    String setupId = runSetupService.findCancellable(run, request.targetRunSetupId()).getRunSetupId();
+                    if (!cancelledSetups.add(setupId)) {
+                        throw new BusinessException(ErrorCode.BAD_REQUEST, "The same setup is cancelled twice.");
+                    }
+                    line.setTargetRunSetupId(setupId);
+                }
+                case ProductionRunCorrectionLine.ADD_SETUP -> {
+                    line.setEquipmentId(runSetupService.requireCorrectionSetup(run, request.equipmentId(), request.setupMinutes()));
+                    line.setSetupMinutes(request.setupMinutes());
+                }
+                default -> throw new BusinessException(ErrorCode.BAD_REQUEST, "Unknown correction kind '" + request.kind()
+                    + "'. Use void_item, add_item, set_output_qty, cancel_setup or add_setup.");
             }
             lines.add(line);
         }
@@ -368,7 +391,11 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
                     line.getUnit(),
                     line.getBeforeQty(),
                     line.getAfterQty(),
-                    line.getCreatedRunItemId()))
+                    line.getCreatedRunItemId(),
+                    line.getTargetRunSetupId(),
+                    line.getEquipmentId(),
+                    line.getSetupMinutes(),
+                    line.getCreatedRunSetupId()))
                 .toList()
         );
     }

@@ -22,6 +22,7 @@ import org.myweb.flowmat.domain.catalog.application.UnitConverter;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.springframework.stereotype.Service;
@@ -47,6 +48,7 @@ public class BomWhereUsedTreeService {
     private final CatalogQuery catalogQuery;
     private final UnitConverter unitConverter;
     private final ProjectAccessService projectAccessService;
+    private final ProjectCalendarQuery projectCalendar;
 
     /** One approved BOM line that consumes a material, with how much of it one unit of the product needs. */
     private record Edge(BomHeader header, BomLine line, BigDecimal rate) {
@@ -61,7 +63,9 @@ public class BomWhereUsedTreeService {
         CatalogItemView start = catalogQuery.findProjectItem(project, itemId.trim())
             .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "Item does not exist in this project."));
 
-        Map<String, BomHeader> approvedByBom = BomTree.approvedByItem(bomHeaderRepository, project).values().stream()
+        // Undated, so the revisions effective on the project's today (docs/domain/multi-level-bom.md M3).
+        Map<String, BomHeader> approvedByBom = BomTree.approvedByItem(bomHeaderRepository, project, projectCalendar.today(project))
+            .values().stream()
             .collect(Collectors.toMap(BomHeader::getBomId, Function.identity()));
         List<BomLine> lines = approvedByBom.isEmpty() ? List.of() : bomLineRepository.findAllByBomIdIn(approvedByBom.keySet()).stream()
             .filter(line -> BomTree.isMaterial(line.getLineType()))

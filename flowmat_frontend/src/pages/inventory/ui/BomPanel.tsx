@@ -12,7 +12,7 @@ import {
 import type { BomDto, BomLineType, BuildableQuantityDto, ItemDto, UnitDto } from '../../../shared/types/api'
 import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
-import { BOM_ACTION_LABELS, bomActions, groupByTarget, isEditable } from '../model/bomModel'
+import { BOM_ACTION_LABELS, bomActions, groupByTarget, isEditable, overlappingApproved, periodLabel } from '../model/bomModel'
 import { shortBy, usableByMaterial } from '../model/buildableModel'
 import { BomRevisionCompare } from './BomRevisionCompare'
 import { BomLineImport } from './BomLineImport'
@@ -93,7 +93,12 @@ export function BomPanel({ projectId, items, units }: { projectId: string; items
                       background: bom.bomId === selectedId ? 'var(--accent-bg)' : undefined,
                     }}
                   >
-                    <td style={cell}><code>v{bom.bomVersion}</code></td>
+                    <td style={cell}>
+                      <code>v{bom.bomVersion}</code>
+                      {(bom.effectiveFrom || bom.effectiveTo) && (
+                        <span style={{ fontSize: 11, opacity: 0.7 }}> {periodLabel(bom)}</span>
+                      )}
+                    </td>
                     <td style={cell}>{bom.bomName}</td>
                     <td style={cell}>
                       {formatQty(bom.baseQuantity)} {bom.baseUnit}
@@ -271,7 +276,11 @@ function BomDetail({
   const { add, remove } = useBomLineMutations(projectId)
   const actionMutation = useBomActionMutation(projectId)
   const editable = isEditable(bom)
-  const [line, setLine] = useState({ childItemId: '', quantity: '', unit: unitCodes[0] ?? 'kg', lineType: 'material' as BomLineType })
+  const [line, setLine] = useState({
+    childItemId: '', quantity: '', unit: unitCodes[0] ?? 'kg', lineType: 'material' as BomLineType, phantom: false,
+  })
+  // Only a material with its own approved BOM can be a phantom (docs/domain/multi-level-bom.md P1).
+  const canBePhantom = line.lineType === 'material' && subAssemblies.has(line.childItemId)
   const [productionQty, setProductionQty] = useState(String(bom.baseQuantity))
   const requirementsQuery = useBomRequirementsQuery(bom.bomStatus === 'draft' ? null : bom.bomId, Number(productionQty))
   const buildableQuery = useBomBuildableQuery(projectId, bom.bomStatus === 'draft' ? null : bom.bomId)
@@ -283,8 +292,9 @@ function BomDetail({
     try {
       await add.mutateAsync({
         bomId: bom.bomId, childItemId: line.childItemId, quantity: Number(line.quantity), unit: line.unit, lineType: line.lineType,
+        phantom: canBePhantom && line.phantom ? true : undefined,
       })
-      setLine((l) => ({ ...l, childItemId: '', quantity: '' }))
+      setLine((l) => ({ ...l, childItemId: '', quantity: '', phantom: false }))
     } catch {
       // Shown below.
     }
@@ -307,6 +317,8 @@ function BomDetail({
   }
 
   const error = add.error ?? remove.error ?? actionMutation.error
+  // Approval keeps other approved revisions and refuses an overlap (docs/domain/multi-level-bom.md M1-M2).
+  const overlaps = bom.bomStatus === 'draft' || bom.bomStatus === 'pending_approval' ? overlappingApproved(bom, revisions) : []
   const revisionStatus = errorStatus(actionMutation.error)
   const revisionUnconfirmed = actionMutation.variables?.action === 'revisions' && Boolean(actionMutation.error)
     && !(revisionStatus != null && revisionStatus >= 400 && revisionStatus < 500)
@@ -339,7 +351,8 @@ function BomDetail({
             <tr key={l.bomLineId} style={{ borderBottom: '1px solid var(--border)' }}>
               <td style={cell}>
                 {itemLabel.get(l.childItemId) ?? l.childItemId}
-                {subAssemblies.has(l.childItemId) && <span className="inspector-hint"> · has its own BOM</span>}
+                {subAssemblies.has(l.childItemId) && !l.phantom && <span className="inspector-hint"> · has its own BOM</span>}
+                {l.phantom && <span className="inspector-hint"> · phantom: its own BOM's materials are used</span>}
                 {lineTypeTag(l.lineType) && <span className="inspector-hint"> · {lineTypeTag(l.lineType)}</span>}
               </td>
               <td style={{ ...cell, textAlign: 'right' }}>{formatQty(l.quantity)} {l.unit}</td>
@@ -394,6 +407,12 @@ function BomDetail({
               .filter((item) => item.itemId !== bom.targetItemId)
               .map((item) => <option key={item.itemId} value={item.itemId}>{item.itemCode} · {item.itemName}</option>)}
           </select>
+          {canBePhantom && (
+            <label style={{ gridColumn: '1 / -1', fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input type="checkbox" checked={line.phantom} onChange={(e) => setLine((l) => ({ ...l, phantom: e.target.checked }))} />
+              Phantom: use its own BOM's materials instead of stocking it
+            </label>
+          )}
           <input
             type="number"
             min="0"
@@ -412,6 +431,13 @@ function BomDetail({
       )}
       {editable && <BomLineImport projectId={projectId} bomId={bom.bomId} />}
 
+      {overlaps.length > 0 && (
+        <p data-testid="bom-period-overlap" style={{ fontSize: 12, color: '#b45309', margin: '0 0 8px' }}>
+          Its effective period ({periodLabel(bom)}) overlaps approved{' '}
+          {overlaps.map((other) => `v${other.bomVersion} (${periodLabel(other)})`).join(', ')}. Approving does not retire
+          them: end their period or retire them, and give this revision its own, before approving.
+        </p>
+      )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {bomActions(bom.bomStatus).map((action) => (
           <button key={action} type="button" disabled={actionMutation.isPending} onClick={() => void handleAction(action)}>
@@ -476,7 +502,10 @@ function BomDetail({
                   const short = shortBy(r.requiredItemQuantity, have)
                   return (
                     <tr key={r.bomLineId} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={cell}>{itemLabel.get(r.childItemId) ?? r.childItemId}</td>
+                      <td style={cell}>
+                        {itemLabel.get(r.childItemId) ?? r.childItemId}
+                        {r.viaItemId && <span className="inspector-hint"> · via {itemLabel.get(r.viaItemId) ?? r.viaItemId}</span>}
+                      </td>
                       <td style={{ ...cell, textAlign: 'right' }}>
                         <strong>{formatQty(r.requiredItemQuantity)} {r.itemUnit}</strong>
                         {r.lineUnit !== r.itemUnit && (

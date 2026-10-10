@@ -80,6 +80,7 @@ public class ItemServiceImpl implements ItemService {
         item.setUnitId(requireActiveUnit(request.unitId()));
         item.setItemStatus(hasText(request.itemStatus()) ? ItemStatusRule.requireKnown(request.itemStatus()) : ItemStatusRule.ACTIVE);
         item.setLotManageYn(yn(request.lotManageYn()));
+        item.setLotReleaseRequiredYn(yn(request.lotReleaseRequiredYn()));
         item.setSafetyStockQty(requireNonNegative(request.safetyStockQty(), "Safety stock"));
         item.setLeadTimeDays(requireNonNegative(request.leadTimeDays(), "Lead time"));
         item.setUnitCost(requireNonNegative(request.unitCost(), "Unit cost"));
@@ -147,6 +148,10 @@ public class ItemServiceImpl implements ItemService {
                     "LOT tracking can only change while the item has no stock records.");
             }
             item.setLotManageYn(yn(request.lotManageYn()));
+        }
+        // Applies to LOTs registered from now on; LOTs already registered keep their status (docs/domain/lot-release.md).
+        if (request.lotReleaseRequiredYn() != null) {
+            item.setLotReleaseRequiredYn(yn(request.lotReleaseRequiredYn()));
         }
         if (request.safetyStockQty() != null) {
             item.setSafetyStockQty(requireNonNegative(request.safetyStockQty(), "Safety stock"));
@@ -264,7 +269,8 @@ public class ItemServiceImpl implements ItemService {
             new ItemDetails(item.getItemGroup(), item.getSpec(), item.getBarcode(), item.getSku(), item.getStorageCondition(),
                 item.getItemDesc()),
             item.getPurchaseUnit(),
-            item.getPurchaseUnit() == null ? null : item.getConversionRate()
+            item.getPurchaseUnit() == null ? null : item.getConversionRate(),
+            "Y".equals(item.getLotReleaseRequiredYn()) ? "Y" : "N"
         );
     }
 

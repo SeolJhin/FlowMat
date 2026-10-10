@@ -13,6 +13,8 @@ public record BomLineResponse(
     Integer sortOrder,
     String note,
     /** material, by_product or waste (docs/domain/bom-by-products.md). */
-    String lineType
+    String lineType,
+    /** A phantom sub-assembly, used through its own BOM (docs/domain/multi-level-bom.md P1). */
+    boolean phantom
 ) {
 }

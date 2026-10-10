@@ -19,6 +19,9 @@ public interface LotService {
     /** Ends a LOT for good; only when it holds no stock. */
     LotResponse closeLot(String lotId);
 
+    /** Opens a closed LOT again; project owners only (docs/domain/lot-release.md R6). */
+    LotResponse reopenLot(String lotId);
+
     /** @param direction {@code backward} (towards materials) or {@code forward} (towards products) */
     LotTraceResponse trace(String lotId, String direction);
 

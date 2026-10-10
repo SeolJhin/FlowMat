@@ -44,4 +44,11 @@ public interface BomService {
      * run's target item. Access checks are the caller's job.
      */
     BomRequirementResponse requirementsForRun(String bomId, String projectId, String targetItemId, BigDecimal productionQuantity);
+
+    /**
+     * As above, with phantom lines expanded through the phantom's revision effective on {@code phantomDay}, a project
+     * calendar day; null means the project's today (docs/domain/multi-level-bom.md P2-P3).
+     */
+    BomRequirementResponse requirementsForRun(String bomId, String projectId, String targetItemId, BigDecimal productionQuantity,
+                                              java.time.LocalDate phantomDay);
 }

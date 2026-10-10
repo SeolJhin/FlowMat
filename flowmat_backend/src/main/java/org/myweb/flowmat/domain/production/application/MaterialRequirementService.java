@@ -28,6 +28,7 @@ import org.myweb.flowmat.domain.production.domain.entity.WorkOrder;
 import org.myweb.flowmat.domain.production.repository.ProductionRunRepository;
 import org.myweb.flowmat.domain.production.repository.WorkOrderRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.springframework.stereotype.Service;
 
@@ -53,6 +54,7 @@ public class MaterialRequirementService {
     private final ItemRepository itemRepository;
     private final UsableStock usableStock;
     private final ProjectAccessService projectAccessService;
+    private final ProjectCalendarQuery projectCalendar;
     private final OpenRunInputs openRunInputs;
     private final BomHeaderRepository bomHeaderRepository;
     private final BomLineRepository bomLineRepository;
@@ -94,7 +96,9 @@ public class MaterialRequirementService {
             }
             BomRequirementResponse requirement;
             try {
-                requirement = bomService.requirementsForRun(order.getBomId(), projectId, order.getTargetItemId(), remaining);
+                // Phantom lines go through the revision of the order's planned day (multi-level-bom.md P3).
+                requirement = bomService.requirementsForRun(order.getBomId(), projectId, order.getTargetItemId(), remaining,
+                    order.getPlannedStartAt() == null ? null : projectCalendar.date(projectId, order.getPlannedStartAt().toInstant()));
             } catch (BusinessException exception) {
                 problems.add(order.getWorkOrderTitle() + ": " + exception.getMessage());
                 continue;
@@ -123,7 +127,8 @@ public class MaterialRequirementService {
         // Stock allocated to open orders is reserved for the needs counted here, so it counts as usable for them
         // (docs/domain/stock-allocation.md).
         Map<String, BigDecimal> allocated = stockAllocationService.openByItem(active.stream().map(WorkOrder::getWorkOrderId).toList());
-        Map<String, BomHeader> approved = BomTree.approvedByItem(bomHeaderRepository, projectId);
+        // Undated, so the revisions effective on the project's today (docs/domain/multi-level-bom.md M3).
+        Map<String, BomHeader> approved = BomTree.approvedByItem(bomHeaderRepository, projectId, projectCalendar.today(projectId));
         explodeSubAssemblies(projectId, approved, supply, allocated, required, units, needs, problems);
 
         Map<String, BigDecimal> usable = new HashMap<>(usableStock.byItem(projectId, required.keySet()));

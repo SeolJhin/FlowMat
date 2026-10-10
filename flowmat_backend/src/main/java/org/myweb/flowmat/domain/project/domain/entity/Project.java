@@ -10,6 +10,7 @@ import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
 @Getter
 @Setter
 @Entity
+@org.hibernate.annotations.DynamicUpdate
 @Table(name = "project")
 public class Project extends CreatedUpdatedAuditEntity {
 
@@ -22,6 +23,8 @@ public class Project extends CreatedUpdatedAuditEntity {
     private String projectStatus;
     private String visibility;
     private String currentWorkflowId;
+    /** The organization the project belongs to (ADR-001, docs/domain/organization.md); grants no access. */
+    private String organizationId;
     private String timeZone = "Asia/Seoul";
     private long timeZoneVersion;
     private String timeZoneUpdatedBy;

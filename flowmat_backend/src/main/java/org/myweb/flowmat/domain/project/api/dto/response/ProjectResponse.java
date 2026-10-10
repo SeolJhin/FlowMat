@@ -7,6 +7,8 @@ public record ProjectResponse(
     String projectStatus,
     String visibility,
     String currentWorkflowId,
-    String timeZone
+    String timeZone,
+    /** The organization it belongs to (docs/domain/organization.md); null for a project not linked yet. */
+    String organizationId
 ) {
 }

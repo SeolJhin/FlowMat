@@ -74,11 +74,29 @@
 - `workInstructionModel.test.ts` 3건(revision 묶기·보여 줄 revision·상태 문구, 단계 요청·링크 검사, 진행 문구)
 - 실 화면 `e2e/work-instructions.spec.ts`(REAL_API_E2E, CI browser-e2e에 추가, BOM 없음): 새 제품 → Instructions 탭에서 지침 시작 → 값 기록 단계(`Oven °C`)·필수 단계·선택 단계 추가 → Release → API로 실행 시작 → 실행 상세 `0 of 2 required steps done`과 마감 옆 알림 → 250 입력 후 Done(한계 200–230 밖이라 `(outside 200–230)` 표시, 2026-10-03), 둘째 Done → `All 2 required steps done`, 알림 사라짐. 끝나면 실행 마감. 이 테스트가 단계 입력 중 폼이 지워지는 경합을 찾아냄(위 화면 설명대로 고침)
 
-## 2026-10-05 확정: 파일 첨부
+## 2026-10-09 구현: 파일 첨부 (2bz)
 
-**Accepted (정책).** A 기반 StorageService 추상화 승인. Local/S3-compatible 설정 선택·메타데이터 DB·기본 10MB 설정 가능·다운로드 read/업로드 write·과거 지침 참조 보존. 아래 메모는 검토 이력이며 구현 전이다. [최종 결정](../status/DECISIONS-2026-10-05.md)이 아래 예전 선택지보다 우선한다.
+**Accepted 정책 구현.** [최종 결정](../status/DECISIONS-2026-10-05.md)의 DB 메타데이터 + 설정에 따른 Local/S3-compatible를 구현했다. **V59**는 기존 V1–V58을 변경하지 않고 추가했으며 전용 SQL BEGIN/ROLLBACK과 Testcontainers에서 검증한다. 개발 DB에는 적용하지 않는다.
+
+| 규칙 | 동작·이유 | 위반 응답 |
+|---|---|---|
+| W7 | 읽기/다운로드는 Project read, 추가/삭제는 Project write. viewer는 다운로드만 | 403 |
+| W8 | 새 파일·삭제는 draft에서만. released/retired는 불변. revision 복사는 새 attachmentId와 같은 저장 키를 참조 | 409 `… make a new revision.` |
+| W9 | `PUT /work-instructions/{instructionId}/attachments/{attachmentId}` multipart `file`, 클라이언트 UUID 고정. 같은 작성자·파일명·MIME·크기·SHA-256의 재전송은 기존 결과를 돌려준다. 배포 뒤에도 이미 성공한 업로드는 복구 가능 | 다른 내용/삭제된 ID는 409, 잘못된 UUID·파일은 400 |
+| W10 | 기본 10 MiB, 설정 가능. png/jpg/jpeg/gif/webp/pdf/txt/csv 확장자·MIME 대조, 이미지/PDF signature, 텍스트 UTF-8·제어 문자 검사. 원래 경로는 제거, 서버 임의 파일명 사용 | 400, 서블릿 한도 초과 413 |
+| W11 | 다운로드는 인증 API에서 bytes로 반환, `attachment`, `nosniff`, `private, no-store`. DB 크기·해시와 실제 파일이 맞아야 한다. 저장 키/버킷/인증값은 응답에 넣지 않는다 | 없는 참조 404, 저장소 불가·손상 500 |
+| W12 | draft에서 파일을 제거하면 참조만 soft delete. released/retired 및 복사본의 파일은 보존. DB 롤백은 그 업로드가 만든 새 객체만 정리 | 재삭제는 200; 새 객체 정리 실패는 서버 경고 |
+
+- 조회: `GET /work-instructions/{instructionId}/attachments`; 다운로드: `GET …/{attachmentId}/download`; 삭제: `DELETE …/{attachmentId}`.
+- 화면: Inventory → Instructions, 실행 상세의 고정 지침에도 읽기 전용 첨부 목록. 응답 유실/5xx는 같은 File·UUID로 수동 재시도, 변경 입력 잠금. 자동 업로드 재시도 없음. 새로고침 시 File 객체는 보존하지 않으므로 목록을 확인한다.
+- Local 경로는 설정 root 안으로 제한하고 내부 symbolic link·외부 real path를 거절한다. 저장 root는 운영자만 쓰는 전용 디렉터리여야 한다. S3는 공식 AWS SDK 2.55.13의 실제 put/get/delete를 사용하며 프라이빗 버킷을 전제로 한다. 원격 버킷에는 검증 중 업로드하지 않았다.
+- 환경: `STORAGE_TYPE=local|s3`, `STORAGE_UPLOAD_DIR`; S3는 `STORAGE_S3_BUCKET`, `STORAGE_S3_REGION`, 선택 `STORAGE_S3_ENDPOINT`, MinIO 등에는 `STORAGE_S3_PATH_STYLE=true`. 인증은 AWS SDK 기본 자격 증명 체인(환경변수/인스턴스 역할)을 쓴다. 저장소 전환은 파일 복사를 자동으로 하지 않으므로 기존 파일을 옮기고 metadata를 검증하는 운영 절차가 필요하다.
+- `STORAGE_MAX_FILE_SIZE_BYTES` 기본 10485760, multipart 요청 전체 한도 `STORAGE_MAX_REQUEST_SIZE_BYTES` 기본 11534336. 파일 한도를 키우면 요청 한도도 충분히 키운다.
+- 범위: 바이러스 검사·내용 전체의 파일 형식 유효성 검사는 구현하지 않았다. browser inline preview 없이 다운로드만 제공한다. 삭제된 draft의 미참조 blob 회수는 보존기간 결정 후 별도 관리 작업이며, 자동 삭제하지 않는다.
 
 ## 결정 메모: 이미지·파일 첨부 (Proposed, 2026-10-03)
+
+> **대체됨(2026-10-10 표시):** 이 메모의 선택지는 [DECISIONS-2026-10-05](../status/DECISIONS-2026-10-05.md) §2 "첨부"로 확정됐고 위 2bz로 구현됐다. 아래는 검토 이력으로만 남긴다. 업로드 한도·형식 오류의 전역 처리기는 `global/exception/MultipartExceptionHandler`(2026-10-10 이동, 동작 같음)다.
 
 > **결정이 아니다.** [WORKBOARD](../status/WORKBOARD.md) §4 "작업 지침 이미지·파일 첨부"를 고르기 위한 자료다. 고르기 전에는 구현하지 않는다.
 
@@ -110,5 +128,5 @@
 - 워크플로 공정(노드)별 지침과 실행 단계 연결(현재는 제품 단위)
 - ~~필수 단계 미확인 시 마감 막기(설정으로)~~ → F1로 구현(V37). 검증: `WorkInstructionIntegrationTest`, `RunInstructionRevisionIntegrationTest`
 - ~~값 범위(한계)~~ → W6·R7(2026-10-03, V47). ~~한계 밖 값에서 부적합 제안~~ → R8(2026-10-03). 남은 것: [검사 기준](inspection-standard.md)과의 연결(같은 한계를 두 곳에 적지 않기)
-- 이미지·파일 첨부(현재는 링크)
+- 공정별 지침 첨부, 저장소 이관·보존기간에 따른 미참조 파일 회수
 - ~~확인 취소 이력 남기기(지금은 확인 행을 지움)~~ → R6(2026-10-03, V46)

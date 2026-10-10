@@ -87,6 +87,7 @@ export function InventoryRoute() {
     unitId: '',
     itemStatus: 'active',
     lotManageYn: false,
+    lotReleaseRequiredYn: false,
     safetyStockQty: '',
     leadTimeDays: '',
     unitCost: '',
@@ -113,6 +114,7 @@ export function InventoryRoute() {
       unitId: item.unitId ?? '',
       itemStatus: item.itemStatus,
       lotManageYn: item.lotManageYn === 'Y',
+      lotReleaseRequiredYn: item.lotReleaseRequiredYn === 'Y',
       safetyStockQty: item.safetyStockQty ? String(item.safetyStockQty) : '',
       leadTimeDays: item.leadTimeDays != null ? String(item.leadTimeDays) : '',
       unitCost: item.unitCost ? String(item.unitCost) : '',
@@ -152,6 +154,7 @@ export function InventoryRoute() {
           unitId: form.unitId,
           itemStatus: form.itemStatus,
           lotManageYn: form.lotManageYn ? 'Y' : 'N',
+          lotReleaseRequiredYn: form.lotManageYn && form.lotReleaseRequiredYn ? 'Y' : 'N',
           itemCode: form.itemCode.trim(),
           ...reorderFields(false),
           details: itemInfoPayload(form.details),
@@ -166,6 +169,7 @@ export function InventoryRoute() {
           unitId: form.unitId || undefined,
           itemStatus: form.itemStatus,
           lotManageYn: form.lotManageYn ? 'Y' : 'N',
+          lotReleaseRequiredYn: form.lotManageYn && form.lotReleaseRequiredYn ? 'Y' : 'N',
           ...reorderFields(true),
           details: itemInfoPayload(form.details),
         })
@@ -414,6 +418,16 @@ export function InventoryRoute() {
               />
               <span>Track stock per LOT</span>
             </label>
+            {form.lotManageYn && (
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={form.lotReleaseRequiredYn}
+                  onChange={(e) => setForm((f) => ({ ...f, lotReleaseRequiredYn: e.target.checked }))}
+                />
+                <span>Hold new LOTs until their receipt checks pass</span>
+              </label>
+            )}
             {/* minWidth 0: side by side, the inputs' own width would otherwise push the whole form past its column. */}
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8 }}>
               <label style={{ display: 'grid', gap: 4, minWidth: 0 }}>

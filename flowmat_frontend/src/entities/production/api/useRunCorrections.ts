@@ -48,6 +48,7 @@ export function useDecideRunCorrectionMutation(runId: string, projectId: string)
         void queryClient.invalidateQueries({ queryKey: ['lots', projectId] })
         void queryClient.invalidateQueries({ queryKey: ['inventory-transactions'] })
         void queryClient.invalidateQueries({ queryKey: ['work-orders'] })
+        void queryClient.invalidateQueries({ queryKey: ['run-setups', runId] })
       }
     },
   })

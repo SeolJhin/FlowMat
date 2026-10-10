@@ -3,6 +3,7 @@ package org.myweb.flowmat.domain.catalog.api;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.api.dto.request.EquipmentHourlyCostRequest;
+import org.myweb.flowmat.domain.catalog.api.dto.response.EquipmentHourlyCostChangeResponse;
 import org.myweb.flowmat.domain.catalog.api.dto.response.EquipmentHourlyCostResponse;
 import org.myweb.flowmat.domain.catalog.application.EquipmentHourlyCostService;
 import org.myweb.flowmat.global.exception.BusinessException;
@@ -19,6 +20,10 @@ public class EquipmentHourlyCostController {
     private final EquipmentHourlyCostService service;
     @GetMapping public ApiResponse<EquipmentHourlyCostResponse> get(@PathVariable String equipmentId) {
         return ApiResponse.ok(service.get(equipmentId));
+    }
+    /** Rate changes, newest first (docs/domain/equipment-setup-cost.md AS9). */
+    @GetMapping("/history") public ApiResponse<java.util.List<EquipmentHourlyCostChangeResponse>> history(@PathVariable String equipmentId) {
+        return ApiResponse.ok(service.history(equipmentId));
     }
     @PutMapping public ApiResponse<EquipmentHourlyCostResponse> set(@PathVariable String equipmentId, @RequestBody JsonNode body) {
         if (body == null || !body.isObject() || !body.has("hourlyCost")

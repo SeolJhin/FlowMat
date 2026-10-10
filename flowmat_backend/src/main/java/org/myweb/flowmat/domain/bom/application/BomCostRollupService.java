@@ -21,6 +21,7 @@ import org.myweb.flowmat.domain.catalog.application.UnitConverter;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.springframework.stereotype.Service;
@@ -45,6 +46,7 @@ public class BomCostRollupService {
     private final CatalogQuery catalogQuery;
     private final UnitConverter unitConverter;
     private final ProjectAccessService projectAccessService;
+    private final ProjectCalendarQuery projectCalendar;
 
     /** One item's roll-up: the cost of what is known, and what is not. */
     private record Cost(BigDecimal value, Set<String> missing, List<String> problems) {
@@ -60,7 +62,8 @@ public class BomCostRollupService {
         }
         String project = projectId.trim();
         projectAccessService.requireProjectReadAccess(project);
-        Map<String, BomHeader> approved = BomTree.approvedByItem(bomHeaderRepository, project);
+        // Undated, so the revisions effective on the project's today (docs/domain/multi-level-bom.md M3).
+        Map<String, BomHeader> approved = BomTree.approvedByItem(bomHeaderRepository, project, projectCalendar.today(project));
         if (approved.isEmpty()) {
             return new BomCostRollupResponse(List.of());
         }

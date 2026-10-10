@@ -212,7 +212,7 @@ export interface WorkOrderReadinessDto {
 }
 
 export type RunCorrectionStatus = 'pending_approval' | 'applied' | 'rejected'
-export type RunCorrectionKind = 'void_item' | 'add_item' | 'set_output_qty'
+export type RunCorrectionKind = 'void_item' | 'add_item' | 'set_output_qty' | 'cancel_setup' | 'add_setup'
 
 export interface RunCorrectionLineDto {
   lineNo: number
@@ -226,6 +226,11 @@ export interface RunCorrectionLineDto {
   beforeQty: number | null
   afterQty: number | null
   createdRunItemId: string | null
+  /** Setup corrections (docs/domain/equipment-setup-cost.md AS7). */
+  targetRunSetupId?: string | null
+  equipmentId?: string | null
+  setupMinutes?: number | null
+  createdRunSetupId?: string | null
 }
 
 /** A correction of a finished run (docs/domain/production-run-correction.md). */
@@ -249,6 +254,8 @@ export type RunCorrectionLineRequest =
   | { kind: 'void_item'; targetRunItemId: string }
   | { kind: 'add_item'; direction: 'input' | 'output'; itemId: string; inventoryId: string | null; qty: number; unit: string }
   | { kind: 'set_output_qty'; afterQty: number }
+  | { kind: 'cancel_setup'; targetRunSetupId: string }
+  | { kind: 'add_setup'; equipmentId: string; setupMinutes: number }
 
 export type InspectionResult = 'pass' | 'fail'
 export type DefectSeverity = 'minor' | 'major' | 'critical'
@@ -725,6 +732,8 @@ export interface BomLineDto {
   substituteGroup: string | null
   sortOrder: number | null
   note: string | null
+  /** A phantom sub-assembly, used through its own BOM (docs/domain/multi-level-bom.md P1). */
+  phantom?: boolean
 }
 
 /** One BOM revision. Only drafts can change; a change to an approved BOM is a new revision. */
@@ -741,6 +750,10 @@ export interface BomDto {
   approvedAt: string | null
   note: string | null
   lines: BomLineDto[]
+  /** First day the revision is effective (project calendar); null or missing is open (docs/domain/multi-level-bom.md). */
+  effectiveFrom?: string | null
+  /** Last day it is effective; null or missing is open. */
+  effectiveTo?: string | null
 }
 
 export interface BomRequirementLineDto {
@@ -756,6 +769,8 @@ export interface BomRequirementLineDto {
   unitCost?: number | null
   /** requiredItemQuantity × unitCost; null when the unit cost is not known. */
   lineCost?: number | null
+  /** The phantom sub-assembly this material comes through (docs/domain/multi-level-bom.md P2). */
+  viaItemId?: string | null
 }
 
 export interface BomRequirementDto {
@@ -799,7 +814,7 @@ export interface BuildableQuantityLineDto {
   buildable: number | null
 }
 
-export type LotStatus = 'available' | 'reserved' | 'quarantined' | 'consumed' | 'closed'
+export type LotStatus = 'available' | 'reserved' | 'quarantined' | 'inspection_pending' | 'consumed' | 'closed'
 
 export interface LotDto {
   lotId: string
@@ -909,6 +924,8 @@ export interface ItemDto {
   itemStatus: string
   /** "Y" when stock of this item is tracked per LOT. */
   lotManageYn: string | null
+  /** "Y" when a new LOT waits for its receipt checks before its stock can be used (docs/domain/lot-release.md). */
+  lotReleaseRequiredYn?: string | null
   /** Stock to keep across all records; below it the item is on the reorder list. */
   safetyStockQty?: number | null
   leadTimeDays?: number | null

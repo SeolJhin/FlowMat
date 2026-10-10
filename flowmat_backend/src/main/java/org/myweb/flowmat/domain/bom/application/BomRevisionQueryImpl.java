@@ -18,6 +18,24 @@ import org.springframework.transaction.annotation.Transactional;
 public class BomRevisionQueryImpl implements BomRevisionQuery {
     private final BomHeaderRepository headers;
     private final ProjectAccessService access;
+    private final BomRevisionLock revisionLock;
+    private final jakarta.persistence.EntityManager entityManager;
+
+    @Override
+    @Transactional
+    public Optional<EffectiveBomView> findForPlanning(String projectId, String targetItemId, LocalDate on) {
+        access.requireProjectReadAccess(projectId);
+        revisionLock.lockItem(projectId, targetItemId);
+        var revisions = headers.findAllByProjectIdAndTargetItemIdAndDeletedYnOrderByBomVersionDesc(projectId, targetItemId, "N");
+        // Other owner queries may already have loaded the row before waiting for this item lock.
+        revisions.forEach(entityManager::refresh);
+        var selected = findEffective(projectId, targetItemId, on);
+        if (selected.isEmpty() && revisions.stream().anyMatch(row -> "approved".equals(row.getBomStatus()))) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "plannedStartAt has no effective approved BOM for targetItemId on " + on + ".");
+        }
+        return selected;
+    }
     @Override
     public Optional<EffectiveBomView> findEffective(String projectId,String targetItemId,LocalDate on) {
         if (projectId==null || projectId.isBlank() || targetItemId==null || targetItemId.isBlank())

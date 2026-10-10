@@ -13,6 +13,8 @@ export interface CreateItemInput {
   itemStatus?: string
   /** "Y": stock and production of this item must name a LOT. */
   lotManageYn?: 'Y' | 'N'
+  /** "Y": a new LOT waits for its receipt checks (docs/domain/lot-release.md). */
+  lotReleaseRequiredYn?: 'Y' | 'N'
   /** Stock to keep across all records; omitted or 0 means not watched. */
   safetyStockQty?: number
   leadTimeDays?: number

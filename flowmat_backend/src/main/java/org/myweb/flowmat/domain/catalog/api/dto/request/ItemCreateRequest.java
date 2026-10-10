@@ -25,6 +25,16 @@ public record ItemCreateRequest(
     /** What the item is bought in, e.g. "bag"; omitted: bought in its stock unit. */
     String purchaseUnit,
     /** Stock units in one purchase unit, more than 0; defaults to 1. */
-    BigDecimal purchaseUnitQty
+    BigDecimal purchaseUnitQty,
+    /** "Y": a new LOT waits for its receipt checks before its stock can be used (docs/domain/lot-release.md). Defaults to "N". */
+    String lotReleaseRequiredYn
 ) {
+
+    public ItemCreateRequest(String projectId, String itemCode, String itemName, String itemType, String resourceCategory,
+                             String resourceType, String unitId, String itemStatus, String lotManageYn, BigDecimal safetyStockQty,
+                             Integer leadTimeDays, BigDecimal unitCost, ItemDetails details, String purchaseUnit,
+                             BigDecimal purchaseUnitQty) {
+        this(projectId, itemCode, itemName, itemType, resourceCategory, resourceType, unitId, itemStatus, lotManageYn, safetyStockQty,
+            leadTimeDays, unitCost, details, purchaseUnit, purchaseUnitQty, null);
+    }
 }

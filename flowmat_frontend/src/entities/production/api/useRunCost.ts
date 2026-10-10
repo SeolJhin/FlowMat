@@ -43,3 +43,17 @@ export function useRunByProductValueQuery(runId: string) {
     queryFn: async () => unwrapApiResponse(await httpClient.get<ApiEnvelope<RunByProductValue>>(
       `/production-runs/${encodeURIComponent(runId)}/by-product-value`)) })
 }
+
+export type RunWasteDisposal = {
+  productionRunId: string; disposalCost: number; costComplete: boolean
+  costBasis: 'CURRENT' | 'HISTORICAL' | 'ESTIMATED'; costBasisAt: string | null; estimated: boolean
+  lines: { itemId: string; itemCode: string; itemName: string | null; quantity: number | null; unit: string | null
+    unitDisposalCost: number | null; cost: number | null; costBasis: 'CURRENT' | 'HISTORICAL' | 'ESTIMATED' }[]
+}
+/** Separate waste disposal cost (docs/domain/bom-by-products.md WD5); refreshes with the same recordings as material cost. */
+export function useRunWasteDisposalQuery(runId: string) {
+  return useQuery<RunWasteDisposal>({ queryKey: ['production-run-items', runId, 'waste-disposal'], retry: false,
+    enabled: Boolean(runId), staleTime: 0,
+    queryFn: async () => unwrapApiResponse(await httpClient.get<ApiEnvelope<RunWasteDisposal>>(
+      `/production-runs/${encodeURIComponent(runId)}/waste-disposal-cost`)) })
+}

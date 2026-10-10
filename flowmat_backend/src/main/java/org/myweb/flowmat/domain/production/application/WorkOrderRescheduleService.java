@@ -28,6 +28,7 @@ public class WorkOrderRescheduleService {
     private final ProductionRunRepository runs;
     private final ProjectAccessService access;
     private final IdGenerator ids;
+    private final WorkOrderBomSelection bomSelection;
 
     @Transactional(readOnly = true)
     public List<WorkOrderRescheduleResponse> history(String workOrderId) {
@@ -80,6 +81,7 @@ public class WorkOrderRescheduleService {
         if (same(order.getPlannedStartAt(), start) && same(order.getPlannedEndAt(), end)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "The planned dates are unchanged.");
         }
+        if (!same(order.getPlannedStartAt(), start)) bomSelection.requireSameRevision(order, start);
         WorkOrderReschedule change = new WorkOrderReschedule();
         change.setChangeId(ids.generate()); change.setWorkOrderId(workOrderId); change.setRequestId(request.requestId());
         change.setPreviousPlannedStartAt(order.getPlannedStartAt()); change.setPreviousPlannedEndAt(order.getPlannedEndAt());

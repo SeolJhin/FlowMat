@@ -37,6 +37,8 @@ class BomWhereUsedIntegrationTest extends IntegrationTestSupport {
         line(breadV1, flour, "20");
         approve(breadV1);
         String breadV2 = id(call(post("/boms/" + breadV1 + "/revisions")).andExpect(status().isOk()), "bomId");
+        // Approval retires nothing (docs/domain/multi-level-bom.md M1), so v1 is retired first.
+        call(post("/boms/" + breadV1 + "/retire")).andExpect(status().isOk());
         approve(breadV2);
         String cakeDraft = bom(cake, "Cake");
         line(cakeDraft, flour, "7.5");

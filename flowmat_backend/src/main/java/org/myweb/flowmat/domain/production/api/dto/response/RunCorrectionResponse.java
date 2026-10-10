@@ -32,7 +32,11 @@ public record RunCorrectionResponse(
         String unit,
         BigDecimal beforeQty,
         BigDecimal afterQty,
-        String createdRunItemId
+        String createdRunItemId,
+        String targetRunSetupId,
+        String equipmentId,
+        Integer setupMinutes,
+        String createdRunSetupId
     ) {
     }
 }

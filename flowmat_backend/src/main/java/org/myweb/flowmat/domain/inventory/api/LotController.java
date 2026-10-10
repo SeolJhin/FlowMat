@@ -52,6 +52,12 @@ public class LotController {
         return ApiResponse.ok(lotService.closeLot(lotId));
     }
 
+    /** A closed LOT open again; project owners only (docs/domain/lot-release.md R6). */
+    @PostMapping("/{lotId}/reopen")
+    public ApiResponse<LotResponse> reopenLot(@PathVariable("lotId") String lotId) {
+        return ApiResponse.ok(lotService.reopenLot(lotId));
+    }
+
     /** A suspect LOT and every LOT made from it, with their stock and what left (docs/domain/lot-recall.md). */
     @GetMapping("/{lotId}/recall")
     public ApiResponse<LotRecallResponse> recall(@PathVariable("lotId") String lotId) {

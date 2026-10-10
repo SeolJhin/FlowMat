@@ -79,9 +79,15 @@ export function describeCorrectionLine(
   runItems: ProductionRunItemDto[],
   itemLabel: (itemId: string) => string,
   formatQty: (value: number | null | undefined) => string,
+  equipmentLabel?: (equipmentId: string) => string,
 ): string {
   if (line.kind === 'set_output_qty') {
     return `Output ${formatQty(line.beforeQty)} → ${formatQty(line.afterQty)}`
+  }
+  if (line.kind === 'cancel_setup') return 'Cancel a setup'
+  if (line.kind === 'add_setup') {
+    const on = line.equipmentId ? ` on ${equipmentLabel ? equipmentLabel(line.equipmentId) : line.equipmentId}` : ''
+    return `Add a setup of ${line.setupMinutes ?? '?'} min${on}`
   }
   if (line.kind === 'void_item') {
     const target = runItems.find((item) => item.productionRunItemId === line.targetRunItemId)

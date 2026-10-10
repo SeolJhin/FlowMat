@@ -2,6 +2,7 @@ package org.myweb.flowmat.domain.bom.application;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -21,9 +22,9 @@ import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 
 /**
- * The project's approved BOMs as a tree of items (docs/domain/multi-level-bom.md): an item with an approved BOM is made
- * from that BOM's materials, which may have approved BOMs of their own. Approval keeps the tree free of loops and at most
- * {@link #MAX_LEVELS} deep; the walks here still stop at that depth.
+ * The project's approved BOMs as a tree of items (docs/domain/multi-level-bom.md): on a given day an item is made from the
+ * materials of its approved revision effective that day, which may have approved BOMs of their own. Approval keeps every
+ * approved revision free of loops and at most {@link #MAX_LEVELS} deep; the walks here still stop at that depth.
  */
 public final class BomTree {
 
@@ -37,28 +38,37 @@ public final class BomTree {
     private BomTree() {
     }
 
-    /** Item → its approved BOM; the highest revision if an item somehow has two. */
-    public static Map<String, BomHeader> approvedByItem(BomHeaderRepository headers, String projectId) {
+    /**
+     * Item → its approved revision effective on {@code on}, a project calendar day: what the item is made from that day
+     * (docs/domain/multi-level-bom.md M3). Approved revisions of one item do not overlap, so there is at most one; legacy
+     * overlapping rows take the highest revision. An item whose approved periods all miss the day has none.
+     */
+    public static Map<String, BomHeader> approvedByItem(BomHeaderRepository headers, String projectId, LocalDate on) {
         return headers.findAllByProjectIdAndBomStatusAndDeletedYn(projectId, BomStatus.APPROVED.code(), NOT_DELETED).stream()
+            .filter(header -> covers(header, on))
             .collect(Collectors.toMap(BomHeader::getTargetItemId, Function.identity(),
                 (one, other) -> Comparator.comparing(BomHeader::getBomVersion).compare(one, other) >= 0 ? one : other));
     }
 
+    /** Whether the revision's effective period includes the day; both ends count and a missing end is open. */
+    public static boolean covers(BomHeader header, LocalDate on) {
+        return (header.getEffectiveFrom() == null || !on.isBefore(header.getEffectiveFrom()))
+            && (header.getEffectiveTo() == null || !on.isAfter(header.getEffectiveTo()));
+    }
+
     /**
-     * Item → the materials of its approved BOM. {@code replacedItemId}'s approved BOM is left out: a revision of that item
-     * is being checked and would replace it.
+     * Item → the materials of any of its approved revisions, whatever their periods, so loops and depth hold on every day.
+     * {@code checkedItemId}'s revisions are left out: a revision of that item is being checked.
      */
     public static Map<String, List<String>> approvedChildren(
         BomHeaderRepository headers,
         BomLineRepository lines,
         String projectId,
-        String replacedItemId
+        String checkedItemId
     ) {
-        Map<String, BomHeader> approved = new HashMap<>(approvedByItem(headers, projectId));
-        if (replacedItemId != null) {
-            approved.remove(replacedItemId);
-        }
-        Map<String, String> itemByBom = approved.values().stream()
+        Map<String, String> itemByBom = headers.findAllByProjectIdAndBomStatusAndDeletedYn(projectId, BomStatus.APPROVED.code(),
+                NOT_DELETED).stream()
+            .filter(header -> !header.getTargetItemId().equals(checkedItemId))
             .collect(Collectors.toMap(BomHeader::getBomId, BomHeader::getTargetItemId));
         Map<String, List<String>> tree = new HashMap<>();
         if (itemByBom.isEmpty()) {
@@ -68,7 +78,10 @@ public final class BomTree {
             if (!isMaterial(line.getLineType())) {
                 continue;
             }
-            tree.computeIfAbsent(itemByBom.get(line.getBomId()), item -> new ArrayList<>()).add(line.getChildItemId());
+            List<String> children = tree.computeIfAbsent(itemByBom.get(line.getBomId()), item -> new ArrayList<>());
+            if (!children.contains(line.getChildItemId())) {
+                children.add(line.getChildItemId());
+            }
         }
         return tree;
     }

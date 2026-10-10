@@ -7,6 +7,8 @@ public enum LotStatus {
     AVAILABLE("available"),
     RESERVED("reserved"),
     QUARANTINED("quarantined"),
+    /** Waiting for its receipt checks: stock can be received but stays quarantined until quality releases the LOT. */
+    INSPECTION_PENDING("inspection_pending"),
     CONSUMED("consumed"),
     CLOSED("closed");
 

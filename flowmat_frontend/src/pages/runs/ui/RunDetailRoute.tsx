@@ -21,6 +21,7 @@ import { inputLotOptions } from '../model/correctionModel'
 import { RunCorrectionsPanel } from './RunCorrectionsPanel'
 import { RunQualityPanel } from './RunQualityPanel'
 import { RunCostPanel } from './RunCostPanel'
+import { RunSetupPanel } from './RunSetupPanel'
 import { RunExpectedOutputs } from './RunExpectedOutputs'
 import { useBomRequirementsQuery } from '../../../entities/bom/api/useBoms'
 import { finishByProductNote, finishOutput } from '../../inventory/model/bomLineTypeModel'
@@ -547,6 +548,7 @@ export function RunDetailRoute() {
                 </>
               )}
               <RunCostPanel runId={run.productionRunId} />
+              <RunSetupPanel projectId={projectId} runId={run.productionRunId} open={isRunOpen(run.runStatus)} />
               <RunQualityPanel
                 projectId={projectId}
                 run={run}

@@ -29,6 +29,7 @@ public class ProjectServiceImpl implements ProjectService {
     private final ProjectMemberRepository projectMemberRepository;
     private final IdGenerator idGenerator;
     private final ProjectAccessService projectAccessService;
+    private final OrganizationService organizationService;
 
     @Override
     public List<ProjectSummaryResponse> listProjects() {
@@ -50,6 +51,8 @@ public class ProjectServiceImpl implements ProjectService {
         project.setProjectStatus("active");
         project.setVisibility(defaultIfBlank(request.visibility(), "private"));
         project.setDeletedYn(NOT_DELETED);
+        // Its organization is ownership only; access still comes from the owner and project members (OR6).
+        project.setOrganizationId(organizationService.forNewProject(project.getOwnerId(), request.organizationId()));
         Project savedProject = projectRepository.save(project);
 
         ProjectMember ownerMembership = new ProjectMember();
@@ -102,7 +105,8 @@ public class ProjectServiceImpl implements ProjectService {
             project.getProjectStatus(),
             project.getVisibility(),
             project.getCurrentWorkflowId(),
-            project.getTimeZone()
+            project.getTimeZone(),
+            project.getOrganizationId()
         );
     }
 

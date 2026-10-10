@@ -1,3 +1,4 @@
+import { InstructionAttachmentsPanel } from '../../inventory/ui/InstructionAttachmentsPanel'
 import { useState } from 'react'
 import { useRunInstructionMutations, useRunInstructionQuery } from '../../../entities/production/api/useWorkInstructions'
 import { useNonconformitiesQuery, useNonconformityMutations } from '../../../entities/quality/api/useNonconformities'
@@ -33,6 +34,7 @@ export function RunInstructionChecklist({ projectId, runId }: { projectId: strin
       </p>
       {instruction.documentUrl && <a href={instruction.documentUrl} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>Open document</a>}
       {instruction.body && <p style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{instruction.body}</p>}
+      <InstructionAttachmentsPanel key={instruction.instructionId} projectId={projectId} instructionId={instruction.instructionId} />
       <ol aria-label="Instruction steps" style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 6, fontSize: 13 }}>
         {instruction.steps.map((step) => {
           const confirmed = done.get(step.stepId)

@@ -20,6 +20,7 @@ import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.springframework.stereotype.Service;
@@ -41,6 +42,7 @@ public class BomExplosionService {
     private final BomService bomService;
     private final ItemRepository itemRepository;
     private final ProjectAccessService projectAccessService;
+    private final ProjectCalendarQuery projectCalendar;
 
     public BomExplosionResponse explode(String bomId, String quantityText) {
         BomHeader header = bomHeaderRepository.findByBomIdAndDeletedYn(bomId, NOT_DELETED)
@@ -49,7 +51,9 @@ public class BomExplosionService {
         BigDecimal quantity = quantity(quantityText);
         BomRequirementResponse top = bomService.requirementsForRun(bomId, header.getProjectId(), null, quantity);
 
-        Walk walk = new Walk(header.getProjectId(), BomTree.approvedByItem(bomHeaderRepository, header.getProjectId()));
+        // Undated, so the revisions effective on the project's today (docs/domain/multi-level-bom.md M3).
+        Walk walk = new Walk(header.getProjectId(),
+            BomTree.approvedByItem(bomHeaderRepository, header.getProjectId(), projectCalendar.today(header.getProjectId())));
         Set<String> path = new HashSet<>();
         path.add(header.getTargetItemId());
         walk.level(top, header.getTargetItemId(), 1, path);

@@ -28,7 +28,8 @@ public class LotStatusResync {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void resync(String lotId) {
         LotMaster lot = lotMasterRepository.findForUpdate(lotId).orElse(null);
-        if (lot == null || InventoryCommandService.QUARANTINED.equals(lot.getLotStatus()) || "closed".equals(lot.getLotStatus())) {
+        if (lot == null || InventoryCommandService.QUARANTINED.equals(lot.getLotStatus()) || "closed".equals(lot.getLotStatus())
+            || InventoryCommandService.INSPECTION_PENDING.equals(lot.getLotStatus())) {
             return;
         }
         String status = InventoryCommandService.lotStatusFor(inventoryRepository.findAllByLotIdAndDeletedYn(lotId, NOT_DELETED));

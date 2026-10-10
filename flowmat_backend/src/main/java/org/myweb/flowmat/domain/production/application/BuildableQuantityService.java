@@ -106,7 +106,14 @@ public class BuildableQuantityService {
 
         Map<String, BigDecimal> needs = new LinkedHashMap<>();
         Map<String, String> itemUnits = new LinkedHashMap<>();
-        for (BomLineResponse line : bom.lines()) {
+        if (bom.lines().stream().anyMatch(BomLineResponse::phantom)) {
+            // A phantom is never stocked: count the materials it goes through instead (multi-level-bom.md P2, P4).
+            for (var line : bomService.calculateRequirements(bom.bomId(), batch).lines()) {
+                needs.merge(line.childItemId(), line.requiredItemQuantity().setScale(SCALE, RoundingMode.HALF_UP), BigDecimal::add);
+                itemUnits.putIfAbsent(line.childItemId(), line.itemUnit());
+            }
+        }
+        for (BomLineResponse line : needs.isEmpty() ? bom.lines() : List.<BomLineResponse>of()) {
             if (!BomTree.isMaterial(line.lineType())) {
                 continue;
             }

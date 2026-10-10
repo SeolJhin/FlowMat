@@ -19,6 +19,11 @@ public record RunCorrectionLineRequest(
     String inventoryId,
     BigDecimal qty,
     String unit,
-    BigDecimal afterQty
+    BigDecimal afterQty,
+    /** cancel_setup: the setup to cancel (docs/domain/equipment-setup-cost.md AS7). */
+    String targetRunSetupId,
+    /** add_setup: the equipment and whole minutes of the setup to add. */
+    String equipmentId,
+    Integer setupMinutes
 ) {
 }

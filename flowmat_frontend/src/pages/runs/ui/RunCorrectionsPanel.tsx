@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useLotsQuery } from '../../../entities/inventory/api/useLots'
+import { useEquipmentQuery } from '../../../entities/catalog/api/useEquipment'
 import {
   useDecideRunCorrectionMutation,
   useRequestRunCorrectionMutation,
@@ -43,6 +44,11 @@ export function RunCorrectionsPanel({ projectId, run, runItems, items, inventori
   const requestMutation = useRequestRunCorrectionMutation(runId)
   const decideMutation = useDecideRunCorrectionMutation(runId, projectId)
   const lotsQuery = useLotsQuery(projectId)
+  const equipmentList = useEquipmentQuery(projectId).data
+  const equipmentLabel = (equipmentId: string) => {
+    const one = (equipmentList ?? []).find((equipment) => equipment.equipmentId === equipmentId)
+    return one ? one.equipmentCode ?? one.equipmentName : equipmentId
+  }
   const [draft, setDraft] = useState<CorrectionDraft>(EMPTY_DRAFT)
   const [formError, setFormError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
@@ -98,7 +104,7 @@ export function RunCorrectionsPanel({ projectId, run, runItems, items, inventori
               <div style={{ margin: '4px 0' }}>{correction.reason}</div>
               <ul style={{ margin: '4px 0', paddingLeft: 16 }}>
                 {correction.lines.map((line) => (
-                  <li key={line.lineNo}>{describeCorrectionLine(line, runItems, itemLabel, formatQty)}</li>
+                  <li key={line.lineNo}>{describeCorrectionLine(line, runItems, itemLabel, formatQty, equipmentLabel)}</li>
                 ))}
               </ul>
               <div style={{ opacity: 0.7 }}>

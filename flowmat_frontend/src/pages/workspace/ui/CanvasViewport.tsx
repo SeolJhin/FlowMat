@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
 import { toPng } from 'html-to-image'
 import {
-  experimental_useOnNodesChangeMiddleware,
   ReactFlow,
   Background,
   BackgroundVariant,
@@ -48,6 +47,7 @@ import type { PatchCanvasAnnotationInput } from '../../../entities/canvas-annota
 import { CanvasNode } from './CanvasNode'
 import { CanvasEdge } from './CanvasEdge'
 import { PALETTE_DRAG_MIME } from './canvasConstants'
+import { canvasNodePosition } from '../model/canvasNodePosition'
 import { useWorkspaceStore } from '../model/workspaceStore'
 import { useCanvasInteractionStore } from '../model/canvasInteractionStore'
 import { useTheme } from '../../../app/providers/ThemeProvider'
@@ -334,13 +334,6 @@ function ViewportPersister({ storageKey }: { storageKey: string }) {
 }
 
 /** Calls updateNodeInternals for nodes whose handle count changed. Must be inside ReactFlow. */
-function NodesChangeMiddleware() {
-  experimental_useOnNodesChangeMiddleware((changes) =>
-    changes.filter((c) => !(c.type === 'position' && c.dragging))
-  )
-  return null
-}
-
 function InternalsUpdater({ nodeIds }: { nodeIds: string[] }) {
   const updateNodeInternals = useUpdateNodeInternals()
   useEffect(() => {
@@ -418,6 +411,7 @@ type RfNode = {
   height: number
   selected: boolean
   draggable?: boolean
+  dragging?: boolean
   data: CanvasNodeViewModel
 }
 
@@ -607,6 +601,7 @@ export function CanvasViewport({
 
   // Keep a ref so snap calculation always reads the latest positions without deps churn
   const localNodesRef = useRef<RfNode[]>(localNodes)
+  const serverPositionsRef = useRef(new Map(nodes.map((node) => [node.id, { ...node.position }])))
   // Track I/O counts per node to detect handle additions/removals
   const ioCountRef = useRef<Map<string, number>>(new Map())
 
@@ -620,6 +615,8 @@ export function CanvasViewport({
     }
     if (changed.length > 0) setNodesToUpdateInternals(changed)
 
+    const previousServerPositions = serverPositionsRef.current
+    serverPositionsRef.current = new Map(nodes.map((node) => [node.id, { ...node.position }]))
     setLocalNodes((prev) => {
       const next = toRfProcessNodes(nodes, selectedNodeId)
       const updated = next.map((n) => {
@@ -632,7 +629,8 @@ export function CanvasViewport({
             selected: existing.selected,
             width: existing.width ?? n.width,
             height: existing.height ?? n.height,
-            position: existing.position ?? n.position,
+            dragging: existing.dragging,
+            position: canvasNodePosition(n.position, previousServerPositions.get(n.id), existing),
           }
         }
         return nodeWithEditing
@@ -703,9 +701,6 @@ export function CanvasViewport({
     },
     [onConnectStart]
   )
-
-  // experimental_useOnNodesChangeMiddleware moved into NodesChangeMiddleware below
-  // (must be called inside the ReactFlow context, not in the parent component)
 
   const handleReconnect: OnReconnect = useCallback(
     (oldEdge, newConnection) => {
@@ -1011,7 +1006,6 @@ export function CanvasViewport({
         elementsSelectable={activeTool !== 'annotation-freehand'}
         nodesDraggable={activeTool !== 'annotation-freehand'}
       >
-        <NodesChangeMiddleware />
         <SnapGuideLayer guides={snapGuides} />
         <ViewportPortal>
           <WorkspaceEditorLayer

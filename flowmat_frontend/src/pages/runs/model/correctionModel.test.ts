@@ -166,3 +166,15 @@ describe('LOTs offered in a run record form', () => {
     expect(outputs.map((option) => [option.inventory.inventoryId, option.disabled])).toEqual([['gone', false], ['late', false]])
   })
 })
+
+describe('setup correction lines', () => {
+  it('are described by what they change', () => {
+    const base = { lineNo: 1, targetRunItemId: null, direction: null, itemId: null, inventoryId: null, qty: null, unit: null,
+      beforeQty: null, afterQty: null, createdRunItemId: null }
+    expect(describeCorrectionLine({ ...base, kind: 'cancel_setup', targetRunSetupId: 's1' }, [], String, String)).toBe('Cancel a setup')
+    expect(describeCorrectionLine({ ...base, kind: 'add_setup', equipmentId: 'press', setupMinutes: 20 }, [], String, String))
+      .toBe('Add a setup of 20 min on press')
+    expect(describeCorrectionLine({ ...base, kind: 'add_setup', equipmentId: 'press', setupMinutes: 20 }, [], String, String,
+      () => 'PRESS')).toBe('Add a setup of 20 min on PRESS')
+  })
+})

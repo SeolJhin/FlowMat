@@ -202,7 +202,7 @@ draft ──submit──▶ pending_approval ──approve──▶ approved ─
 
 ### 기타 구현 결정
 
-- **[구현 결정 — 정책 대체 승인 2026-10-05, 구현 전]** 한 품목에 유효기간이 겹치지 않는 여러 approved revision을 허용합니다. 기간 overlap이면 승인을 거절하고 새 승인으로 이전 revision을 자동 retired시키지 않습니다. 기존 코드는 단일 approved·자동 retire이므로 전환 작업이 필요합니다.
+- **[구현 결정 — 정책 대체 승인 2026-10-05, 구현 2026-10-10(로컬 검증)]** 한 품목에 유효기간이 겹치지 않는 여러 approved revision을 허용합니다. 기간 overlap이면 승인을 거절(409)하고 새 승인으로 이전 revision을 자동 retired시키지 않습니다. 날짜 없는 전개·원가·역전개·MRP는 프로젝트 오늘의 revision, 순환·깊이 검사는 모든 approved revision을 씁니다([다단계 BOM](multi-level-bom.md) M1–M3).
 - **[구현 결정 — 정책 대체 승인 2026-10-05, 구현 완료 2026-10-06]** 여러 draft revision을 허용하고, 같은 품목의 pending approval 하나만 허용합니다. 이미 pending인 다른 revision이 있으면 제출은 409이며 초안을 유지합니다. 반려하면 대기 슬롯이 풀립니다. 삭제한 revision 번호는 재사용하지 않습니다. 승인 그래프는 프로젝트별로 직렬 검증하여 서로 순환하는 BOM 둘이 동시에 승인될 수 없고, CSV 자재 검증은 해당 초안 잠금 뒤 현재 줄을 읽습니다.
 - **[확정 2026-09-24]** BOM 및 생산 소요량의 표준 저장·반영 정밀도는 **소수점 4자리, `RoundingMode.HALF_UP`**입니다. 내부 계산은 충분한 정밀도(비율 12자리, 중간값 8자리)로 하고 저장·재고 반영 시점에만 4자리로 맞춥니다. 올림(CEILING)은 쓰지 않습니다. 자재 여유분은 반올림 규칙이 아니라 향후 스크랩률·손실률·안전재고·발주단위 같은 별도 정책으로 처리합니다.
 - 승인 검증은 submit 때 한 번, approve 때 다시 한 번 합니다(그 사이 품목·단위가 바뀔 수 있으므로). 문제는 한 메시지에 모두 나열합니다.
@@ -218,8 +218,9 @@ draft ──submit──▶ pending_approval ──approve──▶ approved ─
 | `available` | ✓ | ✓ | |
 | `reserved` | ✓ | ✓ | 예약량 > 0이면 표시용 |
 | `quarantined` | ✗ | ✗ | `quarantine` 거래로 진입 |
+| `inspection_pending` | ✗ | ✗ | 검사가 필요한 품목의 새 LOT. 재고 행은 격리로 생기고 Release LOT로만 풀림([lot-release](lot-release.md)) |
 | `consumed` | ✗ | ✗ | 수량 0이 되면 자동 |
-| `closed` | ✗ | ✗ | 수동 종료. 되돌릴 수 없음 |
+| `closed` | ✗ | ✗ | 수동 종료. Project owner만 재개(`POST /lots/{id}/reopen`) |
 
 ### 규칙
 
@@ -236,6 +237,8 @@ draft ──submit──▶ pending_approval ──approve──▶ approved ─
 | `GET /lots?projectId=&itemId=` | 목록 |
 | `GET /lots/{id}` | 단건 |
 | `POST /lots/{id}/close` | 종료 |
+| `POST /lots/{id}/reopen` | 재개(Project owner) |
+| `POST /lots/{id}/release` | 검사 대기 해제(Project write, 필수 검사 통과 시) |
 | `GET /lots/{id}/trace?direction=backward\|forward` | 역추적(원재료 쪽) / 정추적(완제품 쪽), 전 단계 재귀 |
 
 ### 계보
@@ -246,7 +249,7 @@ draft ──submit──▶ pending_approval ──approve──▶ approved ─
 
 - **[구현 결정 — 승인 2026-10-05]** 계보는 runId 필수, stepId/processId 선택입니다. 기존 실행 단위 기록을 유지합니다. 현재 코드는 실행의 모든 투입 LOT를 산출 LOT에 연결하며, 선택 step/process 확장은 아직 구현 전입니다.
 - **[구현 결정 — 승인 2026-09-24]** LOT가 있는 재고 행 하나를 격리하면 **그 LOT의 모든 재고 행과 LOT 자체**가 격리됩니다. 해제도 LOT 전체에 적용되고, 해제 후 LOT 상태는 재고량으로 다시 계산합니다(available / reserved / consumed).
-- **[구현 결정 — 정책 대체 승인 2026-10-05, 구현 전]** 검사/Release 정책이 없는 품목은 AVAILABLE, 필요한 품목은 QUARANTINE / INSPECTION_PENDING으로 시작합니다. 호환 기본값은 AVAILABLE입니다. 현재 코드는 검사 정책과 무관하게 available로 시작하므로 해당 정책·상태 전환 구현이 필요합니다.
+- **[구현 결정 — 정책 대체 승인 2026-10-05, 구현 2026-10-09(로컬 검증)]** 검사/Release 정책이 없는 품목은 AVAILABLE, 필요한 품목은 QUARANTINE / INSPECTION_PENDING으로 시작합니다. 호환 기본값은 AVAILABLE입니다. 품목 `lot_release_required_yn`(V60)이 `Y`이면 새 LOT는 `inspection_pending`이고, 해제·격리 전환·재개 규칙은 [lot-release.md](lot-release.md) R1–R6에 있습니다. 원격 CI·실 API 브라우저·보안 검토는 남았습니다.
 - **동시 이동의 LOT 상태(2026-10-02):** 거래는 자기 재고 행만 잠근 채 LOT 상태를 계산하므로, 같은 LOT의 다른 행에서 동시에 이동하면 서로의 옛 수량을 보고 잔량 0인데 `available`로 남을 수 있었습니다. 이제 각 거래가 커밋된 **뒤** 새 트랜잭션에서 LOT 행만 잠그고(`LotStatusResync`, `lot_master … FOR UPDATE`) 한 번 더 계산합니다. 마지막 재계산이 커밋된 변경을 모두 봅니다. 재고 행을 잡지 않으므로 행을 먼저 잠그는 거래(FEFO·실사·이동)와 교착이 없습니다. 거래 안의 계산도 그대로 두어 응답은 지금처럼 바로 반영되고, 한 거래가 같은 LOT의 행 여럿을 움직여도 재계산은 LOT당 한 번입니다. 재계산이 실패하면 거래는 이미 커밋됐으므로 경고 로그만 남깁니다. 검증: `InventoryTransferIntegrationTest`에서 5 kg 행 둘을 같은 순간 출고 → `consumed`(4회 반복). 재계산을 끄면 `available`로 실패하는 것을 확인함
 - **[구현 결정 — 승인 2026-10-05]** closed LOT는 모든 재고 이동과 직접 수정이 거절됩니다. 종료는 보유량이 0일 때만, 종료/재개 권한은 Project owner만입니다. Organization OWNER/ADMIN이라는 이유만으로 허용하지 않습니다.
 - **[구현 결정 — 승인 2026-09-24]** 품목의 `lot_manage_yn`은 그 품목의 재고 행이 하나도 없을 때만 바꿀 수 있습니다.

@@ -58,13 +58,14 @@ class RunCostIntegrationTest extends IntegrationTestSupport {
             .andExpect(jsonPath("$.data.costComplete").value(false))
             .andExpect(jsonPath("$.data.costPerUnit").value(nullValue()));
 
-        // With salt priced the cost is complete: 6 + 1 = 7 for 4 made, 1.75 each.
+        // D+: later prices cannot fill a missing price or change the price at the original completion time.
         call(put("/items/" + salt), "{\"unitCost\":1}").andExpect(status().isOk());
+        call(put("/items/" + flour), "{\"unitCost\":9}").andExpect(status().isOk());
         call(get("/production-runs/" + runId + "/cost"))
-            .andExpect(jsonPath("$.data.materialCost").value(7.0))
-            .andExpect(jsonPath("$.data.costComplete").value(true))
+            .andExpect(jsonPath("$.data.materialCost").value(6.0))
+            .andExpect(jsonPath("$.data.costComplete").value(false))
             .andExpect(jsonPath("$.data.outputQuantity").value(4.0))
-            .andExpect(jsonPath("$.data.costPerUnit").value(1.75));
+            .andExpect(jsonPath("$.data.costPerUnit").value(nullValue()));
 
         mockMvc.perform(get("/production-runs/" + runId + "/cost")
                 .header("Authorization", "Bearer " + jwtProvider.generateAccessToken("run-cost-outsider")))

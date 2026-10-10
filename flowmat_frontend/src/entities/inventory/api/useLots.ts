@@ -45,6 +45,27 @@ export function useCreateLotMutation(projectId: string) {
   })
 }
 
+/** Releases a LOT that waits for its receipt checks; the server refuses while a required check is missing or failed. */
+export function useReleaseLotMutation(projectId: string) {
+  const onSuccess = useInvalidateStock(projectId)
+  return useMutation({
+    mutationFn: async (lotId: string) =>
+      unwrapApiResponse(await httpClient.post<ApiEnvelope<{ lotId: string; lotNo: string; lotStatus: string }>>(
+        `/lots/${encodeURIComponent(lotId)}/release`, {})),
+    onSuccess,
+  })
+}
+
+/** Opens a closed LOT again; project owners only (docs/domain/lot-release.md). */
+export function useReopenLotMutation(projectId: string) {
+  const onSuccess = useInvalidateStock(projectId)
+  return useMutation({
+    mutationFn: async (lotId: string) =>
+      unwrapApiResponse(await httpClient.post<ApiEnvelope<LotDto>>(`/lots/${encodeURIComponent(lotId)}/reopen`, {})),
+    onSuccess,
+  })
+}
+
 export function useCloseLotMutation(projectId: string) {
   const onSuccess = useInvalidateStock(projectId)
   return useMutation({

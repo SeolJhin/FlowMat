@@ -16,7 +16,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.api.dto.request.InventoryAdjustRequest;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
@@ -31,7 +30,7 @@ class InventoryServiceImplTest {
 
     @Mock private InventoryRepository inventoryRepository;
     @Mock private ProjectAccessService projectAccessService;
-    @Mock private ItemRepository itemRepository;
+    @Mock private InventoryCatalogReferences catalogReferences;
     @Mock private InventoryCommandService inventoryCommandService;
     @Mock private FlowRuleEngineService flowRuleEngineService;
     @Mock private IdGenerator idGenerator;
@@ -63,7 +62,7 @@ class InventoryServiceImplTest {
             )
         );
 
-        verifyNoInteractions(itemRepository, inventoryRepository, inventoryCommandService);
+        verifyNoInteractions(catalogReferences, inventoryRepository, inventoryCommandService);
     }
 
     @Test
@@ -97,7 +96,7 @@ class InventoryServiceImplTest {
 
         assertEquals(ErrorCode.CONFLICT, exception.getErrorCode());
         assertEquals("This stock record changed since you opened it (now 10 on hand). Reload and try again.", exception.getMessage());
-        verify(itemRepository, never()).findByItemIdAndDeletedYn(any(), any());
+        verify(catalogReferences, never()).item(any());
         verify(inventoryRepository, never()).saveAndFlush(any());
     }
 
@@ -155,7 +154,7 @@ class InventoryServiceImplTest {
 
     @Test
     void rejectsMaximumBelowMinimum() {
-        when(itemRepository.findByItemIdAndDeletedYn("item-1", "N")).thenReturn(Optional.of(item()));
+        when(catalogReferences.item("item-1")).thenReturn(Optional.of(item()));
 
         BusinessException exception = assertThrows(
             BusinessException.class,
@@ -170,7 +169,7 @@ class InventoryServiceImplTest {
 
     @Test
     void rejectsReservingMoreThanOnHand() {
-        when(itemRepository.findByItemIdAndDeletedYn("item-1", "N")).thenReturn(Optional.of(item()));
+        when(catalogReferences.item("item-1")).thenReturn(Optional.of(item()));
 
         BusinessException exception = assertThrows(
             BusinessException.class,
@@ -185,7 +184,7 @@ class InventoryServiceImplTest {
 
     @Test
     void rejectsNegativeQuantity() {
-        when(itemRepository.findByItemIdAndDeletedYn("item-1", "N")).thenReturn(Optional.of(item()));
+        when(catalogReferences.item("item-1")).thenReturn(Optional.of(item()));
 
         BusinessException exception = assertThrows(
             BusinessException.class,

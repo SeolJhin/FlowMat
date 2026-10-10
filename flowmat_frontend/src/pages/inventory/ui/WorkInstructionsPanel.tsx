@@ -1,3 +1,4 @@
+import { InstructionAttachmentsPanel } from './InstructionAttachmentsPanel'
 import { useState, type FormEvent } from 'react'
 import {
   useWorkInstructionMutations,
@@ -159,6 +160,7 @@ function InstructionDetail({ instruction, revisions, projectId }: {
         </>
       )}
 
+      <InstructionAttachmentsPanel key={instruction.instructionId} projectId={projectId} instructionId={instruction.instructionId} editable={draft} />
       <ol aria-label="Steps" style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 4 }}>
         {instruction.steps.map((one) => (
           <li key={one.stepId}>

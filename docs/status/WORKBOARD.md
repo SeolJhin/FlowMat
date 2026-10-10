@@ -1,11 +1,121 @@
 # 작업 현황판
 
-> **현행 문서** · 최종 갱신 2026-10-08 · 작업을 시작·끝내거나 결정이 나면 같은 변경에서 고친다. 무엇이 구현됐는지는 [CURRENT_CAPABILITIES](CURRENT_CAPABILITIES.md), 아키텍처 결정은 [결정 인계](../architecture/decision-handoff.md)가 기준이다. 이 판은 "지금 무엇을 하고, 다음에 무엇을 하며, 무엇을 기다리는가"만 모은다.
+> **현행 문서** · 최종 갱신 2026-10-09 · 작업을 시작·끝내거나 결정이 나면 같은 변경에서 고친다. 무엇이 구현됐는지는 [CURRENT_CAPABILITIES](CURRENT_CAPABILITIES.md), 아키텍처 결정은 [결정 인계](../architecture/decision-handoff.md)가 기준이다. 이 판은 "지금 무엇을 하고, 다음에 무엇을 하며, 무엇을 기다리는가"만 모은다.
 
 ## 1. 진행 중
 
+### 2026-10-10 현재 로컬 검증·캔버스 오류 수정(오류·테스트 담당)
+
+- **수정 완료·사용자 직접 허가:** `flowmat_frontend/src/pages/workspace/ui/CanvasViewport.tsx`, 새 `model/canvasNodePosition.ts`·`model/canvasNodePosition.test.ts`, 기존 담당 `e2e/data-flow-browser.spec.ts`. 수정 전 CanvasViewport는 clean·mtime 2026-09-24. 리드 구역 제한을 알리고 허가받았다.
+- **실패 → 원인:** 단위 8건 중 5건 RED 및 새로고침 없는 실 API UI에서 DF4 클릭 가로채기 실패. 서버가 저장한 배치 좌표를 `existing.position`이 영구 덮어썼다. 추가 유효 Pointer 도구 재현에서는 드래그 중 화면 위치가 안 바뀌었다. middleware가 dragging=true 위치 이벤트를 제거하고 있었다.
+- **수정:** 이전 서버 좌표와 비교해 새 좌표는 반영하고, 진행 중 드래그·아직 저장 전인 위치는 유지한다. 드래그 이벤트 필터를 제거해 화면이 움직이게 하되 기존 `dragging === false` 저장 조건은 유지했다. 브라우저의 reload 우회 제거, Layout 저장 좌표와 실제 CSS 좌표 일치·드래그 중 선택 변경·위치 저장 횟수를 검증한다.
+- **최종 프런트:** 격리본에서 `npm run test/typecheck/lint/build` **605건/97파일 실패 0**, 네 명령 exit 0. 신규 위치 함수 8건, 기존 캔버스 포함 13건 통과. 신규 함수 statements/branches/functions/lines 모두 **100%**, 80% gate 통과.
+- **최종 관련 실 API:** `REAL_API_E2E=1 BASE_URL=http://127.0.0.1:4192 playwright test e2e/data-flow-browser.spec.ts --workers=1 --retries=0 --repeat-each=2` **2건/실패 0, 33.5초**. UI만으로 DF1–DF14, 새로고침 없음, 드래그 중 PATCH 저장 0회·해제 후 1회. 프로젝트 finally 정리, 개발 DB BOM 삽입 없음. 테스트 작성 중 잘못된 저장 URL(PUT 대신 PATCH /position)을 고친 실행은 제품 오류로 집계하지 않는다.
+- **백엔드 로컬 V62 snapshot:** 원격 조회/git archive 없이 실제 미커밋 파일 2,095개를 복사했다. `gradlew test jacocoTestCoverageVerification build --offline --no-daemon --console=plain` **1,222건/실패·오류·제외 0**, 라인 **82.54%**·분기 **69.32%**, build/coverage gate 성공(9m 54s). V59–V62도 포함하며 공유 build·개발 DB는 사용하지 않았다. Flyway 대기 스택은 새 context 초기화 중이었고 전체 검사 성공했으므로 기동 실패로 보고하지 않는다.
+- **다른 브라우저:** 모의 API **122통과/17 의도적 제외**(캔버스 수정 전), 기존 실 API **19통과/실패 0**(최종 드래그 필터 제거 전). 최종 전체 모의/실 API를 한 번에 재실행한 결과로 합산하지 않는다. BOM approval 스펙 제외, 전용 DB 5548/Redis 6390/backend 18092/frontend 4192, 토큰 trace 없음.
+- **범위 변동:** 검증 도중 리드가 팬텀 V63 및 조직 V64·V65를 완성했다. 최종 hash 대조에 리드 소스 20개 변경과 새 마이그레이션이 확인됐다. 따라서 위 1,222건은 V62 시점 증거이고 현재 V65 전체 결과가 아니다. 리드의 1,226건 검증과 합산하지 않는다. 신규 조직 보안 검토를 다음 단계로 진행한다.
+- **산출물:** `C:/Users/Public/Documents/ESTsoft/CreatorTemp/flowmat-local-20261010-1220`의 `local-validation-summary.json`, 원본/최종 manifest·`final-source-check.json`, `canvas-fix.patch`·`canvas-fix-files.txt`(정확히 4파일), RED/GREEN/coverage/browser 로그. 격리 실행의 ArchUnit 자동 축소 파일은 원본에 덮어쓰지 않았다. UTF-8 BOM 검사 1,637파일 발견 0·새 수정 파일 발견 0. 커밋/푸시/브랜치/결정 상태 변경 없음.
+
+### 2026-10-10 조직 권한·호환성 보안 검토(오류·테스트 담당)
+
+- **수정 완료·사용자 직접 허가:** 리드가 만든 `domain/project/application/OrganizationService.java`의 `forNewProject`에 조직 행 잠금만 추가했다. 새 `OrganizationSecurityRegressionIntegrationTest.java`도 담당한다. Controller·ProjectAccessService·V63–V65 및 리드 진행 중 setup 보정 파일은 편집하지 않는다.
+- **실패 → 원인:** 조직 멤버 제거를 미커밋 상태로 고정하고 동시에 프로젝트를 만들면 기존 코드는 제거 후에도 HTTP **200**으로 저장했다(기대 403, 새 회귀 9건 중 1건 실패). 생성의 멤버십 검증이 조직 잠금 밖에서 오래된 active 상태를 읽었다.
+- **수정 → 검증:** 생성도 기존 `findForUpdate`를 사용해 제거와 같은 조직 행에서 순서를 보장한다. 제거가 먼저 끝나면 새 멤버십 조회로 **403**이며 프로젝트 저장 0건. 정책·스키마 변경 없음. 격리본 `gradlew test --tests "*Organization*Test" --tests "*ProjectAccessServiceTest" --tests "*AuthorizationIntegrationTest" --offline --no-daemon --console=plain` **19건/실패·오류·제외 0**(조직 기존 2·신규 9·접근 단위 7·경계 1; 마지막 필터와 일치하는 현재 클래스는 없음).
+- **호환성·보안 범위:** owner/editor/viewer/외부인/조직 admin/PROJECT_VIEW_ALL의 읽기·쓰기·owner·목록 판정을 V65 두 번 실행 전후 비교, project_member 불변·backfill 멱등. 관리 목록의 4개 metadata 필드만 허용, cross-organization member ID 차단, 제거 뒤 재가입해도 프로젝트 권한 복구 없음, 동시 owner 역할/탈퇴/제거 3개 조합에서 마지막 owner 보존. PROJECT_VIEW_ALL은 현재 코드의 기존 목록 허용·개별 접근 거절 동작을 그대로 검증하며 정책을 바꾸지 않는다.
+- **최신 격리 검증:** 실제 로컬 V65 파일 2,116개를 복사(복사 중 변경 0), 원격/git archive 없음. 프런트 **606건/97파일·실패 0**, test/typecheck/lint/build exit 0. 동일 V65 서버에서 `REAL_API_E2E=1 BASE_URL=http://127.0.0.1:4193 playwright test e2e/data-flow-browser.spec.ts --workers=1 --retries=0 --repeat-each=2 --trace=off` **2건/실패 0, 41.4초**, 자동 배치·드래그 저장·프로젝트 생성·graph actual 완료·제조 행 0. 개발 DB BOM 삽입/생성 스펙 없음.
+- **전체 백엔드 완료:** 위 V65 + 허가받은 조직 잠금 수정 + 신규 회귀를 담은 격리본에서 `gradlew test jacocoTestCoverageVerification build --offline --no-daemon --console=plain` **1,235건/200클래스, 실패·오류·제외 0**, 라인 **82.71%**·분기 **69.52%**, coverage gate/build exit 0(6분 22초). 기존 Facts 7건·업로드 보안 6건도 포함한다. 실행 중 리드가 V66를 추가했으므로 현재 V66 전체 결과로 부르거나 다른 세션 숫자와 합산하지 않는다. 잠금 수정·새 회귀 테스트는 작업 완료해 리드에게 돌려준다.
+- **환경·산출물:** `C:/Users/Public/Documents/ESTsoft/CreatorTemp/flowmat-organization-review-20261010`의 `organization-validation-summary.json`·소스 manifest·RED/GREEN 로그·`organization-service-only-fix.patch`(리드 구현 전체가 아닌 잠금 수정만)·정확한 2파일 목록. 전용 DB 5549/Redis 6391/backend 18093/frontend 4193. readiness 200; aggregate health 503은 SMTP 없는 검증 환경의 mail 지표로 확인했으며 제품 설정은 변경하지 않았다. 생성한 Data Flow 프로젝트 active 0건·Flyway 65 확인 후 소유권 검증한 내 프로세스 5개·컨테이너 2개 정리 완료. 이전 V62 검증 환경도 프로세스 5개·컨테이너 2개 정리 완료. 토큰/쿠키 기록·UTF-8 BOM·커밋/푸시/스테이징 없음.
+- **리드에게 P0 파일 반환:** WorkOrderReadinessService·StockAllocationServiceTest·RunCostIntegrationTest의 P0 수정과 검증은 완료해 더 이상 편집 중이 아니다. 정확한 P0 후보/patch는 기존 HEAD+P0 폴더에 보존한다. 리드의 팬텀 준비 점검·할당 날짜 후속은 이 파일들에서 진행 가능하다. 커밋·푸시는 하지 않는다.
+
+### 2026-10-10 Data Flow 실 API 브라우저(오류·테스트 담당)
+
+- **로컬 검증 완료:** 새 `flowmat_frontend/e2e/data-flow-browser.spec.ts`와 `.github/workflows/browser-e2e.yml`의 실 API 단계. DF1–DF14를 UI 생성·포트·마우스 연결·Publish·graph actual 실행·출력·제조 목록 확인·프로젝트 정리까지 검증했다. 잘못된 출력은 HTTP 409/running 유지/attempt 증가 없음, 완료 후 step마다 completed attempt 1개. 로그인은 실행당 1회, trace는 토큰 기록 방지를 위해 끈다.
+- **검증 명령·건수:** 이전 HEAD+P0 전용 격리본에서 REAL_API_E2E=1/BASE_URL=http://127.0.0.1:4191 `playwright test e2e/data-flow-browser.spec.ts --workers=1 --retries=0 --repeat-each=2` **2건 통과/실패 0, 27.8초**. 현재 로컬 기능 WIP 전체의 검증 결과로 표시하지 않는다. 개발 DB BOM 삽입 없음. CI workflow는 이 스펙을 workers=1로 명시 실행하도록 연결했다. 결정·기능 상태는 변경하지 않았다.
+- **당시 제품 결함(이후 사용자 허가로 위 로컬 검증 항목에서 수정 완료):** CanvasViewport.tsx의 서버 nodes 동기화가 `position: existing.position ?? n.position`으로 이전 위치를 계속 유지한다. Layout은 서버에 새 좌표를 저장하지만 현재 화면은 겹친 좌표를 유지해 DF4에서 다른 노드가 클릭을 가로챈다. 통과 스펙은 UI Layout→모든 node 저장 성공→페이지 다시 읽기→Fit view를 사용했다. workspace 소스는 담당 영역 밖이라 수정하지 않았다. 새로고침 없는 재현 스펙은 아래 `repro/`에 있다.
+- **산출물:** `C:/Users/Public/Documents/ESTsoft/CreatorTemp/flowmat-data-flow-20261010`의 `data-flow-ci.patch`/`data-flow-files.txt`(정확히 2파일)/`data-flow-validation-summary.json`/`data-flow-browser-final.log`/`data-flow-results-final/` 및 `repro/data-flow-layout-repro.spec.ts`/`repro/README.txt`. 원격 CI 판정·기능 상태 변경은 리드/사용자가 맡는다.
+- **환경 정리 완료:** 2026-10-10 재개 후 PID·UTC 시작 시각·스크립트·자식 생성 기록으로 자기 프로세스 4개, ID·label·5547/6389 바인딩으로 전용 DB/Redis 2개만 종료했다. 이전 자동 승인 사용량 한도 거절 뒤 안내 시간이 지난 후 같은 승인 경로로 실행했다. 사용자 서버/컨테이너는 건드리지 않았다.
+- 리드의 global multipart 이동 후 본문 동작은 동일함을 읽기 확인했다. 보안 34건은 이동 전 snapshot이고 리드의 47건과 합산하지 않는다.
+
+### 2026-10-10 P1 Facts 회귀 검토(오류 수정 담당)
+
+- **수정·검증 완료:** `flowmat_backend/src/main/java/org/myweb/flowmat/domain/inventory/application/StockFactsQueryImpl.java`, 새 `flowmat_backend/src/test/java/org/myweb/flowmat/StockFactsRegressionIntegrationTest.java`. 수정 전 StockFactsQueryImpl은 clean·mtime 2026-10-08이며 리드 예약 목록에 없었다. 리드의 ProductionPlanningReferences/첨부/LOT/setup 파일은 편집하지 않는다.
+- 범위: 잠금 전에 읽은 L1 캐시의 오래된 재고, 트랜잭션 잠금 유지·MANDATORY, BigDecimal/날짜/null 왕복 및 일괄 조회 수. P0 격리본을 보존하고 `C:/Users/Public/Documents/ESTsoft/CreatorTemp/flowmat-facts-review-20261010`에서 테스트 먼저 재현한다. 새 마이그레이션 없음.
+
+
+- **실패 검사 → 원인:** 새 회귀 7건 중 2건이 실제 실패했다. 네이티브 SELECT FOR UPDATE 뒤 bulk entity 조회가 기존 persistence context 값을 재사용해 수량 5 대신 10, 최신 실사 시각 대신 null을 반환했다. 실사 stamp는 version을 올리지 않으므로 version 비교만으로는 해결되지 않는다.
+- **고친 파일:** 위 StockFactsQueryImpl에서 이미 읽은 재고만 refresh하고 proxy는 unproxy 후 JSON으로 만든다. 새로운 재고는 한 번에 조회한다. 신규 7건은 잠금 최신 수량·실사 stamp·commit까지 잠금 유지·MANDATORY·BigDecimal/미세초/윤일/null·fresh 12행 2쿼리·일괄 item/stock 조회와 immutable snapshot을 확인한다.
+- **검증:** 격리본 `gradlew test --tests '*StockFactsRegressionIntegrationTest' --tests '*ProductionReferenceFactsIntegrationTest' --tests '*StockAllocation*Test' --tests '*RunInputAllocation*Test' --tests '*LotFefo*Test' --offline --no-daemon` **45건/실패·오류·제외 0**. RED/GREEN 로그 `facts-red.log`/`facts-green.log`. 전체 `test jacocoTestCoverageVerification build --offline --no-daemon --console=plain` **1,179건/실패·오류·제외 0**, 라인 **81.96%**·분기 **68.75%**, coverage gate/build 성공(6m 59s, `facts-full.log`). P0 5개 CI 후보와 P1 2개 수정은 분리한다.
+- **남은 위험:** fresh 행은 2쿼리지만 이미 읽어 둔 N행은 정확한 최신 값 확보를 위해 추가 refresh N회가 발생할 수 있다. immutable projection 등 공개 API 설계 변경은 리드 판단 대상이다.
+- **리드 판단(2026-10-10):** 지금 방식(잠금 뒤 이미 읽은 행만 refresh)을 유지한다. 잠금 아래의 정확한 값이 우선이고, 한 작업지시·품목의 재고 행 N은 작다. 공개 API를 immutable projection으로 바꾸는 설계 변경은 측정에서 refresh 비용이 보일 때 다시 연다. 리드의 최신 기능 WIP·V59 이상은 이번 Facts 격리본에 들어 있지 않다.
+
+### 2026-10-10 첨부 보안 정적 검토(오류·보안 담당)
+
+- **추가 보안 테스트 완료:** 새 `flowmat_backend/src/test/java/org/myweb/flowmat/global/storage/UploadSecurityRegressionTest.java`. 파일 없음/status 확인 후 신규 테스트만 맡는다. 리드의 첨부 구현·기존 테스트·마이그레이션은 수정하지 않는다. HEAD+P0 격리본에 첨부 서버 22개 파일만 복사한 별도 환경에서 실제 읽기 바이트 한계/선언 크기 불일치/파일 이름 제어 문자/MIME를 확인한다.
+
+- **읽기만:** 리드 인수 표시 뒤 controller/service/StorageFilenamePolicy/UploadValidation/Local·S3/설정/V59/기존 권한·저장 테스트를 검토했다. 인계 서버 22개 파일은 이전 격리본과 바이트 동일하며 리드 소유 파일은 수정하지 않았다. 새 마이그레이션·외부 저장소 쓰기·개발 DB 접근 없음.
+- **확인:** project read 다운로드/list, write 업로드/remove, 다른 instruction의 attachment 404, UUID 재송신의 작성자·hash 확인, draft 잠금과 release/revise의 같은 잠금, MIME·확장자·내용 서명·UTF-8·크기 검사, 원본 이름 대신 UUID 저장 키, 상대 경로/탈출/link 검사, 다운로드 attachment/nosniff/no-store와 SHA-256 검증, rollback 신규 객체 회수. S3는 기본 자격 증명 provider를 사용하고 credential을 소스에 넣지 않으며 endpoint의 embedded credentials를 거절한다.
+- **결론·검증 범위:** 읽은 코드에서 새로운 원격 권한 우회·경로 탈출을 확정하지 못했다. 기존 테스트의 outsider/viewer/read/write·변조·초과 크기·저장 실패·rollback도 첨부 전용 격리본에서 실행했다. 이는 MockMvc/Testcontainers와 S3 SDK mock 검증이며 실제 S3 배포 결과가 아니다.
+- **보안 실행 검증:** 신규 UploadSecurityRegressionTest **6건**, 기존 첨부 권한/다운로드/저장/설정·ArchUnit 포함 **34건/실패·오류·제외 0**, 2m 3s. `gradlew test --tests '*UploadSecurityRegressionTest' --tests '*InstructionAttachment*Test' --tests '*LocalStorageServiceTest' --tests '*S3StorageServiceTest' --tests '*S3StorageConfigurationTest' --offline --no-daemon --console=plain`. 신고 크기를 속인 무한 스트림도 max+1 바이트(5)까지만 읽고 닫았으며, 잘린 파일은 저장하지 않고 CR/LF/NUL/탭 파일 이름·미지정/HTML/SVG MIME·Windows/Unix 경로 탈출은 거절했다. 새 production 수정 없음.
+- **산출물·커밋 경계:** `C:/Users/Public/Documents/ESTsoft/CreatorTemp/flowmat-attachment-security-20261010`의 `security-test.patch`/`security-overlay-manifest.json`/`security-validation-summary.json`/`attachment-security.log`. HEAD+P0에 첨부 서버 22개와 새 보안 테스트만 복사했고 검증 후 원본 SHA 불일치 0. 이 새 테스트는 리드의 UploadValidation 등 첨부 구현에 의존하므로 **단독 P0 CI 수정 목록에 넣지 않는다**. Facts 별도 2파일 patch/manifest/전체 1,179건 결과는 `flowmat-facts-review-20261010` 폴더에 있다. 커밋/푸시/브랜치/공유 build 실행/개발 DB BOM 삽입 없음.
+- **리드에게 넘길 것:** global multipart 예외 handler 이동·형식 정리 이후 최종 소스 재확인. 운영 S3 private bucket/IAM/TLS, 바이러스 검사·미참조 회수·보존기간·전체 저장 용량 정책은 배포/정책 검토 대상이며 이번 코드 검수로 완료 처리하지 않는다.
+
+### 2026-10-10 P0 격리 CI 검증(오류 수정 담당)
+
+- **P0 로컬 검증 완료:** 원격 HEAD `9162c6d`의 `WorkOrderReadinessService.java`, `StockAllocationServiceTest.java`, `RunCostIntegrationTest.java` 수정만 검증. 리드의 첨부/BOM/LOT/setup 파일은 편집하지 않는다. 격리본 `C:/Users/Public/Documents/ESTsoft/CreatorTemp/flowmat-head-ci-9162c6d-20261009`은 git archive HEAD에서 만들고 3개 파일만 덮었다. 입력 SHA256은 `ci-overlay-manifest.json`, 원본 비교는 `ci-validation-summary.json`에 있다.
+- **실패 검사 → 원인:** 원격 backend `37751898429`·browser `37751898510` 모두 EquipmentRepository 미해결 컴파일 오류. 브라우저는 테스트 실행 전 backend startup에서 실패했다. Codecov/브라우저 locator 문제가 이 HEAD 실패 원인이 아니다.
+- **수정 → 검증:** CatalogQuery 전환 완료, allocation의 owner Facts 의존성 및 ProjectCalendarQuery mock/today 고정. D+ 계약에서 완료 이후 바뀐 가격은 완료 원가를 6→7로 바꾸지 않으므로 테스트 기대값이 오래됐다(서비스 정책 변경 없음). `gradlew test jacocoTestCoverageVerification build --offline --no-daemon` **1,172 실패/오류/건너뜀 0**, 라인 **81.94%**, 분기 **68.73%**, build 성공. 격리 HEAD 프런트 vitest **580/93 files**, typecheck/lint/build 성공.
+- **자동 ArchUnit:** 격리 실행만으로 store 80→54, 새 위반 0, stored.rules 동일. 손으로 목록을 고치지 않았다. CI 후보는 위 3개 + `flowmat_frontend/e2e/lot-genealogy.spec.ts` + 자동 생성 store `flowmat_backend/src/test/resources/archunit_store/a23610c2-c9e4-4632-93c1-ab29043d5077`(격리 자동 생성본과 작업 트리 바이트 동일 확인). 첨부 WIP 및 V59/V60/V61은 후보에서 제외한다.
+- **실 API 최초 검사:** 132개 중 131 통과/1 실패(9.4분). `e2e/lot-genealogy.spec.ts`의 마지막 재고 복구 조회 전에 스펙 전체 30초가 소진되어 Loading 화면에서 종료됐다. **추가 수정(P0): `flowmat_frontend/e2e/lot-genealogy.spec.ts`**. trace의 최종 기대 검사가 남은 약 1초에 종료됐고 HTTP 오류는 없었다. 해당 긴 스펙만 60초로 조정(각 검사의 기본 제한·재고 복구·계보 제거 단언 유지), 같은 전용 실 API에서 **2회 연속 통과(26초)**. 초기 전체 131 통과 + 수정 스펙 2회 통과이며, 수정 후 전체 132개를 반복했다고 표시하지 않는다. 전용 DB 5546·Redis 6388, 격리 backend 18090·frontend 4190. REAL_API_E2E=1/workers 1, BOM approval 스펙 제외. 기존 5434/8080/5173 및 사용자 컨테이너는 건드리지 않는다. 개발 DB에 BOM 삽입하지 않는다. 이전 컨테이너 생성은 자동 승인 검토의 사용량 한도로 미실행됐으며, 안내된 2026-10-10 03:09 이후 같은 정상 승인 경로로 재시도했다.
+- **P0 환경 정리:** backend wrapper PID/UTC 시작 시각/스크립트와 자식 생성 시각·명령을 확인한 7개, Vite의 같은 조건 4개만 종료했다. 전용 DB/Redis는 ID·작업 label·5546/6388 host binding 확인 뒤 제거했다. 기존 사용자 프로세스·컨테이너는 종료하지 않았다.
+- **P0 전달 산출물:** 격리 폴더의 `ci-commit-files.txt`(정확히 5개), `ci-fix-head-9162c6d.patch`, `ci-overlay-manifest.json`, `ci-validation-summary.json` 및 backend/frontend/browser 로그. 첨부/기능 WIP 제외, 커밋/푸시는 하지 않았다. 커밋된 build-0927 2,541파일/127.18MiB 및 bom-effectivity-e2e-results 50파일/2.41MiB는 그대로 뒀다.
+- **남은 위험:** 원격 결과는 사용자 커밋/푸시 전까지 계속 실패 상태다. 이번 로컬 성공은 HEAD+P0만의 결과이며 리드 기능 WIP 전체를 인증하지 않는다. CI의 실제 Node/JDK 버전 차이 및 Linux 환경 재검증은 사용자 푸시 후 확인한다.
+
+
+### 2026-10-09 역할 변경 및 리드 인계
+
+- **검증 완료(P0, 더 이상 편집 중 아님):** `flowmat_backend/src/main/java/org/myweb/flowmat/domain/production/application/WorkOrderReadinessService.java`, `flowmat_backend/src/test/java/org/myweb/flowmat/domain/production/application/StockAllocationServiceTest.java`, `flowmat_backend/src/test/java/org/myweb/flowmat/RunCostIntegrationTest.java`. HEAD `9162c6d` + 이 3개 파일만 올린 별도 격리 복사본에서 전체 검증한다. 첨부 WIP·새 마이그레이션·기능 WIP를 섞지 않는다. 동결 목록은 ArchUnit 자동 축소만 허용한다.
+- **첨부 작업 즉시 중단·리드 소유로 이관:** 파일을 삭제·원복하지 않았다. 아래 목록의 코드/설정/테스트는 이후 리드 승인 없이 수정하지 않는다.
+  - `flowmat_backend/build.gradle`
+  - `flowmat_backend/src/main/java/org/myweb/flowmat/domain/production/api/InstructionAttachmentController.java`
+  - `flowmat_backend/src/main/java/org/myweb/flowmat/global/exception/MultipartExceptionHandler.java` (2026-10-10 리드가 `production/api/InstructionAttachmentExceptionHandler`에서 이동)
+  - `flowmat_backend/src/main/java/org/myweb/flowmat/domain/production/api/dto/response/InstructionAttachmentResponse.java`
+  - `flowmat_backend/src/main/java/org/myweb/flowmat/domain/production/application/InstructionAttachmentService.java`
+  - `flowmat_backend/src/main/java/org/myweb/flowmat/domain/production/application/WorkInstructionService.java`
+  - `flowmat_backend/src/main/java/org/myweb/flowmat/domain/production/domain/entity/InstructionAttachment.java`
+  - `flowmat_backend/src/main/java/org/myweb/flowmat/domain/production/repository/InstructionAttachmentRepository.java`
+  - `flowmat_backend/src/main/java/org/myweb/flowmat/global/config/S3StorageConfiguration.java`
+  - `flowmat_backend/src/main/java/org/myweb/flowmat/global/config/StorageProperties.java`
+  - `flowmat_backend/src/main/java/org/myweb/flowmat/global/storage/LocalStorageService.java`
+  - `flowmat_backend/src/main/java/org/myweb/flowmat/global/storage/S3StorageService.java`
+  - `flowmat_backend/src/main/java/org/myweb/flowmat/global/storage/StorageService.java`
+  - `flowmat_backend/src/main/java/org/myweb/flowmat/global/storage/UploadValidation.java`
+  - `flowmat_backend/src/main/resources/application.yml`
+  - `flowmat_backend/src/main/resources/db/migration/V59__instruction_attachment.sql`
+  - `flowmat_backend/src/test/java/org/myweb/flowmat/InstructionAttachmentIntegrationTest.java`
+  - `flowmat_backend/src/test/java/org/myweb/flowmat/global/exception/MultipartExceptionHandlerTest.java` (같이 이동)
+  - `flowmat_backend/src/test/java/org/myweb/flowmat/domain/production/application/InstructionAttachmentServiceTest.java`
+  - `flowmat_backend/src/test/java/org/myweb/flowmat/global/config/S3StorageConfigurationTest.java`
+  - `flowmat_backend/src/test/java/org/myweb/flowmat/global/storage/LocalStorageServiceTest.java`
+  - `flowmat_backend/src/test/java/org/myweb/flowmat/global/storage/S3StorageServiceTest.java`
+  - `flowmat_frontend/e2e/instruction-attachments.spec.ts`
+  - `flowmat_frontend/src/entities/production/api/instructionAttachments.test.ts`
+  - `flowmat_frontend/src/entities/production/api/instructionAttachments.ts`
+  - `flowmat_frontend/src/entities/production/api/useInstructionAttachments.ts`
+  - `flowmat_frontend/src/pages/inventory/ui/InstructionAttachmentsPanel.tsx`
+  - `flowmat_frontend/src/pages/inventory/ui/WorkInstructionsPanel.tsx`
+  - `flowmat_frontend/src/pages/runs/ui/RunInstructionChecklist.tsx`
+- **첨부 된 것:** 메타데이터/권한/초안 편집/발행 참조 보존/동일 UUID 재송신, Local·S3 저장, 크기·형식·경로·내용 검증, 서버/화면·모의 브라우저 테스트를 구현했다. 직전 전체 격리본(첨부와 기타 변경 포함)은 백엔드 1,193 실패·오류·건너뜀 0, 커버리지 기준/bootJar 통과; 프런트 590 및 타입/lint/build, 모의 E2E 116 통과/16 제외. 이는 HEAD+P0 전용 검증 결과가 아니다.
+- **V59 리허설:** 포트 없는 자기 전용 PostgreSQL에서 BEGIN/ROLLBACK으로 생성 1→롤백 0을 확인했고 실제 전체 스키마는 Testcontainers로 검증했다. 개발/세션 DB에 V58/V59를 적용하지 않았다. 기존 V1–V58은 변경하지 않았다.
+- **첨부 남은 것:** 리드의 V59/API 설계 검수·인수, 이후 별도 보안 검토. 실제 S3-compatible 배포/운영 파일 이관·보존기간/미참조 회수·바이러스 검사·실사용/부하 검증은 하지 않았다. build.gradle의 SDK 변경도 WIP로 이관한다.
+- **기능 WIP 추가 인계:** `BomRevisionQueryImpl.java`, `bom/application/publicapi/BomRevisionQuery.java`, `ProductionPlanningReferences.java`, `ProductionRunServiceImpl.java`, `WorkOrderServiceImpl.java`, `WorkOrderRescheduleService.java`, 새 `WorkOrderBomSelection.java`, `WorkOrderBomEffectivityIntegrationTest.java`, 수정 `WorkOrderServiceImplTest.java`, 새 `flowmat_frontend/e2e/work-order-bom-date.spec.ts`. 날짜별 선택·실행 override 방어를 작성하던 중 역할이 변경되어 그대로 중단한다. 화면 생산 코드는 아직 수정하지 않았다. 새 모의 E2E 2건은 Target item locator 불일치로 실패하여 유효한 기능 RED 증거가 아니다. 서버 초기 8건 중 실제 계약 6건 실패를 재현했으며 일정 URL 수정 뒤 별도 1건도 200→409 기대 실패로 재현했다. 후속 관련 검사에서 명시 기간 오류 메시지 테스트 실패가 보였으며 최종 전체 완료 상태로 표시하지 않는다. 승인 일정의 revision 변경을 거절하고 cancel/new draft로 안내하는 구현 선택은 리드 판단 대상으로 넘긴다. 기간별 다중 승인·자동 retire 제거·phantom은 미구현이다.
+- **기존 커밋된 산출물:** `flowmat_backend/build-0927`과 `flowmat_frontend/bom-effectivity-e2e-results`는 지우지 않는다. 사용자에게 별도 보고한다.
+- **리드 수령(2026-10-10):** 첨부 V59/API 설계 검수 통과·인수(§2 결정과 일치: DB 메타+StorageService, Local/S3 설정, 10MB, read 다운로드·write 업로드, 배포/폐기 참조 보존). 후속은 리드: 전역 multipart 예외 처리기를 global로 옮기기, 코드 형식 정리, 결정 메모(`work-instruction.md` Proposed 2026-10-03)에 대체 표시. 보안 검토는 오류·보안 담당 Agent. 기능 WIP는 인수해 마무리(§2 2cb). 승인 일정의 revision 변경 거절·취소 후 새 초안 안내는 리드 구현 선택으로 채택(사용자가 바꿀 수 있음).
+
+
 | 일 | 상태 | 끝나면 |
 |---|---|---|
+| 2026-10-10 리드(세션 1) 작업 중: 인계받은 유효일 BOM·첨부 | 역할: 리드=기능·설계, 다른 Agent=오류·디버깅·테스트·보안. **리드가 고치는 중이니 다른 Agent는 손대지 않는다:** 위 인계의 기능 WIP 전부(`WorkOrderBomSelection`·`BomRevisionQuery(Impl)`·`ProductionPlanningReferences`·`ProductionRunServiceImpl`·`WorkOrderServiceImpl`·`WorkOrderRescheduleService`·`WorkOrderBomEffectivityIntegrationTest`·`WorkOrderServiceImplTest`·`e2e/work-order-bom-date.spec.ts`), 화면 `WorkOrdersPanel`·`BomEffectivePreview`·새 `runs/model/workOrderBomModel(.test)`, 위 첨부 목록(코드 수정은 리드, 보안 검토 결과는 리드에게), 다음 작업(기간별 다중 승인) 파일: bom `BomApprovalServiceImpl`·`BomTree`·`BomCostRollupService`·`BomExplosionService`·`BomWhereUsedTreeService`·`BomServiceImpl`(응답)·`BomResponse`, production `MaterialRequirementService`, 테스트 `BomIntegrationTest`·`BomWhereUsedIntegrationTest`·새 `BomMultipleApprovalIntegrationTest`, 프런트 `bomModel(.test)`·`BomPanel`·`shared/types/api.ts`(BomDto), 문서 `multi-level-bom.md`·`inventory-bom-lot-contract.md` §5. LOT 검사 대기 파일은 §2 2ca로 끝나 풀었다 | 2cc–2ch 끝. **사용자 확인(2026-10-10):** 팬텀 P3 = 작업지시 계획 시작일(없으면 실행 시작일), P4 = 팬텀 재고 무시, 조직 OR6 = 만든 사람의 개인 조직. 팬텀 2ci·조직 2cj 끝(전체 백엔드 1,226 통과). 2ck–2cm 끝. **사용자 지시로 대기(2026-10-10).** 다음 후보: 조직 관리 화면, 팬텀 준비 점검·할당의 작업지시 날짜(P0 파일 해제 뒤) |
+| 2026-10-09 마감·시간대·지침 첨부 | 사용자 수정 허가 범위의 2bx–2bz 구현. HEAD 9162c6d 재개 때 clean, 준비 점검 컴파일 오류·과거 원가 테스트·단위 mock 누락·viewer fixture 길이·누락 업로드 500·동시 이름 수정의 시간대 덮어쓰기를 수정. 최종 격리 백엔드 **1,193 실패·오류·건너뜀 0**, 라인 **82.13%**·분기 **68.81%**·커버리지 기준/bootJar. 프런트 **590**·타입·lint·빌드, 전체 기본 모의 E2E **116 통과/16 의도적 제외**. 첨부 transport 라인 100%·분기 90%, 서버 첨부 서비스 라인 98.25%, 내용 검증 96%, S3 구현/설정 100%. | V59 전용 SQL BEGIN/ROLLBACK·Testcontainers 검증, 이 세션에서 V58/V59 개발 DB 미적용. Stage B 자동 동결 **80→54**. 소스 복사본 불일치 0. 다음: 유효일 BOM의 기간별 다중 승인·작업지시 날짜 선택·팬텀. D2 품목 삭제 한 건·기존 BOM 정리·운영 검증은 계속 별도. 커밋/푸시/브랜치/기존 Flyway 수정/repair/개발 DB BOM 삽입 없음 |
 | 2026-10-08 재개·revision 복구·설비 setup 구현 | HEAD 0a38981 원격 backend/frontend/browser/security CI 성공. 2bq/2br 인계 보완·2bs 원가·2bt 속성 규칙·2bu 계획 갱신·2bv 저장 규칙 미리보기·2bw revision 새로고침 복구 완료. 최종 격리 백엔드 **1,165 실패·오류·건너뜀 0**, 라인 **81.89%**·분기 **68.70%**·커버리지 기준/빌드. 프런트 **572**·타입·기존 JS/JSX lint·빌드. 전체 기본 모의 E2E **110 통과/16 의도적 제외**. 속성 hook/모델 **37**, 라인 **98.27%**·분기 **98.55%**; revision receipt **9**, 커버리지 **100%** | V56/V57은 전용 SQL 롤백·Testcontainers에만 적용. 개발 DB BOM 삽입·V1–V55·기존 서버·브랜치/커밋/푸시 없음. 4개 기존 변경 보존. 실제 setup 원가 snapshot·BOM 계획 날짜/다중 승인/팬텀 등 남음. project 시간대/workflow actualEndAt/D2 품목 삭제 및 첨부 공용 storage/config/build.gradle 수정 허가 회신 대기 |
 | 2026-10-06 부산물 가치·조회 복구 | 2bp 완료. 최신 전체 백엔드 1,128·실패/오류/건너뜀 0·커버리지/빌드, 프런트 476·타입·기존 lint·빌드. 전체 모의 E2E 99 통과/16 제외, 조회 복구 추가 뒤 관련 5 재통과. 새 서비스 라인 100%·분기 92.86% | 다음: 전환 규칙 삭제/수정 동시성 재현 중(2bq). BOM revision 생성은 아직 requestId 없는 명령: 응답 유실 시 여러 초안이 생길 수 있어 별도 후속 방어 필요. project 시간대/actualEndAt 범위 답변 대기 유지 |
 | 2026-10-06 build test #44·BOM 후속 구현 | 원격 d22d37f backend/frontend/security 성공, browser의 Revision 셀렉터 7건 실패 확인. combobox 접근성 이름으로 수정. 기간 명령·조회 통합 13건과 여러 draft·동시성 통합 7건 통과. 여러 draft/단일 pending, 승인 그래프 잠금, CSV 검증 전 잠금 구현. 전체 백엔드 1,119건 실패·오류·건너뜀 0·라인 81.53%·분기 67.92%·커버리지 기준/빌드 통과. 프런트 476건·타입·기존 lint·빌드, 기본 모의 E2E 98 통과/16 의도적 제외, 날짜 미리보기 추가 후 관련 9 통과 | 2bn 기간 명령·날짜 조회 기반, 2bo 여러 초안. 기간별 다중 승인·작업지시 날짜 선택·팬텀은 미완료. 프로젝트 시간대 수정 범위 답변 대기. 커밋·푸시·개발 DB BOM 삽입 없음 |
@@ -122,7 +232,23 @@
 | 2bu | ~~품목 쌍/기본 전환 편집 뒤 계획 조회 갱신~~ | **완료(2026-10-08, 커밋 전).** 기존 add/update/remove가 readiness만 갱신하여 계획/부하/전환 원가가 남는 3개 실패 재현. work-order-plan·equipment-load도 갱신. 단위 4, 열린 부하표 원가 변경 모의 브라우저 검증 | [설비 부하표](../domain/equipment-load.md) |
 | 2bv | ~~저장 setup 규칙 미리보기~~ | **완료(2026-10-08, 커밋 전).** 앞/뒤 품목으로 실제 계획 선택 함수를 조회. 적용 tier·분·규칙 ID, repeatable-read·권한·동일 프로젝트 live 품목 검증. 미저장 편집 제외, 응답 쌍 검증, 변경·삭제 뒤 재조회. 삭제 품목의 낡은 결과를 숨김. 통합 3·hook 13·모의 UI 2 통과 | [setup 속성 SA11–SA12](../domain/setup-attributes.md) |
 | 2bw | ~~revision 미확인 요청의 페이지 새로고침 복구~~ | **완료(2026-10-08, 커밋 전).** 탭 sessionStorage에 pending UUID만 보존, JSON tuple 키·확정 응답만 해당 키 해제·늦은 응답 방어·잘못된 성공 응답 거절. 저장소 차단 때 메모리 fallback, 탭 닫기/차단 저장소 뒤 재로드는 보장하지 않음. 유실 뒤 v2 대신 v3가 생기는 모의 실패 재현. receipt 9·mutation 6·모의 UI 5 통과, 전체 결과 §1 | [revision 복구](../domain/multi-level-bom.md#revision-미확인-요청의-새로고침-복구-2026-10-08-2-2bw) |
-| 3 | 조직 Phase 1~3(`organization`·`organization_member`·`project.organization_id`) | ADR-001 Accepted(2026-10-05). 구현 순서는 사용자 확정 목록에 따름. 새 번호는 직전 재확인 | [ADR-001](../architecture/adr/ADR-001-organization-project-boundary.md), 결정 인계 §6-6 |
+| 2bx | ~~실제 마감 시각과 D+ 완료 원가~~ | **완료(2026-10-09).** 최초 finish 서버 UTC 마감 저장·응답/DB microsecond 일치, 과거 완료는 임의 날짜 채움 없음. 새 단가는 완료 원가를 바꾸지 않음. 공개 workflow/catalog/inventory/BOM Query로 Stage B, 기존 규칙 사실의 전체 모양 유지. 전체 검증 §1 | [원가](../domain/material-cost.md#2026-10-09-마감-시각-및-d-연결-완료-2bx) |
+| 2by | ~~프로젝트 업무 시간대~~ | **완료(2026-10-09).** V58 IANA/Seoul 기본값·owner version 명령·멱등 복구·viewer 조회. ProjectCalendarQuery와 Clock, LOT/FEFO/NCR/할당/준비/설비 달력 연결. 일반 프로젝트 필드 동시 저장의 timezone 덮어쓰기 재현·방어. hook 8·모의 UI 3, 전체 검증 §1 | [시간대](../domain/project-time-zone.md) |
+| 2bz | ~~지침 파일 첨부~~ | **완료(2026-10-09).** V59 DB metadata+조건부 Local/S3 SDK 저장/읽기, 입력/내용/경로/해시·권한 검증, UUID 재송신, 롤백 새 객체 정리, 배포/폐기본 및 복사 참조 보존. Instructions·실행 상세 다운로드/초안 편집, 모의 UI 3. 저장소 이관·미참조 회수·바이러스 검사는 별도 | [첨부](../domain/work-instruction.md#2026-10-09-구현-파일-첨부-2bz) |
+| 2ca | ~~LOT 검사 대기·해제·재개~~ | **완료(2026-10-10, 로컬 검증).** §6 결정 구현. V60 `item.lot_release_required_yn`(기본 N, `new Item()`도 N). 대상 품목의 새 LOT `inspection_pending`, 그 재고 행은 격리로 생성(입고·산출은 격리 행에). quality `POST /lots/{id}/release`가 필수 receipt/any 기준의 최신 pass 확인 뒤 inventory 공개 `LotReleaseCommand`로 해제(원장 `lot_inspection_release`). 일반 unquarantine 409, 대기 중 격리는 `quarantined`. owner 전용 `POST /lots/{id}/reopen`(대상 품목은 다시 대기·행 재격리 `lot_reopen`, 닫았다 열어 검사 건너뛰기 방지). `InventoryServiceImpl` Stage B(ItemRepository→InventoryCatalogReferences, 동결 4줄 자동 축소). 품목 폼 체크박스·LOTs 탭 Release/Reopen·Add Stock 표시·FEFO 제외. 격리 백엔드 관련 묶음 440·262 실패 0, 프런트 타입·lint·단위·빌드, 모의 E2E | [LOT 해제](../domain/lot-release.md) |
+| 2cb | ~~작업지시 계획 시작일 BOM revision 선택~~ | **완료(2026-10-10, 로컬 검증).** 다른 Agent 중단 WIP 인수. 프로젝트 날짜로 approved revision 선택·저장, 명시 revision 기간 검사(검사 순서를 바꿔 `bomId` 오류 메시지 복구), 초안 날짜 변경 재선택, 승인 재검사, 실행 상속·override 409, 승인 일정 변경은 revision 유지(다른 기간 409, 리드 선택 S6). 폼 "Select by planned start"·프로젝트 날짜 미리보기·접근 이름. 유효일 통합 8/8, 작업지시·실행·BOM·경계 265 실패 0, 모의 E2E 2 + 기존 BOM/일정 스펙 통과. **승인의 자동 retire 제거·overlap 거절은 아직** — 그 전엔 API로 품목당 approved 하나 | [다단계 BOM](../domain/multi-level-bom.md) S1–S7 |
+| 2cc | ~~BOM 기간별 다중 승인~~ | **완료(2026-10-10, 로컬 검증).** §5 결정 구현. 승인은 다른 approved revision을 retire하지 않고, 기간이 겹치면 409(겹친 revision·기간·조치 안내). 날짜 없는 전개·원가 누적·역전개·MRP 반제품 전개는 프로젝트 오늘의 revision, 순환·깊이 검사는 모든 approved revision 합집합. `BomResponse.effectiveFrom/To`, BOMs 목록 기간 표시·겹침 사전 경고, 화면 기본 BOM은 오늘 유효 revision. 기존 교체 흐름 테스트 2건은 명시적 retire로 수정. 전체 백엔드 1,205 중 그 2건만 실패 → 수정 뒤 BOM·자재·경계 68 실패 0, 프런트 타입·lint·단위 290, 모의 BOM E2E 26. 팬텀은 설계 제안만(P3·P4 사용자 확인 대기) | [다단계 BOM](../domain/multi-level-bom.md) M1–M3, P1–P7 |
+| 2cd | ~~실행 실제 setup 시간·원가 snapshot~~ | **완료(2026-10-10, 로컬 검증).** §4 실제 쪽. V61 `production_run_setup`(개발 DB 미적용). 실행별 setup 기록(설비 기본=작업지시 설비, 정수 분 1–1440), 기록 순간 설비 원가·버전 복사, requestId 재송신·409, 사유 있는 취소, 합계와 원가 미상 표시, 재료비와 분리. 실행 행 잠금으로 마감과 직렬화. 공개 `EquipmentCostQuery.findHourlyRate`. 실행 상세 Setup (actual) 패널(응답 유실 재시도·취소). 통합 2건 포함 관련 60 실패 0, 프런트 타입·lint, 모의 E2E 120/16 제외 | [설비 원가](../domain/equipment-setup-cost.md) AS1–AS6 |
+| 2ce | ~~폐기 처리비(Waste Disposal Cost)~~ | **완료(2026-10-10, 로컬 검증).** §4 구현. V62 `item_disposal_cost`·이력(개발 DB 미적용). 품목 단위당 폐기 처리비(단가와 별도, 0=무료 폐기), 버전 편집·재송신·409·변경 이력, 공개 `CatalogDisposalCostQuery`(D+ 기준), `BomOutputQuery.findWasteItemIds`, 실행 `waste-disposal-cost`(진행 중 현재·끝난 실행 마감 시각 기준, 재료비·부산물 가치와 분리). Items 상세 Disposal cost·실행 상세 Waste disposal cost. 통합 2건 포함 79 실패 0, 프런트 타입·lint·단위, 모의 E2E 122/16 제외 | [부산물·폐기물](../domain/bom-by-products.md) WD1–WD6 |
+| 2cf | Data Flow 실제 API 브라우저 전체 흐름(§9-10) | **설계 완료(2026-10-10, 리드), 스펙은 오류·테스트 담당 Agent.** DF1–DF14: 새 프로젝트를 화면으로 만들고 노드 3·품목 없는 포트·연결·Publish·그래프 실행·Step 출력(잘못된 출력의 계약 거절 포함)·Finish·출력/이벤트 확인·제조 행 0, API는 정리에만. 화면이 없어 API로 우회한 단계가 있으면 VALIDATED로 올리지 않음 | [시나리오](../domain/data-flow-browser-scenario.md) |
+| 2cg | ~~첨부 후속 정리~~ | **완료(2026-10-10, 리드).** 앱 전체에 걸리는 multipart 예외 처리기를 `production/api`에서 `global/exception/MultipartExceptionHandler`로 옮기고 형식 정리(동작 같음), 테스트도 이동. `work-instruction.md`의 2026-10-03 Proposed 메모에 §2 결정·2bz 구현으로 대체됐다고 표시. 첨부·multipart·저장소·경계 47 실패 0. 보안 검토는 오류·보안 담당 Agent 진행 | [작업 지침](../domain/work-instruction.md) |
+| 2ch | ~~ADR-001 조직 Phase 1–3 설계~~ | **설계 완료(2026-10-10), OR6 사용자 확인 뒤 2cj로 구현.** OR1–OR10: 조직·멤버 테이블과 NULL 허용 `project.organization_id`, 조직 API, owner·admin 전용 관리 metadata 목록, 탈퇴·제거 시 그 조직 프로젝트 멤버십만 비활성화(프로젝트 owner·마지막 owner 409), 개인 조직 backfill(멱등), NOT NULL 전환 없음. 호환성 회귀 표(전후 접근 판정 동일)·cross-project deny·override 없음 검증 계획 | [조직 설계](../domain/organization.md) |
+| 2ci | ~~팬텀 BOM 줄~~ | **완료(2026-10-10, 로컬 검증).** §5 팬텀 + 사용자 확인 P3(작업지시 계획 시작일, 없으면 오늘)·P4(팬텀 재고 무시). V63 `bom_line.phantom_yn`(개발 DB 미적용). 소요량 계산 한 곳에서 팬텀 줄을 그 품목의 유효 revision 재료로 바꾸고 `viaItemId` 표시, 실행 시작·간이 MRP는 작업지시 날짜, 승인은 자기 BOM 없는 팬텀 거절, revision·복사 유지, 만들 수 있는 양은 풀어 쓴 재료로. 화면 팬텀 표시·via·체크박스. 통합 2건 포함 320 실패 0, 프런트 타입·lint·단위 245, 모의 E2E 123/17 제외. **남음:** 준비 점검·할당은 P0 파일이 풀린 뒤 작업지시 날짜를 넘김 | [다단계 BOM](../domain/multi-level-bom.md) P1–P7 |
+| 2cj | ~~조직 Phase 1–3(ADR-001)~~ | **완료(2026-10-10, 로컬 검증).** V64 조직·조직 멤버·NULL 허용 `project.organization_id`, V65 개인 조직 backfill(멱등, project_member 불변)(둘 다 개발 DB 미적용). 조직 API(생성·내 조직·멤버·추가·역할·탈퇴·제거), owner·admin 전용 관리 metadata 목록, 탈퇴·제거 시 그 조직 프로젝트 멤버십만 removed(프로젝트 owner·마지막 owner 409), 새 프로젝트는 요청 조직(멤버여야 함) 또는 만든 사람의 개인 조직(OR6). 프로젝트 접근 판정 코드는 바꾸지 않음. 조직 코드는 project 컨텍스트 안. 통합 2건(backfill·기본 조직·override 없음·cross-project deny·탈퇴 범위·owner 규칙) 포함 **전체 백엔드 1,226 실패·오류·제외 0**. 조직 관리 화면은 후속 | [조직 설계](../domain/organization.md) |
+| 2ck | ~~폐기 처리비 이력 조회~~ | **완료(2026-10-10, 로컬 검증).** WD7 `GET /items/{id}/disposal-cost/history`(최근 50, Project read), Items 상세에 최근 5개 변경(미상 `not set`, 0 `free`), 저장 뒤 다시 읽기. 통합(이력 3행 순서·viewer 200·외부인 403)·경계 통과, 프런트 타입·lint·모델 3·관련 모의 E2E 4 | [부산물·폐기물](../domain/bom-by-products.md) WD7 |
+| 2cl | ~~끝난 실행의 setup 보정~~ | **완료(2026-10-10, 로컬 검증).** V66(설비 원가 이력·setup `rate_basis`·보정 줄 `cancel_setup`/`add_setup`, V22 CHECK는 새로 걸어 대체)(개발 DB 미적용). 완료 실행 보정 흐름(요청·owner 승인=반영)에 setup 취소·추가, 보정 setup은 원래 마감 시각 설비 원가(이력 없으면 estimated), 화면 접힌 보정 요청·원가 기준 표시. 통합 2건 포함 104 실패 0, 프런트 타입·lint·단위 48, 모의 E2E 124/17 제외 | [설비 원가](../domain/equipment-setup-cost.md) AS7–AS10 |
+| 2cm | ~~설비 원가 이력 조회·보정 줄 설비 이름~~ | **완료(2026-10-10, 로컬 검증).** `GET /equipments/{id}/hourly-cost/history`(최근 50, Project read), Schedule의 원가 패널에 최근 5개 변경(별도 hook으로 기존 hook 동작 유지), 보정 승인 목록의 setup 추가 줄에 설비 이름. setup 보정·설비·경계 52 실패 0, 프런트 타입·lint·단위 345, 관련 모의 E2E 6 | [설비 원가](../domain/equipment-setup-cost.md) AS9 |
+| 3 | ~~조직 Phase 1~3(`organization`·`organization_member`·`project.organization_id`)~~ | **완료(2026-10-10): §2 2cj로 구현(V64·V65, 로컬 검증).** ADR-001 Accepted(2026-10-05). 구현 순서는 사용자 확정 목록에 따름. 새 번호는 직전 재확인 | [ADR-001](../architecture/adr/ADR-001-organization-project-boundary.md), 결정 인계 §6-6 |
 | 4 | 리본 마이그레이션 Step 3 리뷰 → Step 6(`workspace-topbar` 버튼 영역 제거) | Step 3 리뷰 | [editor/current-state](../editor/current-state.md) §8, [리본 계획](../editor/toolbar_ribbon_migration_plan.md) §7 |
 
 2026-10-02에 끝난 아키텍처 작업(결정 인계 §6-1~4): ADR 3개, 공개 API 기준 구현(`CatalogQuery`·`FlowRunCommand`), ArchUnit 기준선, `resourceType` registry 경고.
@@ -166,14 +292,14 @@ Tenant·Site·거래처·조직 이동/삭제·노드 실행기·세분화 역�
 
 | 항목 | 막힌 까닭 | 근거 문서 |
 |---|---|---|
-| 실행 원가 저장, 단가 이력으로 과거 금액 계산(끝난 실행·실사 차이) | 어느 시점 단가를 쓸지(§3 "실행 원가 저장 시점") | [재료비](../domain/material-cost.md) |
+| 실행 원가 저장, 단가 이력으로 과거 금액 계산(끝난 실행·실사 차이) | 실행 D+는 2bx 완료(금액 저장은 미채택). 실사 금액은 별도 이력 계약 확인 후 진행 | [재료비](../domain/material-cost.md), §2 2bx |
 | 할당된 재고를 먼저 집는 피킹, 투입 취소 때 재할당 | 할당은 production, 피킹·재고 행 잠금은 inventory라 어느 쪽이 다른 쪽을 부를지(의존 방향). `StockAllocationService`는 inventory 저장소로 행을 잠그고 고르므로 Stage B에 inventory 공개 API(행 잠금·후보) 설계가 먼저 | [재고 할당](../domain/stock-allocation.md), [ADR-002](../architecture/adr/ADR-002-module-dependency.md). 선택지·권장안: [결정 메모](../domain/stock-allocation.md#결정-메모-할당된-재고를-먼저-집는-피킹-proposed-2026-10-03)(Proposed) |
 | ~~재고 있는 위치의 코드 바꾸기(L7 풀기)~~ | **풀림(2026-10-03, §2 2al).** 재고 행을 새로 만드는 곳이 모두 inventory 안(Add Stock·가져오기·이동 도착 행)이라 `ProductionRunServiceImpl`을 고칠 필요가 없었다. 위치 코드별 잠금으로 해결 | [보관 위치](../domain/storage-location.md) L7 |
-| 작업 지침 이미지·파일 첨부 | `global/storage`는 일부러 잡아 둔 뼈대(사용 안 함). 저장 위치(로컬·S3), 내려받기 권한·크기 제한을 정해야 한다 | [작업 지침](../domain/work-instruction.md). 선택지·권장안: [결정 메모](../domain/work-instruction.md#결정-메모-이미지파일-첨부-proposed-2026-10-03)(Proposed) |
+| ~~작업 지침 이미지·파일 첨부~~ | Accepted 정책·수정 허가 후 2bz 완료. 운영 저장소 이관·미참조 회수/보존기간·바이러스 검사는 별도 | [첨부 계약](../domain/work-instruction.md#2026-10-09-구현-파일-첨부-2bz), §2 2bz |
 | 공정(노드)별 작업 지침·검사 기준 | 공정 단계 실행(`flow_run_step`)과 잇는 일이라 flow-run 구역과 함께 정해야 한다 | [작업 지침](../domain/work-instruction.md), [검사 기준](../domain/inspection-standard.md) |
 | 블라인드 실사·실사 계획 | 지금 실사는 센 사람이 본 수량(C3)으로 동시 이동을 막는다. 수량을 숨기면 기준 시점을 계획에 저장하는 새 모델이 필요 | [재고 실사](../domain/stock-count.md). 선택지·권장안: [결정 메모](../domain/stock-count.md#결정-메모-블라인드-실사와-실사-계획-proposed-2026-10-03)(Proposed) |
 | setup 묶음·전환 비용, 부산물 가치·배출 종류, 유효일 BOM·팬텀 반제품 | 제품 규칙(무엇으로 묶을지, 금액을 어디에 더할지, revision을 날짜로 고를지)이 먼저. 일부는 D2 대기 항목과 겹침 | 각 도메인 문서 "이후". 선택지·권장안: [전환](../domain/equipment-changeover.md#결정-메모-setup-묶음과-전환-비용-proposed-2026-10-04), [부산물](../domain/bom-by-products.md#결정-메모-부산물-가치와-배출-proposed-2026-10-04), [BOM](../domain/multi-level-bom.md#결정-메모-유효일-bom과-팬텀-반제품-proposed-2026-10-04) 결정 메모(Proposed) |
-| 프로젝트별 시간대(유효기한·설비 날짜) | 프로젝트 설정 추가가 먼저(project 구역) | [유효기한](../domain/lot-expiry.md). 선택지·권장안: [결정 메모](../domain/lot-expiry.md#결정-메모-오늘을-정하는-시간대-proposed-2026-10-04)(Proposed) |
+| ~~프로젝트별 시간대(유효기한·설비 날짜)~~ | Accepted B 정책·수정 허가 후 2by 완료 | [구현 계약](../domain/project-time-zone.md), §2 2by |
 
 ## 5. 사용자가 하는 일
 

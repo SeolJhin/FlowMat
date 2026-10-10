@@ -1,5 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { useCloseLotMutation, useCreateLotMutation, useLotTraceQuery, useLotsQuery } from '../../../entities/inventory/api/useLots'
+import {
+  useCloseLotMutation, useCreateLotMutation, useLotTraceQuery, useLotsQuery, useReleaseLotMutation, useReopenLotMutation,
+} from '../../../entities/inventory/api/useLots'
 import { useInventoriesQuery } from '../../../entities/inventory/api/useInventoriesQuery'
 import { useInspectionStandardsQuery } from '../../../entities/quality/api/useInspectionStandards'
 import { useQualityInspectionsQuery } from '../../../entities/quality/api/useQuality'
@@ -20,6 +22,7 @@ const STATUS_COLORS: Record<LotStatus, string> = {
   available: '#15803d',
   reserved: '#1d4ed8',
   quarantined: '#b91c1c',
+  inspection_pending: '#b45309',
   consumed: '#9ca3af',
   closed: '#6b7280',
 }
@@ -72,7 +75,7 @@ export function LotPanel({ projectId, items }: { projectId: string; items: ItemD
             <select value={filter.status} onChange={(e) => setFilter((f) => ({ ...f, status: e.target.value as LotFilter['status'] }))} aria-label="LOT status">
               <option value="all">any status</option>
               <option value="open">not closed</option>
-              {(['available', 'reserved', 'quarantined', 'consumed', 'closed'] as const).map((status) => (
+              {(['available', 'reserved', 'quarantined', 'inspection_pending', 'consumed', 'closed'] as const).map((status) => (
                 <option key={status} value={status}>{status}</option>
               ))}
             </select>
@@ -242,6 +245,8 @@ function LotDetail({
   const [direction, setDirection] = useState<'backward' | 'forward'>('backward')
   const traceQuery = useLotTraceQuery(lot.lotId, direction)
   const closeMutation = useCloseLotMutation(projectId)
+  const releaseMutation = useReleaseLotMutation(projectId)
+  const reopenMutation = useReopenLotMutation(projectId)
   const inventoriesQuery = useInventoriesQuery(projectId)
 
   return (
@@ -252,12 +257,15 @@ function LotDetail({
       </div>
       <p style={{ margin: '0 0 6px', fontSize: 13 }}>
         {itemLabel.get(lot.itemId) ?? lot.itemId} ·{' '}
-        <strong style={{ color: STATUS_COLORS[lot.lotStatus] }}>{lot.lotStatus}</strong>
+        <strong style={{ color: STATUS_COLORS[lot.lotStatus] }}>{lot.lotStatus.replace('_', ' ')}</strong>
       </p>
       <p style={{ margin: '0 0 12px', fontSize: 12, opacity: 0.75 }}>
         {formatQty(lot.quantityOnHand)} on hand, {formatQty(lot.quantityReserved)} reserved
         {lot.productionRunId ? ' · produced by a run' : ''}
         {lot.lotStatus === 'quarantined' ? ' · release it from the Stock tab' : ''}
+        {lot.lotStatus === 'inspection_pending'
+          ? ' · held until its receipt checks pass: record them below, then Release LOT'
+          : ''}
         {lot.expired ? ` · expired ${lot.expiryDate}: it cannot go into production or be reserved; issue it to scrap it` : ''}
       </p>
 
@@ -276,6 +284,29 @@ function LotDetail({
       )}
       {closeMutation.isError && (
         <p style={{ color: '#dc2626', fontSize: 12 }}>{errorMessage(closeMutation.error, 'Failed to close LOT.')}</p>
+      )}
+      {lot.lotStatus === 'inspection_pending' && (
+        <button type="button" disabled={releaseMutation.isPending} style={{ marginBottom: 12, marginLeft: 6 }}
+          onClick={() => {
+            releaseMutation.reset()
+            releaseMutation.mutate(lot.lotId)
+          }}>
+          {releaseMutation.isPending ? 'Releasing...' : 'Release LOT'}
+        </button>
+      )}
+      {lot.lotStatus === 'closed' && (
+        <button type="button" disabled={reopenMutation.isPending} style={{ marginBottom: 12 }}
+          onClick={() => {
+            if (window.confirm(`Reopen LOT ${lot.lotNo}? It can take stock again.`)) reopenMutation.mutate(lot.lotId)
+          }}>
+          Reopen LOT
+        </button>
+      )}
+      {releaseMutation.isError && (
+        <p role="alert" style={{ color: '#dc2626', fontSize: 12 }}>{errorMessage(releaseMutation.error, 'Failed to release LOT.')}</p>
+      )}
+      {reopenMutation.isError && (
+        <p role="alert" style={{ color: '#dc2626', fontSize: 12 }}>{errorMessage(reopenMutation.error, 'Failed to reopen LOT.')}</p>
       )}
 
       <div role="tablist" style={{ display: 'flex', gap: 6, marginBottom: 8 }}>

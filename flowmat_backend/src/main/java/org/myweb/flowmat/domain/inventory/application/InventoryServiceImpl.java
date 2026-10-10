@@ -9,7 +9,6 @@ import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
 import org.myweb.flowmat.domain.inventory.domain.enums.InventoryTransactionType;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.api.dto.request.InventoryAdjustRequest;
 import org.myweb.flowmat.domain.inventory.api.dto.response.InventoryResponse;
 import org.myweb.flowmat.domain.rule.application.FlowRuleEngineService;
@@ -38,7 +37,7 @@ public class InventoryServiceImpl implements InventoryService {
 
     private final InventoryRepository inventoryRepository;
     private final ProjectAccessService projectAccessService;
-    private final ItemRepository itemRepository;
+    private final InventoryCatalogReferences catalogReferences;
     private final InventoryCommandService inventoryCommandService;
     private final FlowRuleEngineService flowRuleEngineService;
     private final IdGenerator idGenerator;
@@ -84,12 +83,14 @@ public class InventoryServiceImpl implements InventoryService {
 
         // LOT-tracked items hold stock per LOT; everything else never names one.
         String lotId = trimToNull(request.lotId());
+        boolean awaitingChecks = false;
         if ("Y".equals(item.getLotManageYn())) {
             if (lotId == null) {
                 throw new BusinessException(ErrorCode.BAD_REQUEST,
                     item.getItemCode() + " is LOT-tracked; choose a LOT for this stock record.");
             }
             LotMaster lot = lotService.requireLotForStock(lotId, item.getProjectId(), item.getItemId());
+            awaitingChecks = LotStatus.INSPECTION_PENDING.code().equals(lot.getLotStatus());
             // One stock record per item + location + LOT (V17 unique index); say so instead of a bare conflict. Taking turns
             // with anything else creating that record (another Add Stock, a transfer) makes the check hold until commit.
             inventoryRepository.lockStockPlace(item.getProjectId(), item.getItemId(), lotId, location);
@@ -111,7 +112,8 @@ public class InventoryServiceImpl implements InventoryService {
         inventory.setLotId(lotId);
         applyQuantities(inventory, request);
         inventory.setLocation(location);
-        inventory.setInventoryStatus(defaultIfBlank(request.inventoryStatus(), "available"));
+        // Stock of a LOT waiting for its receipt checks is held until quality releases the LOT (docs/domain/lot-release.md R2).
+        inventory.setInventoryStatus(awaitingChecks ? InventoryCommandService.QUARANTINED : defaultIfBlank(request.inventoryStatus(), "available"));
         applyThresholds(inventory, request);
         inventory.setDeletedYn(NOT_DELETED);
         Inventory savedInventory = inventoryRepository.saveAndFlush(inventory);
@@ -278,7 +280,7 @@ public class InventoryServiceImpl implements InventoryService {
     }
 
     private Item findActiveItem(String itemId) {
-        return itemRepository.findByItemIdAndDeletedYn(itemId, NOT_DELETED)
+        return catalogReferences.item(itemId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 

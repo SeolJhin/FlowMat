@@ -1,0 +1,58 @@
+package org.myweb.flowmat.domain.catalog.api;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.catalog.api.dto.request.ItemDisposalCostRequest;
+import org.myweb.flowmat.domain.catalog.api.dto.response.ItemDisposalCostChangeResponse;
+import org.myweb.flowmat.domain.catalog.api.dto.response.ItemDisposalCostResponse;
+import org.myweb.flowmat.domain.catalog.application.ItemDisposalCostService;
+import org.myweb.flowmat.global.exception.BusinessException;
+import org.myweb.flowmat.global.exception.ErrorCode;
+import org.myweb.flowmat.global.response.ApiResponse;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+/** An item's disposal cost (docs/domain/bom-by-products.md WD2). Read: Project read; save: Project write. */
+@RestController
+@RequiredArgsConstructor
+@RequestMapping("/items/{itemId}/disposal-cost")
+public class ItemDisposalCostController {
+    private final ItemDisposalCostService service;
+
+    @GetMapping
+    public ApiResponse<ItemDisposalCostResponse> get(@PathVariable("itemId") String itemId) {
+        return ApiResponse.ok(service.get(itemId));
+    }
+
+    /** Its changes, newest first (docs/domain/bom-by-products.md WD7). Project read. */
+    @GetMapping("/history")
+    public ApiResponse<List<ItemDisposalCostChangeResponse>> history(@PathVariable("itemId") String itemId) {
+        return ApiResponse.ok(service.history(itemId));
+    }
+
+    @PutMapping
+    public ApiResponse<ItemDisposalCostResponse> set(@PathVariable("itemId") String itemId, @RequestBody JsonNode body) {
+        if (body == null || !body.isObject() || !body.has("disposalCost")
+            || !(body.get("disposalCost").isNull() || body.get("disposalCost").isNumber()))
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "disposalCost is required as a number or explicit null.");
+        JsonNode version = body.get("expectedVersion");
+        if (version == null || !version.isIntegralNumber() || !version.canConvertToLong() || version.longValue() < 0)
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "expectedVersion is required as a nonnegative integer.");
+        return ApiResponse.ok(service.set(itemId, new ItemDisposalCostRequest(
+            body.get("disposalCost").isNull() ? null : body.get("disposalCost").decimalValue(), version.longValue())));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> malformed() {
+        return ResponseEntity.badRequest().body(ApiResponse.error(
+            "disposalCost and expectedVersion require valid JSON numbers (disposalCost may be null)."));
+    }
+}

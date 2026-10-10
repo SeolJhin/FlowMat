@@ -22,7 +22,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.production.api.dto.request.WorkOrderCreateRequest;
 import org.myweb.flowmat.domain.production.api.dto.request.WorkOrderUpdateRequest;
 import org.myweb.flowmat.domain.production.api.dto.response.WorkOrderResponse;
@@ -32,7 +31,6 @@ import org.myweb.flowmat.domain.production.domain.enums.WorkOrderStatus;
 import org.myweb.flowmat.domain.production.repository.ProductionRunRepository;
 import org.myweb.flowmat.domain.production.repository.WorkOrderRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
-import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
@@ -42,11 +40,10 @@ class WorkOrderServiceImplTest {
 
     @Mock private WorkOrderRepository workOrderRepository;
     @Mock private ProductionRunRepository productionRunRepository;
-    @Mock private WorkflowRepository workflowRepository;
-    @Mock private ItemRepository itemRepository;
+    @Mock private ProductionPlanningReferences references;
+    @org.mockito.Spy private WorkOrderBomSelection bomSelection = new WorkOrderBomSelection(null, null, references);
     @Mock private ProjectAccessService projectAccessService;
     @Mock private IdGenerator idGenerator;
-    @Mock private org.myweb.flowmat.domain.bom.repository.BomHeaderRepository bomHeaderRepository;
     @Mock private StockAllocationService stockAllocationService;
 
     @InjectMocks

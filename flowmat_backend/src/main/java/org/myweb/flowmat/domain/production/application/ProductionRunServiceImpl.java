@@ -39,6 +39,7 @@ import org.myweb.flowmat.domain.production.repository.ProductionRunItemRepositor
 import org.myweb.flowmat.domain.production.repository.ProductionRunRepository;
 import org.myweb.flowmat.domain.production.repository.WorkOrderRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery;
 import org.myweb.flowmat.domain.rule.application.FlowRuleEngineService;
 import org.myweb.flowmat.domain.rule.application.RuleEvaluationContext;
 import org.myweb.flowmat.domain.rule.application.RuleTarget;
@@ -83,6 +84,7 @@ public class ProductionRunServiceImpl implements ProductionRunService {
     private final ProductionFlowRunAdapter productionFlowRunAdapter;
     private final StockAllocationService stockAllocationService;
     private final RunInstructionService runInstructionService;
+    private final ProjectCalendarQuery projectCalendar;
 
     @Override
     public List<ProductionRunResponse> listRuns(String workflowId) {
@@ -131,12 +133,19 @@ public class ProductionRunServiceImpl implements ProductionRunService {
 
         // Freeze the BOM now: later revisions or retirement must not change what this run planned to consume.
         String bomId = trimToNull(request.bomId());
-        if (bomId == null && workOrder != null) {
-            bomId = trimToNull(workOrder.getBomId());
+        if (workOrder != null && workOrder.getBomId() != null) {
+            if (bomId != null && !bomId.equals(workOrder.getBomId())) {
+                throw new BusinessException(ErrorCode.CONFLICT, "bomId must match the revision stored on the work order.");
+            }
+            bomId = workOrder.getBomId();
         }
+        // A phantom line uses the revision of the day the order was planned for, else today's (multi-level-bom.md P3).
+        java.time.LocalDate phantomDay = workOrder != null && workOrder.getPlannedStartAt() != null
+            ? projectCalendar.date(workOrder.getProjectId(), workOrder.getPlannedStartAt().toInstant())
+            : null;
         BomRequirementResponse bom = bomId == null
             ? null
-            : bomService.requirementsForRun(bomId, request.projectId().trim(), targetItemId, request.plannedOutputQty());
+            : bomService.requirementsForRun(bomId, request.projectId().trim(), targetItemId, request.plannedOutputQty(), phantomDay);
         if (bom != null && targetItemId == null) {
             targetItemId = bom.targetItemId();
         }

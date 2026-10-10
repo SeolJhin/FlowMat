@@ -34,6 +34,13 @@ public class Item extends CreatedUpdatedAuditEntity {
     private String lotManageYn;
 
     /**
+     * "Y" when a new LOT of this item waits for its receipt checks before its stock can be used (docs/domain/lot-release.md).
+     * "N" unless set, like the column, so items created without it keep their LOTs available as before.
+     */
+    @JdbcTypeCode(SqlTypes.CHAR)
+    private String lotReleaseRequiredYn = "N";
+
+    /**
      * Stock to keep on hand across all of the item's records; below it the item is on the reorder list
      * (docs/domain/stock-alert.md "재주문 목록"). Null or 0 means not watched.
      */

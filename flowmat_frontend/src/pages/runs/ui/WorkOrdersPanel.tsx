@@ -11,6 +11,9 @@ import { formatQty } from '../../../shared/lib/formatQty'
 import type { ItemDto, WorkflowDto, WorkOrderDto } from '../../../shared/types/api'
 import { availableWorkOrderActions, isWorkOrderEditable, safeHttpUrl, workOrderProgress } from '../model/workOrderActions'
 import { useBomBuildableQuery, useBomsQuery } from '../../../entities/bom/api/useBoms'
+import { useEffectiveBomQuery } from '../../../entities/bom/api/useBomEffectivity'
+import { useProjectTimeZone } from '../../../entities/project/api/useProjectTimeZone'
+import { projectDay } from '../model/workOrderBomModel'
 import { approvedRevision } from '../../inventory/model/bomModel'
 import { ItemScanInput } from '../../inventory/ui/ItemScanInput'
 import { pickableItems } from '../../inventory/model/itemStatusModel'
@@ -104,6 +107,8 @@ export function WorkOrdersPanel({
 
   const [editing, setEditing] = useState<WorkOrderDto | null>(null)
   const [form, setForm] = useState<OrderForm>(EMPTY_FORM)
+  // Whether the user chose the BOM in this form; one they did not choose follows the planned start.
+  const [bomPicked, setBomPicked] = useState(false)
   const [readinessFor, setReadinessFor] = useState<string | null>(null)
   // Why the form was filled in for a short sub-assembly: an order's readiness, or open work order needs.
   const [madeFor, setMadeFor] = useState<string | null>(null)
@@ -127,6 +132,11 @@ export function WorkOrdersPanel({
   // Retired revisions can no longer be chosen; draft / pending ones can, but must be approved before the order is.
   const bomChoices = boms.filter((bom) => bom.targetItemId === form.targetItemId && bom.bomStatus !== 'retired')
   const chosenBom = form.bomId ? bomById.get(form.bomId) : undefined
+  // With approved revisions, a work order without a chosen BOM gets the one effective on its planned start's project day.
+  const hasApproved = bomChoices.some((bom) => bom.bomStatus === 'approved')
+  const timeZone = useProjectTimeZone(projectId).query.data?.timeZone
+  const plannedDay = projectDay(form.plannedStartAt, timeZone)
+  const effectiveBom = useEffectiveBomQuery(projectId, form.targetItemId, !form.bomId && hasApproved ? plannedDay : '')
   // What usable stock could make with the chosen BOM, so a quantity beyond it shows before approving.
   const canMake = useBomBuildableQuery(projectId, form.bomId || null).data
 
@@ -135,6 +145,7 @@ export function WorkOrdersPanel({
     if (made) {
       setMadeFrom(makeItemId)
       setEditing(null)
+      setBomPicked(false)
       setForm({
         ...EMPTY_FORM,
         workOrderTitle: `${made.itemCode} for open work orders`,
@@ -154,6 +165,7 @@ export function WorkOrdersPanel({
   /** A short sub-assembly as a new work order, done before the order it is for starts (docs/domain/multi-level-bom.md). */
   function makeSubAssembly(order: WorkOrderDto, material: { itemId: string; itemCode: string }, quantity: number) {
     setEditing(null)
+    setBomPicked(false)
     saveMutation.reset()
     setForm({
       ...EMPTY_FORM,
@@ -167,11 +179,25 @@ export function WorkOrdersPanel({
   }
 
   function selectTargetItem(targetItemId: string) {
-    setForm((f) => ({ ...f, targetItemId, bomId: approvedRevision(boms, targetItemId)?.bomId ?? '' }))
+    setBomPicked(false)
+    setForm((f) => ({ ...f, targetItemId, bomId: f.plannedStartAt ? '' : approvedRevision(boms, targetItemId)?.bomId ?? '' }))
+  }
+
+  /**
+   * A BOM the user did not choose follows the planned start: with one, the server picks the revision effective on its
+   * project day; without one, the approved revision is filled in as before (docs/domain/multi-level-bom.md).
+   */
+  function changePlannedStart(plannedStartAt: string) {
+    setForm((f) => {
+      const current = f.bomId ? bomById.get(f.bomId) : undefined
+      if (bomPicked || !f.targetItemId || (current && current.bomStatus !== 'approved')) return { ...f, plannedStartAt }
+      return { ...f, plannedStartAt, bomId: plannedStartAt ? '' : approvedRevision(boms, f.targetItemId)?.bomId ?? '' }
+    })
   }
 
   function resetForm() {
     setEditing(null)
+    setBomPicked(false)
     setForm(EMPTY_FORM)
     setMadeFor(null)
     saveMutation.reset()
@@ -179,6 +205,7 @@ export function WorkOrdersPanel({
 
   function startEdit(order: WorkOrderDto) {
     setEditing(order)
+    setBomPicked(false)
     setForm({
       workOrderTitle: order.workOrderTitle,
       workflowId: order.workflowId ?? '',
@@ -420,7 +447,7 @@ export function WorkOrdersPanel({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 8 }}>
             <label style={{ display: 'grid', gap: 4 }}>
               <span>Target item</span>
-              <select value={form.targetItemId} onChange={(e) => selectTargetItem(e.target.value)}>
+              <select aria-label="Target item" value={form.targetItemId} onChange={(e) => selectTargetItem(e.target.value)}>
                 <option value="">None</option>
                 {pickableItems(items, form.targetItemId).map((item) => <option key={item.itemId} value={item.itemId}>{item.itemCode} · {item.itemName}</option>)}
               </select>
@@ -439,8 +466,15 @@ export function WorkOrdersPanel({
           {form.targetItemId && (
             <label style={{ display: 'grid', gap: 4 }}>
               <span>BOM</span>
-              <select value={form.bomId} onChange={(e) => setForm((f) => ({ ...f, bomId: e.target.value }))}>
-                <option value="">None — record materials by hand</option>
+              <select
+                aria-label="BOM"
+                value={form.bomId}
+                onChange={(e) => {
+                  setBomPicked(true)
+                  setForm((f) => ({ ...f, bomId: e.target.value }))
+                }}
+              >
+                <option value="">{hasApproved ? 'Select by planned start' : 'None — record materials by hand'}</option>
                 {bomChoices.map((bom) => (
                   <option key={bom.bomId} value={bom.bomId}>
                     {bom.bomName} v{bom.bomVersion} ({bom.bomStatus.replace('_', ' ')})
@@ -450,6 +484,22 @@ export function WorkOrdersPanel({
               {chosenBom && chosenBom.bomStatus !== 'approved' && (
                 <span style={{ fontSize: 11, color: '#b45309' }}>
                   This BOM is {chosenBom.bomStatus.replace('_', ' ')}; approve it before approving the work order.
+                </span>
+              )}
+              {!form.bomId && hasApproved && (
+                <span style={{ fontSize: 11, opacity: 0.7 }}>
+                  The server selects the approved revision for the planned start in the project time zone.
+                  {!form.plannedStartAt && ' Set a planned start or pick a revision; without either the order has no BOM.'}
+                </span>
+              )}
+              {!form.bomId && hasApproved && plannedDay && effectiveBom.data?.bomId && (
+                <span data-testid="work-order-effective-bom" style={{ fontSize: 11 }}>
+                  On {plannedDay} ({timeZone}) that is v{effectiveBom.data.bomVersion}.
+                </span>
+              )}
+              {!form.bomId && hasApproved && plannedDay && effectiveBom.isError && (
+                <span style={{ fontSize: 11, color: '#b45309' }}>
+                  {errorMessage(effectiveBom.error, 'No approved revision covers this day.')}
                 </span>
               )}
               {bomChoices.length === 0 && (
@@ -483,7 +533,7 @@ export function WorkOrdersPanel({
               <input
                 type="datetime-local"
                 value={form.plannedStartAt}
-                onChange={(e) => setForm((f) => ({ ...f, plannedStartAt: e.target.value }))}
+                onChange={(e) => changePlannedStart(e.target.value)}
               />
             </label>
             <label style={{ display: 'grid', gap: 4 }}>

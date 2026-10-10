@@ -44,9 +44,37 @@ export function groupByTarget(boms: BomDto[]): Map<string, BomDto[]> {
   return groups
 }
 
-/** The approved revision production would use for an item, if any. */
-export function approvedRevision(boms: BomDto[], targetItemId: string): BomDto | undefined {
-  return boms.find((bom) => bom.targetItemId === targetItemId && bom.bomStatus === 'approved')
+/** This browser's calendar day, YYYY-MM-DD. */
+export function localDay(now: Date = new Date()): string {
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
+}
+
+/** Whether a revision's effective period includes the day (YYYY-MM-DD); both ends count and a missing end is open. */
+export function coversDay(bom: Pick<BomDto, 'effectiveFrom' | 'effectiveTo'>, day: string): boolean {
+  return (!bom.effectiveFrom || bom.effectiveFrom <= day) && (!bom.effectiveTo || day <= bom.effectiveTo)
+}
+
+/**
+ * The approved revision production would use for an item on the day (default: today here). Approved revisions of one
+ * item have separate periods (docs/domain/multi-level-bom.md M1); the highest one if legacy periods overlap.
+ */
+export function approvedRevision(boms: BomDto[], targetItemId: string, day: string = localDay()): BomDto | undefined {
+  return boms
+    .filter((bom) => bom.targetItemId === targetItemId && bom.bomStatus === 'approved' && coversDay(bom, day))
+    .sort((a, b) => b.bomVersion - a.bomVersion)[0]
+}
+
+/** Approved revisions of the same product sharing a day with this one's period; approval refuses while there are any. */
+export function overlappingApproved(bom: BomDto, revisions: BomDto[]): BomDto[] {
+  return revisions.filter((other) => other.bomId !== bom.bomId && other.targetItemId === bom.targetItemId
+    && other.bomStatus === 'approved'
+    && (!bom.effectiveTo || !other.effectiveFrom || other.effectiveFrom <= bom.effectiveTo)
+    && (!other.effectiveTo || !bom.effectiveFrom || bom.effectiveFrom <= other.effectiveTo))
+}
+
+/** A revision's effective period for display. */
+export function periodLabel(bom: Pick<BomDto, 'effectiveFrom' | 'effectiveTo'>): string {
+  return `${bom.effectiveFrom ?? 'open'} → ${bom.effectiveTo ?? 'open'}`
 }
 
 export type BomLineChange = 'added' | 'removed' | 'changed' | 'same'

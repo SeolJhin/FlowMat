@@ -11,6 +11,9 @@ public interface ProjectMemberRepository extends JpaRepository<ProjectMember, St
 
     List<ProjectMember> findAllByUserIdAndMemberStatus(String userId, String memberStatus);
 
+    List<ProjectMember> findAllByProjectIdInAndUserIdAndMemberStatus(java.util.Collection<String> projectIds, String userId,
+                                                                     String memberStatus);
+
     Optional<ProjectMember> findByProjectIdAndUserIdAndMemberStatus(String projectId, String userId, String memberStatus);
 
     List<ProjectMember> findAllByProjectIdAndMemberStatusOrderByCreatedAtAsc(String projectId, String memberStatus);

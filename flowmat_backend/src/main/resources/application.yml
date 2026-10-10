@@ -1,6 +1,10 @@
 spring:
   application:
     name: flowmat
+  servlet:
+    multipart:
+      max-file-size: ${STORAGE_MAX_FILE_SIZE_BYTES:10485760}B
+      max-request-size: ${STORAGE_MAX_REQUEST_SIZE_BYTES:11534336}B
   # No default profile on purpose: an install that forgets to name one must not run as dev, which keeps the demo account
   # and its known password (V18 removes the demo rows only when flowmat.demo_seed_enabled is not 'true'). Run locally
   # with --spring.profiles.active=dev (docs/local-development.md); deploy with prod.
@@ -64,6 +68,14 @@ slack:
   webhook-url: ${SLACK_WEBHOOK_URL:}
 
 app:
+  storage:
+    type: ${STORAGE_TYPE:local}
+    upload-dir: ${STORAGE_UPLOAD_DIR:./uploads}
+    max-file-size-bytes: ${STORAGE_MAX_FILE_SIZE_BYTES:10485760}
+    s3-bucket: ${STORAGE_S3_BUCKET:}
+    s3-region: ${STORAGE_S3_REGION:us-east-1}
+    s3-endpoint: ${STORAGE_S3_ENDPOINT:}
+    s3-path-style: ${STORAGE_S3_PATH_STYLE:false}
   auth:
     login-rate-limit:
       account-limit: ${AUTH_LOGIN_ACCOUNT_LIMIT:8}

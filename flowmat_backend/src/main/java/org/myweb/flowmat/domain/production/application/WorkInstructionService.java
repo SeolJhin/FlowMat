@@ -39,6 +39,7 @@ public class WorkInstructionService {
     private static final String NOT_DELETED = "N";
 
     private final WorkInstructionRepository instructionRepository;
+    private final InstructionAttachmentService attachments;
     private final WorkInstructionStepRepository stepRepository;
     private final CatalogQuery catalogQuery;
     private final ProjectAccessService projectAccessService;
@@ -191,6 +192,7 @@ public class WorkInstructionService {
         copy.setBlocksFinishYn(source.getBlocksFinishYn());
         copy.setCreatedBy(actor);
         instructionRepository.save(copy);
+        attachments.copyReferences(source.getInstructionId(), copy.getInstructionId(), actor);
         for (WorkInstructionStep sourceStep : stepRepository.findAllByInstructionIdOrderByStepNoAsc(source.getInstructionId())) {
             WorkInstructionStep step = new WorkInstructionStep();
             step.setStepId(idGenerator.generate());

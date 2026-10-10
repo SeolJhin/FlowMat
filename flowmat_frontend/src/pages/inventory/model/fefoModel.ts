@@ -22,7 +22,7 @@ export function fefoRecords(inventories: InventoryDto[], lots: LotDto[], itemId:
   for (const inventory of inventories) {
     if (inventory.itemId !== itemId || inventory.availableQuantity <= 0 || inventory.inventoryStatus === 'quarantined' || !inventory.lotId) continue
     const lot = lotById.get(inventory.lotId)
-    if (!lot || lot.lotStatus === 'closed' || lot.lotStatus === 'quarantined') continue
+    if (!lot || lot.lotStatus === 'closed' || lot.lotStatus === 'quarantined' || lot.lotStatus === 'inspection_pending') continue
     if (lot.expiryDate !== null && lot.expiryDate < now) continue
     records.push({ inventory, lot })
   }

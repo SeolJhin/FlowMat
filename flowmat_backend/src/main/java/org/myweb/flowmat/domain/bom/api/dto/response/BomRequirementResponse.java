@@ -52,7 +52,16 @@ public record BomRequirementResponse(
         /** The material's cost per {@link #itemUnit}; null when not known. */
         BigDecimal unitCost,
         /** requiredItemQuantity × unitCost, 4 decimals; null when the unit cost is not known. */
-        BigDecimal lineCost
+        BigDecimal lineCost,
+        /** The phantom sub-assembly this material comes through; null for the BOM's own lines (multi-level-bom.md P2). */
+        String viaItemId
     ) {
+
+        public Line(String bomLineId, String childItemId, BigDecimal lineQuantity, String lineUnit, BigDecimal requiredQuantity,
+                    String itemUnit, BigDecimal requiredItemQuantity, BigDecimal conversionRate, BigDecimal unitCost,
+                    BigDecimal lineCost) {
+            this(bomLineId, childItemId, lineQuantity, lineUnit, requiredQuantity, itemUnit, requiredItemQuantity, conversionRate,
+                unitCost, lineCost, null);
+        }
     }
 }

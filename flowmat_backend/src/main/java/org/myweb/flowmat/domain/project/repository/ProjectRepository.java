@@ -15,4 +15,6 @@ public interface ProjectRepository extends JpaRepository<Project, String> {
     List<Project> findAllByProjectIdInAndDeletedYnOrderByCreatedAtDesc(Collection<String> projectIds, String deletedYn);
 
     Optional<Project> findByProjectIdAndDeletedYn(String projectId, String deletedYn);
+
+    List<Project> findAllByOrganizationIdAndDeletedYnOrderByCreatedAtDesc(String organizationId, String deletedYn);
 }

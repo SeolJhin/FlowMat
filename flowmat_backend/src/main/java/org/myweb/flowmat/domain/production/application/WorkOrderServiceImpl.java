@@ -14,10 +14,8 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.bom.domain.entity.BomHeader;
 import org.myweb.flowmat.domain.bom.domain.enums.BomStatus;
-import org.myweb.flowmat.domain.bom.repository.BomHeaderRepository;
 import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.production.api.dto.request.WorkOrderCreateRequest;
 import org.myweb.flowmat.domain.production.api.dto.request.WorkOrderUpdateRequest;
 import org.myweb.flowmat.domain.production.api.dto.response.WorkOrderResponse;
@@ -28,7 +26,6 @@ import org.myweb.flowmat.domain.production.repository.ProductionRunRepository;
 import org.myweb.flowmat.domain.production.repository.WorkOrderRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.workflow.domain.entity.Workflow;
-import org.myweb.flowmat.domain.workflow.repository.WorkflowRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
@@ -55,11 +52,10 @@ public class WorkOrderServiceImpl implements WorkOrderService {
 
     private final WorkOrderRepository workOrderRepository;
     private final ProductionRunRepository productionRunRepository;
-    private final WorkflowRepository workflowRepository;
-    private final ItemRepository itemRepository;
+    private final ProductionPlanningReferences references;
+    private final WorkOrderBomSelection bomSelection;
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
-    private final BomHeaderRepository bomHeaderRepository;
     private final StockAllocationService stockAllocationService;
 
     @Override
@@ -125,15 +121,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     public WorkOrderResponse approveWorkOrder(String workOrderId) {
         WorkOrder order = findOrderForUpdate(workOrderId);
         projectAccessService.requireProjectOwnerAccess(order.getProjectId());
-        // An approved order must be runnable: its BOM (if any) has to be approved too.
-        if (order.getBomId() != null) {
-            BomHeader bom = findBom(order, order.getBomId());
-            if (!BomStatus.APPROVED.code().equals(bom.getBomStatus())) {
-                throw new BusinessException(ErrorCode.BAD_REQUEST,
-                    "BOM " + bom.getBomName() + " v" + bom.getBomVersion() + " is " + bom.getBomStatus()
-                        + "; approve it or pick an approved revision before approving the work order.");
-            }
-        }
+        order.setBomId(bomSelection.resolve(order, order.getBomId(), order.getPlannedStartAt(), true));
         transition(order, WorkOrderStatus.APPROVED);
         String userId = projectAccessService.requireCurrentUserId();
         OffsetDateTime now = OffsetDateTime.now();
@@ -197,7 +185,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
 
         String normalizedWorkflowId = ProductionText.trimToNull(workflowId, "workflowId");
         if (normalizedWorkflowId != null) {
-            Workflow workflow = workflowRepository.findByWorkflowIdAndDeletedYn(normalizedWorkflowId, NOT_DELETED)
+            Workflow workflow = references.workflow(normalizedWorkflowId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "Workflow does not exist."));
             requireSameProject(order, workflow.getProjectId());
         }
@@ -205,7 +193,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
 
         String normalizedItemId = ProductionText.trimToNull(targetItemId, "targetItemId");
         if (normalizedItemId != null) {
-            Item item = itemRepository.findByItemIdAndDeletedYn(normalizedItemId, NOT_DELETED)
+            Item item = references.item(normalizedItemId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "Target item does not exist."));
             requireSameProject(order, item.getProjectId());
             // Only a new target is checked, so an order for an item phased out later can still be edited and finished.
@@ -243,6 +231,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         if (plannedStartAt != null && plannedEndAt != null && plannedEndAt.isBefore(plannedStartAt)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Planned end must not be before planned start.");
         }
+        order.setBomId(bomSelection.resolve(order, normalizedBomId, plannedStartAt, false));
         order.setPlannedStartAt(plannedStartAt);
         order.setPlannedEndAt(plannedEndAt);
         order.setInstruction(ProductionText.trimToNull(instruction, "instruction"));
@@ -296,7 +285,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     }
 
     private BomHeader findBom(WorkOrder order, String bomId) {
-        BomHeader bom = bomHeaderRepository.findByBomIdAndDeletedYn(bomId, NOT_DELETED)
+        BomHeader bom = references.bom(bomId)
             .orElseThrow(() -> new BusinessException(ErrorCode.BAD_REQUEST, "BOM does not exist."));
         requireSameProject(order, bom.getProjectId());
         return bom;

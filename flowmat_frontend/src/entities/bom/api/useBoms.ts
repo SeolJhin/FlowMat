@@ -31,6 +31,8 @@ export interface BomLineInput {
   unit: string
   /** Blank is a material (docs/domain/bom-by-products.md). */
   lineType?: BomLineType
+  /** A phantom sub-assembly: used through its own BOM (docs/domain/multi-level-bom.md P1); material lines only. */
+  phantom?: boolean
 }
 
 /** submit needs write access; approve / reject / retire need project owner access. */

@@ -63,6 +63,9 @@ async function recordRunItem(page: Page, direction: 'input' | 'output', itemCode
 }
 
 test('a run links its input and output LOTs, and the LOTs tab traces both ways', async ({ page }) => {
+  // This complete journey creates two items/LOTs, records production, traces both ways, then reverses an input.
+  // Leave time for the final stock/genealogy refresh as well as the setup; keep each assertion's normal timeout.
+  test.setTimeout(60_000)
   await login(page)
 
   await page.goto(`/projects/${PROJECT}/inventory`)

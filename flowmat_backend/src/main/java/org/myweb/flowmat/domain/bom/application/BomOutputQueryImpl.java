@@ -22,12 +22,21 @@ public class BomOutputQueryImpl implements BomOutputQuery {
 
     @Override
     public Set<String> findByProductItemIds(String projectId, String bomId) {
+        return itemIdsOf(projectId, bomId, "by_product");
+    }
+
+    @Override
+    public Set<String> findWasteItemIds(String projectId, String bomId) {
+        return itemIdsOf(projectId, bomId, "waste");
+    }
+
+    private Set<String> itemIdsOf(String projectId, String bomId, String lineType) {
         access.requireProjectReadAccess(projectId);
         if (bomId == null) return Set.of();
         headers.findById(bomId).filter(header -> projectId.equals(header.getProjectId()))
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         return lines.findAllByBomIdOrderBySortOrderAscBomLineIdAsc(bomId).stream()
-            .filter(line -> "by_product".equals(line.getLineType()))
+            .filter(line -> lineType.equals(line.getLineType()))
             .map(line -> line.getChildItemId()).collect(Collectors.toSet());
     }
 }

@@ -416,6 +416,8 @@ export function StockPanel({ projectId, items }: { projectId: string; items: Ite
                   <option key={lot.lotId} value={lot.lotId}>
                     {lot.lotNo}
                     {lot.expiryDate ? ` (${lot.expired ? 'expired' : 'exp.'} ${lot.expiryDate})` : ''}
+                    {/* Its stock is held until quality releases the LOT (docs/domain/lot-release.md R2). */}
+                    {lot.lotStatus === 'inspection_pending' ? ' · held for receipt checks' : ''}
                   </option>
                 ))}
               </select>

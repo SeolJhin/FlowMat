@@ -26,12 +26,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
 import org.myweb.flowmat.domain.bom.application.BomService;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
-import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.application.InventoryCommandService;
 import org.myweb.flowmat.domain.inventory.application.InventoryMovement;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
-import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
-import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
 import org.myweb.flowmat.domain.production.api.dto.request.StockAllocationRequest;
 import org.myweb.flowmat.domain.production.api.dto.response.StockAllocationResponse;
 import org.myweb.flowmat.domain.production.domain.entity.StockAllocation;
@@ -51,9 +48,8 @@ class StockAllocationServiceTest {
     @Mock private ProductionRunRepository productionRunRepository;
     @Mock private BomService bomService;
     @Mock private OpenRunInputs openRunInputs;
-    @Mock private InventoryRepository inventoryRepository;
-    @Mock private ItemRepository itemRepository;
-    @Mock private LotMasterRepository lotMasterRepository;
+    @Mock private ProductionPlanningReferences references;
+    @Mock private org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
     @Mock private InventoryCommandService inventoryCommandService;
     @Mock private ProjectAccessService projectAccessService;
     @Mock private IdGenerator idGenerator;
@@ -81,9 +77,9 @@ class StockAllocationServiceTest {
         stock.setReservedQuantity(BigDecimal.ZERO);
         stock.setAvailableQuantity(BigDecimal.TEN);
         lenient().when(workOrderRepository.findForUpdate("order")).thenReturn(Optional.of(order));
-        lenient().when(itemRepository.findByItemIdAndDeletedYn("item", "N")).thenReturn(Optional.of(item));
-        lenient().when(inventoryRepository.lockItemStock("project", "item")).thenReturn(List.of("stock"));
-        lenient().when(inventoryRepository.findAllById(any())).thenReturn(List.of(stock));
+        lenient().when(references.item("item")).thenReturn(Optional.of(item));
+        lenient().when(references.lockItemStock("project", "item")).thenReturn(List.of(stock));
+        lenient().when(projectCalendar.today("project")).thenReturn(java.time.LocalDate.of(2026,10,9));
         lenient().when(allocationRepository.saveAndFlush(any(StockAllocation.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
 

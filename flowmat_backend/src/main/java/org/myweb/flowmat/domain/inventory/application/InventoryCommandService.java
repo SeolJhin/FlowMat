@@ -35,6 +35,12 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 public class InventoryCommandService {
 
     static final String QUARANTINED = "quarantined";
+    /** A LOT waiting for its receipt checks (docs/domain/lot-release.md); its rows are quarantined until quality releases it. */
+    static final String INSPECTION_PENDING = "inspection_pending";
+    /** Reference of the movements that release a LOT after its receipt checks. */
+    static final String INSPECTION_RELEASE = "lot_inspection_release";
+    /** Reference of the movements that hold a reopened LOT's records for its receipt checks again. */
+    static final String LOT_REOPEN = "lot_reopen";
     private static final String AVAILABLE = "available";
     private static final String NOT_DELETED = "N";
 
@@ -186,7 +192,8 @@ public class InventoryCommandService {
     public void syncLotStatus(String lotId) {
         recheckAfterCommit(lotId);
         LotMaster lot = lotMasterRepository.findById(lotId).orElse(null);
-        if (lot == null || QUARANTINED.equals(lot.getLotStatus()) || "closed".equals(lot.getLotStatus())) {
+        if (lot == null || QUARANTINED.equals(lot.getLotStatus()) || "closed".equals(lot.getLotStatus())
+            || INSPECTION_PENDING.equals(lot.getLotStatus())) {
             return;
         }
         String status = lotStatusFor(inventoryRepository.findAllByLotIdAndDeletedYn(lotId, NOT_DELETED));
@@ -240,6 +247,19 @@ public class InventoryCommandService {
 
     /** Quarantine applies to the whole LOT when the row has one: every row of that LOT and the LOT itself. */
     private void changeQuarantine(Inventory inventory, boolean quarantine, OffsetDateTime now) {
+        LotMaster waiting = inventory.getLotId() == null ? null
+            : lotMasterRepository.findById(inventory.getLotId()).filter(lot -> INSPECTION_PENDING.equals(lot.getLotStatus())).orElse(null);
+        if (waiting != null) {
+            // Only quality releases a LOT that waits for its receipt checks (docs/domain/lot-release.md R4).
+            if (!quarantine) {
+                throw new BusinessException(ErrorCode.CONFLICT, "LOT " + waiting.getLotNo()
+                    + " waits for its receipt checks; release it with Release LOT once they have passed.");
+            }
+            // A failed check or a recall turns the wait into a quarantine; the LOT's rows are held already (R5).
+            waiting.setLotStatus(QUARANTINED);
+            lotMasterRepository.save(waiting);
+            return;
+        }
         String target = quarantine ? QUARANTINED : AVAILABLE;
         boolean isQuarantined = QUARANTINED.equals(inventory.getInventoryStatus());
         if (quarantine == isQuarantined) {
@@ -287,6 +307,51 @@ public class InventoryCommandService {
         BigDecimal needed = reservedDelta.subtract(quantityDelta);
         return new BusinessException(ErrorCode.CONFLICT,
             "Not enough available stock: " + plain(available) + " available, " + plain(needed) + " needed.");
+    }
+
+    /**
+     * Releases a LOT that waits for its receipt checks (docs/domain/lot-release.md R3): each held row becomes available with
+     * an `unquarantine` movement referencing the LOT, and the LOT takes its stock's status. Quality calls this after the
+     * checks passed; a plain unquarantine refuses such a LOT. Answers the LOT's status afterwards.
+     */
+    @Transactional
+    public String releaseInspection(String lotId, String actorUserId) {
+        LotMaster lot = lotMasterRepository.findForUpdate(lotId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "LOT does not exist."));
+        if (!INSPECTION_PENDING.equals(lot.getLotStatus())) {
+            throw new BusinessException(ErrorCode.CONFLICT, "LOT " + lot.getLotNo() + " is " + lot.getLotStatus()
+                + ", not waiting for its receipt checks.");
+        }
+        String lotNo = lot.getLotNo();
+        OffsetDateTime now = OffsetDateTime.now();
+        for (Inventory row : inventoryRepository.findAllByLotIdAndDeletedYn(lotId, NOT_DELETED)) {
+            if (QUARANTINED.equals(row.getInventoryStatus())) {
+                inventoryRepository.updateStatus(row.getInventoryId(), AVAILABLE, now);
+                record(findActiveInventory(row.getInventoryId()), InventoryTransactionType.UNQUARANTINE, BigDecimal.ZERO, BigDecimal.ZERO,
+                    INSPECTION_RELEASE, lotId, "Released after the receipt checks of LOT " + lotNo, null, actorUserId);
+            }
+        }
+        List<Inventory> stock = inventoryRepository.findAllByLotIdAndDeletedYn(lotId, NOT_DELETED);
+        LotMaster current = lotMasterRepository.findById(lotId).orElseThrow();
+        current.setLotStatus(stock.isEmpty() ? AVAILABLE : lotStatusFor(stock));
+        lotMasterRepository.save(current);
+        return current.getLotStatus();
+    }
+
+    /**
+     * Holds every stock record of a LOT that is not held yet, with a `quarantine` movement each, because the reopened LOT
+     * waits for its receipt checks again (docs/domain/lot-release.md R6).
+     */
+    @Transactional
+    public void holdForReceiptChecks(String lotId, String lotNo, String actorUserId) {
+        OffsetDateTime now = OffsetDateTime.now();
+        for (Inventory row : inventoryRepository.findAllByLotIdAndDeletedYn(lotId, NOT_DELETED)) {
+            if (!QUARANTINED.equals(row.getInventoryStatus())) {
+                inventoryRepository.updateStatus(row.getInventoryId(), QUARANTINED, now);
+                record(findActiveInventory(row.getInventoryId()), InventoryTransactionType.QUARANTINE, BigDecimal.ZERO, BigDecimal.ZERO,
+                    LOT_REOPEN, lotId, "Held for the receipt checks of reopened LOT " + lotNo, null, actorUserId);
+            }
+        }
     }
 
     private Inventory findActiveInventory(String inventoryId) {

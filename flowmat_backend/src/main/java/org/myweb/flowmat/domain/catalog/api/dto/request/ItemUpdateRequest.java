@@ -25,6 +25,15 @@ public record ItemUpdateRequest(
     /** Omitted: unchanged. Blank: bought in the stock unit again (clears the quantity too). */
     String purchaseUnit,
     /** Omitted: unchanged. More than 0; needs a purchase unit, given here or already set. */
-    BigDecimal purchaseUnitQty
+    BigDecimal purchaseUnitQty,
+    /** Omitted: unchanged. Applies to LOTs registered from now on (docs/domain/lot-release.md). */
+    String lotReleaseRequiredYn
 ) {
+
+    public ItemUpdateRequest(String itemName, String itemType, String resourceCategory, String resourceType, String unitId,
+                             String itemStatus, String lotManageYn, BigDecimal safetyStockQty, Integer leadTimeDays, BigDecimal unitCost,
+                             String itemCode, ItemDetails details, String purchaseUnit, BigDecimal purchaseUnitQty) {
+        this(itemName, itemType, resourceCategory, resourceType, unitId, itemStatus, lotManageYn, safetyStockQty, leadTimeDays, unitCost,
+            itemCode, details, purchaseUnit, purchaseUnitQty, null);
+    }
 }

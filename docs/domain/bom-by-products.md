@@ -84,3 +84,21 @@ BOM 줄마다 `lineType`:
 | B6 | 실행 Material cost 안에 **By-product value** 표를 별도로 표시. 총 가치 또는 아는 가치 소계와 가격 기준·estimated 표시. 출력 기록/취소/보정/마감 후 기존 production-run-items 캐시 무효화로 다시 조회. 재료비·단위당 재료비에서 차감하지 않음 |
 
 폐기 처리비와 EmissionFactor는 구현하지 않았다. 폐기물에 Item.unitCost를 대입하지 않는다. 통합 테스트와 모의 API 브라우저 검증 결과는 [WORKBOARD](../status/WORKBOARD.md) §2 2bp에 기록한다.
+
+## 폐기 처리비 (Waste Disposal Cost, 2026-10-10, 리드, §2 2ce)
+
+상태: **구현 — 로컬 격리 검증만.** [결정](../status/DECISIONS-2026-10-05.md) §4 "폐기 처리비는 Item.unitCost를 재사용하지 않고 별도 Waste Disposal Cost로 설계한다"의 구현이다. WD1–WD6은 리드의 구현 선택이다. 새 마이그레이션 **V62**(`item_disposal_cost`, `item_disposal_cost_history`, 개발 DB 미적용).
+
+| # | 규칙 | 이유 |
+|---|---|---|
+| WD1 | 품목마다 **품목 단위당 폐기 처리비**를 따로 둔다. 단가(`unitCost`)와 섞지 않는다. null은 미상, **0은 알려진 무료 폐기**(단가의 0=미상과 다름) | 폐기물의 가치와 버리는 비용은 다른 숫자 |
+| WD2 | `GET/PUT /items/{id}/disposal-cost` `{disposalCost: number|null, expectedVersion}`. 읽기 Project read, 저장 write. 품목 행 잠금·버전 일치, 같은 작성자의 직전 저장 재송신은 현재 결과, 다르면 409. 음수·소수 5자리 이상·정수 11자리 이상·형식 오류 400. 값이 바뀔 때만 이력 행(이전/새 값·작성자·UTC 시각) | 설비 시간당 원가(SC2–SC4)와 같은 편집 계약 |
+| WD3 | 공개 `CatalogDisposalCostQuery.findDisposalCostsAt(projectId, itemIds, at)`: at 없음=현재(CURRENT), 있으면 그 시각 이력(HISTORICAL), 첫 변경 전·이력 없음·같은 시각 충돌은 ESTIMATED. 재료비 D+와 같은 규칙 | 실행 비용들이 같은 기준 시각을 쓴다 |
+| WD4 | 공개 `BomOutputQuery.findWasteItemIds`: 실행에 고정된 BOM revision의 `waste` 줄 품목. BOM 없는 실행은 폐기물을 알 수 없어 0줄 | 부산물 가치와 같은 분류 |
+| WD5 | `GET /production-runs/{id}/waste-disposal-cost`: 취소되지 않은 산출 기록 중 폐기물 품목을 품목 단위로 환산해 × 폐기 처리비(4자리). 진행 중은 현재, 끝난 실행은 원래 마감 시각 기준. 미상·환산 불가 줄은 금액 null, `costComplete=false`, 알려진 합계만. **재료비·부산물 가치에 더하거나 빼지 않는다** | §4: 별도 표시 |
+| WD6 | 화면: Items 상세 **Disposal cost**(버전 편집·409 뒤 입력 보존·명시적 Reload·미확인 저장 안내), 실행 상세 **Waste disposal cost**(기준 표시·미상 표시·조회 재시도) | |
+| WD7 | `GET /items/{id}/disposal-cost/history`(Project read): 최근 50개 변경, 새것부터(이전/새 값·작성자·UTC 시각). Items 상세에 최근 5개(`not set → 2.5`, `2.5 → free`). 저장하면 다시 읽는다(2026-10-10 2ck) | 기록만 되던 이력을 볼 수 있게 |
+
+검증(2026-10-10, 격리 복사본): `ItemDisposalCostIntegrationTest` 2건(버전·재송신·409·0 알려진 값·해제·이력 3행·단가 불변·입력 400·viewer/외부인 권한, 진행 중 현재 기준 20·끝난 뒤 이력 기준 15·무료 폐기 0·미상 줄·취소 제외·g→kg 환산·재료비와 부산물 가치 불변·BOM 없는 실행·외부인 403), 품목·부산물·실행 원가·경계 묶음 79건 실패 0. 프런트 타입·lint·모델 단위 2, 모의 E2E 2건 포함 기본 모의 E2E 122 통과·16 의도적 제외.
+
+남은 것: 작업지시 계획 단계의 폐기 처리비 추정, 폐기물의 실제 처분(외부 업체·처분 기록)과 연결, 배출량 모델(§4, 보류).

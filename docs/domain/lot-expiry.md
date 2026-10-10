@@ -136,7 +136,7 @@ Stock 탭에서 재고 행의 **History**를 열고 움직임을 **Issue** 또�
 
 ## 2026-10-05 확정: 프로젝트 시간대
 
-**Accepted (정책).** B 승인. Project.timeZone IANA ID, 기존 Asia/Seoul backfill, timestamp UTC 저장, 업무 날짜는 프로젝트 시간대. 앱 단일 시간대 권장안 A는 채택하지 않는다. 아래 메모는 검토 이력이며 구현 전이다. [최종 결정](../status/DECISIONS-2026-10-05.md)이 아래 예전 선택지보다 우선한다.
+**Accepted (정책).** B 승인. Project.timeZone IANA ID, 기존 Asia/Seoul backfill, timestamp UTC 저장, 업무 날짜는 프로젝트 시간대. 앱 단일 시간대 권장안 A는 채택하지 않는다. V58·ProjectCalendarQuery·설정 화면 및 각 날짜 소비자 구현은 [프로젝트 시간대](project-time-zone.md)를 참고한다. 아래 메모는 당시 검토 이력이다. [최종 결정](../status/DECISIONS-2026-10-05.md)이 아래 예전 선택지보다 우선한다.
 
 ## 결정 메모: 오늘을 정하는 시간대 (Proposed, 2026-10-04)
 
@@ -162,4 +162,4 @@ Stock 탭에서 재고 행의 **History**를 열고 움직임을 **Issue** 또�
 ## 이후
 
 - FEFO는 재고 출고·예약 안내, 보정 요청, 실행 상세의 투입 LOT 선택, 실행 투입 나누기(`/inputs/fefo`), 재고 출고·예약 나누기(`/inventories/issue-fefo`, `action`)에 적용됨. 예약에 작업지시 같은 대상을 묶는 기능은 없음(메모로만 남김)
-- 시간대: 지금은 서버 날짜 기준입니다. 프로젝트별 시간대가 생기면 그 기준으로 바꿉니다.
+- 시간대: 프로젝트의 IANA 시간대와 주입된 Clock으로 오늘을 계산한다. LOT 목록·예약·FEFO·준비 점검·할당·만료 폐기는 같은 기준을 쓴다.

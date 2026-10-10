@@ -18,6 +18,9 @@ public class ProductionRunCorrectionLine {
     public static final String VOID_ITEM = "void_item";
     public static final String ADD_ITEM = "add_item";
     public static final String SET_OUTPUT_QTY = "set_output_qty";
+    /** Setup corrections (docs/domain/equipment-setup-cost.md AS7). */
+    public static final String CANCEL_SETUP = "cancel_setup";
+    public static final String ADD_SETUP = "add_setup";
 
     @Id
     private String productionRunCorrectionLineId;
@@ -43,4 +46,11 @@ public class ProductionRunCorrectionLine {
 
     /** add_item: the recording created when the correction was applied. */
     private String createdRunItemId;
+
+    /** cancel_setup: the setup it cancels. */
+    private String targetRunSetupId;
+    /** add_setup: the equipment and whole minutes of the setup it adds, and the setup it made once applied. */
+    private String equipmentId;
+    private Integer setupMinutes;
+    private String createdRunSetupId;
 }

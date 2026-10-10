@@ -48,3 +48,10 @@ describe('earlierToIssue', () => {
     expect(earlierToIssue(records[8], records, lots, today)).toBeNull()
   })
 })
+
+describe('a LOT waiting for its receipt checks', () => {
+  it('is not offered for FEFO even if a record of it were not held', () => {
+    const held = lot('HELD', '2026-10-01', { lotStatus: 'inspection_pending' })
+    expect(fefoRecords([record('i1', 'HELD')], [held], 'flour', today)).toEqual([])
+  })
+})

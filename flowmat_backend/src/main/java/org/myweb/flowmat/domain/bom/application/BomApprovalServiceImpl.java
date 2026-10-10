@@ -64,20 +64,11 @@ public class BomApprovalServiceImpl implements BomApprovalService {
         projectAccessService.requireProjectOwnerAccess(header.getProjectId());
         List<BomLine> lines = lines(header);
         requireApprovable(header, lines);
+        // Approved revisions of an item live side by side for separate periods: approval retires none of them and refuses
+        // an overlap (DECISIONS-2026-10-05 section 5, docs/domain/multi-level-bom.md M1-M2).
+        requireNoOverlap(header);
         transition(header, BomStatus.APPROVED);
         String actor = projectAccessService.requireCurrentUserId();
-
-        // One approved revision per item: approving v(n) retires the previous approved revision.
-        for (BomHeader previous : bomHeaderRepository.findAllByProjectIdAndTargetItemIdAndDeletedYnOrderByBomVersionDesc(
-            header.getProjectId(), header.getTargetItemId(), NOT_DELETED)) {
-            if (!previous.getBomId().equals(header.getBomId())
-                && BomStatus.fromCode(previous.getBomStatus()) == BomStatus.APPROVED) {
-                previous.setBomStatus(BomStatus.RETIRED.code());
-                previous.setUpdatedBy(actor);
-                appendNote(previous, "Retired by approval of v" + header.getBomVersion() + ".");
-                bomHeaderRepository.save(previous);
-            }
-        }
 
         header.setApprovalStatus("approved");
         header.setApprovedBy(actor);
@@ -109,6 +100,29 @@ public class BomApprovalServiceImpl implements BomApprovalService {
         header.setUpdatedBy(projectAccessService.requireCurrentUserId());
         appendNote(header, note);
         return BomServiceImpl.toResponse(bomHeaderRepository.save(header), lines(header));
+    }
+
+    /** Refuses approval while another approved revision of the item covers any of the same days. */
+    private void requireNoOverlap(BomHeader header) {
+        List<String> overlapping = new ArrayList<>();
+        for (BomHeader other : bomHeaderRepository.findAllByProjectIdAndTargetItemIdAndDeletedYnOrderByBomVersionDesc(
+            header.getProjectId(), header.getTargetItemId(), NOT_DELETED)) {
+            if (!other.getBomId().equals(header.getBomId()) && BomStatus.fromCode(other.getBomStatus()) == BomStatus.APPROVED
+                && BomEffectivityService.overlaps(header.getEffectiveFrom(), header.getEffectiveTo(), other.getEffectiveFrom(),
+                    other.getEffectiveTo())) {
+                overlapping.add("v" + other.getBomVersion() + " (" + period(other) + ")");
+            }
+        }
+        if (!overlapping.isEmpty()) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Revision " + header.getBomVersion() + " (" + period(header)
+                + ") overlaps approved " + String.join(", ", overlapping) + ". Approving does not retire other revisions: end"
+                + " their effective period or retire them, give this revision a period of its own, then approve again.");
+        }
+    }
+
+    private static String period(BomHeader header) {
+        return (header.getEffectiveFrom() == null ? "open" : header.getEffectiveFrom().toString()) + " → "
+            + (header.getEffectiveTo() == null ? "open" : header.getEffectiveTo().toString());
     }
 
     /** Approval conditions 1–7 of docs/domain/inventory-bom-lot-contract.md §5; reports every violation at once. */
@@ -171,11 +185,21 @@ public class BomApprovalServiceImpl implements BomApprovalService {
             if (line.getQuantity() != null && line.getQuantity().signum() > 0) {
                 convertible(line.getQuantity(), line.getUnit(), child, "Material " + label, problems);
             }
+            if ("Y".equals(line.getPhantomYn())) {
+                // A phantom is used through its own BOM, so it needs one (docs/domain/multi-level-bom.md P1).
+                if (!BomTree.isMaterial(line.getLineType())) {
+                    problems.add("Material " + label + ": only a material line can be a phantom.");
+                } else if (bomHeaderRepository.findAllByProjectIdAndTargetItemIdAndDeletedYnOrderByBomVersionDesc(
+                        header.getProjectId(), child.itemId(), NOT_DELETED).stream()
+                    .noneMatch(other -> BomStatus.fromCode(other.getBomStatus()) == BomStatus.APPROVED)) {
+                    problems.add("Material " + label + " is a phantom but has no approved BOM of its own.");
+                }
+            }
         }
 
         // Multi-level (docs/domain/multi-level-bom.md): a material may have its own approved BOM, but no BOM may contain its
-        // own item through its materials' BOMs, and the tree may be at most MAX_LEVELS deep. This revision replaces the
-        // approved one of the same item, so that one is left out of the tree.
+        // own item through its materials' BOMs, and the tree may be at most MAX_LEVELS deep. Every approved revision counts,
+        // whatever its period; the same item's revisions are left out, as this one is checked on its own.
         Map<String, List<String>> tree = BomTree.approvedChildren(bomHeaderRepository, bomLineRepository, header.getProjectId(),
             header.getTargetItemId());
         List<BomLine> materials = lines.stream().filter(line -> BomTree.isMaterial(line.getLineType())).toList();

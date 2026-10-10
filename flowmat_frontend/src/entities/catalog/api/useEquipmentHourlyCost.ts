@@ -11,6 +11,14 @@ export interface EquipmentHourlyCostDto {
   updatedAt: string | null
 }
 export interface EquipmentHourlyCostInput { hourlyCost: number | null; expectedVersion: number }
+/** One rate change, newest first (docs/domain/equipment-setup-cost.md AS9). */
+export interface EquipmentHourlyCostChangeDto {
+  previousHourlyCost: number | null
+  hourlyCost: number | null
+  version: number
+  changedBy: string
+  changedAt: string
+}
 const key = (equipmentId: string) => ['equipment-hourly-cost', equipmentId]
 const path = (equipmentId: string) => `/equipments/${encodeURIComponent(equipmentId)}/hourly-cost`
 
@@ -37,9 +45,23 @@ export function useEquipmentHourlyCost(equipmentId: string, projectId: string) {
     onMutate: () => client.cancelQueries({ queryKey: key(equipmentId) }),
     onSuccess: (rate) => {
       client.setQueryData(key(equipmentId), rate)
+      void client.invalidateQueries({ queryKey: [...key(equipmentId), 'history'] })
       void client.invalidateQueries({ queryKey: ['equipment-load', projectId] })
     },
     retry: false,
   })
   return { query, save }
+}
+
+/** The rate's changes, newest first (docs/domain/equipment-setup-cost.md AS9); saving a rate fetches them again. */
+export function useEquipmentHourlyCostHistory(equipmentId: string) {
+  return useQuery({
+    queryKey: [...key(equipmentId), 'history'],
+    queryFn: async () => {
+      const changes = unwrapApiResponse(await httpClient.get<ApiEnvelope<EquipmentHourlyCostChangeDto[]>>(`${path(equipmentId)}/history`))
+      return Array.isArray(changes) ? changes : []
+    },
+    enabled: Boolean(equipmentId),
+    retry: false,
+  })
 }

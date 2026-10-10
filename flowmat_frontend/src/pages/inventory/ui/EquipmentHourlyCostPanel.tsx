@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { useEquipmentHourlyCost } from '../../../entities/catalog/api/useEquipmentHourlyCost'
+import { useEquipmentHourlyCost, useEquipmentHourlyCostHistory } from '../../../entities/catalog/api/useEquipmentHourlyCost'
 import { errorMessage, errorStatus } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import { hourlyCostInput } from '../model/equipmentHourlyCostModel'
@@ -7,6 +7,8 @@ import { hourlyCostInput } from '../model/equipmentHourlyCostModel'
 /** Current planning price only. The loaded version stays with dirty inputs until the editor explicitly reloads. */
 export function EquipmentHourlyCostPanel({ equipmentId, projectId }: { equipmentId: string; projectId: string }) {
   const { query, save } = useEquipmentHourlyCost(equipmentId, projectId)
+  const history = useEquipmentHourlyCostHistory(equipmentId)
+  const rateText = (value: number | null) => (value == null ? 'not set' : `${formatQty(value)}/h`)
   const [draft, setDraft] = useState<{ text: string; version: number } | null>(null)
   const [inputError, setInputError] = useState<string | null>(null)
   const status = errorStatus(save.error)
@@ -46,5 +48,11 @@ export function EquipmentHourlyCostPanel({ equipmentId, projectId }: { equipment
     <p className="inspector-hint" style={{ margin: 0 }}>Blank clears the rate. Zero is a known rate. Reload discards unsaved edits.</p>
     {error && <p role="alert" style={{ margin: 0, color: '#b91c1c' }}>{error}</p>}
     {unconfirmed && <p role="status" style={{ margin: 0 }}>Rate save is unconfirmed. Retry with these values to recover the saved rate.</p>}
+    {(history.data?.length ?? 0) > 0 && <ul aria-label="Hourly cost changes" style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
+      {history.data!.slice(0, 5).map((change) => <li key={change.version}>
+        {rateText(change.previousHourlyCost)} → {rateText(change.hourlyCost)}{' '}
+        <span className="inspector-hint">· {change.changedBy} · {new Date(change.changedAt).toLocaleString()}</span>
+      </li>)}
+    </ul>}
   </section>
 }

@@ -45,6 +45,7 @@ public class LotServiceImpl implements LotService {
     private final ProjectAccessService projectAccessService;
     private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
     private final InventoryCatalogReferences catalogReferences;
+    private final InventoryCommandService inventoryCommandService;
     private final IdGenerator idGenerator;
 
     @Override
@@ -73,7 +74,8 @@ public class LotServiceImpl implements LotService {
         lot.setSerialNo(request.serialNo() == null || request.serialNo().isBlank() ? null : request.serialNo().trim());
         lot.setReceivedAt(request.receivedAt());
         lot.setExpiryDate(request.expiryDate());
-        lot.setLotStatus(LotStatus.AVAILABLE.code());
+        // An item that needs its receipt checks first starts its LOTs waiting for them (docs/domain/lot-release.md R1).
+        lot.setLotStatus(("Y".equals(item.getLotReleaseRequiredYn()) ? LotStatus.INSPECTION_PENDING : LotStatus.AVAILABLE).code());
         return toResponse(lotMasterRepository.saveAndFlush(lot), List.of());
     }
 
@@ -102,6 +104,33 @@ public class LotServiceImpl implements LotService {
         LotMaster lot = findLot(lotId);
         projectAccessService.requireProjectReadAccess(lot.getProjectId());
         return toResponse(lot);
+    }
+
+    @Override
+    @Transactional
+    public LotResponse reopenLot(String lotId) {
+        LotMaster lot = findLot(lotId);
+        projectAccessService.requireProjectOwnerAccess(lot.getProjectId());
+        if (!LotStatus.CLOSED.code().equals(lot.getLotStatus())) {
+            throw new BusinessException(ErrorCode.CONFLICT, "LOT " + lot.getLotNo() + " is not closed.");
+        }
+        List<Inventory> stock = inventoryRepository.findAllByLotIdAndDeletedYn(lotId, NOT_DELETED);
+        boolean needsChecks = catalogReferences.item(lot.getItemId())
+            .map(item -> "Y".equals(item.getLotReleaseRequiredYn())).orElse(false);
+        if (needsChecks) {
+            // Reopening counts as registering the LOT again, so it waits for its receipt checks and its records are held.
+            // Checks that passed before still count, so Release LOT clears it at once (docs/domain/lot-release.md R6).
+            inventoryCommandService.holdForReceiptChecks(lotId, lot.getLotNo(), projectAccessService.requireCurrentUserId());
+            lot.setLotStatus(LotStatus.INSPECTION_PENDING.code());
+            stock = inventoryRepository.findAllByLotIdAndDeletedYn(lotId, NOT_DELETED);
+        } else if (stock.stream().anyMatch(row -> InventoryCommandService.QUARANTINED.equals(row.getInventoryStatus()))) {
+            // Its records are still held, so the LOT is too; unquarantine releases them.
+            lot.setLotStatus(LotStatus.QUARANTINED.code());
+        } else {
+            // A closed LOT held nothing, so it comes back as its stock says: consumed, or available with no stock record.
+            lot.setLotStatus(stock.isEmpty() ? LotStatus.AVAILABLE.code() : InventoryCommandService.lotStatusFor(stock));
+        }
+        return toResponse(lotMasterRepository.save(lot), stock);
     }
 
     @Override
