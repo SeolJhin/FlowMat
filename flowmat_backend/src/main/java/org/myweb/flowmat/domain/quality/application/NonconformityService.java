@@ -20,6 +20,7 @@ import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.inventory.application.publicapi.LotQuery;
 import org.myweb.flowmat.domain.inventory.application.publicapi.LotView;
+import org.myweb.flowmat.domain.notification.application.publicapi.NotificationCommand;
 import org.myweb.flowmat.domain.production.application.publicapi.ProductionRunQuery;
 import org.myweb.flowmat.domain.production.application.publicapi.ProductionRunView;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
@@ -71,6 +72,7 @@ public class NonconformityService {
     private final ProjectMemberQuery projectMemberQuery;
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
+    private final NotificationCommand notifications;
 
     /** Newest first; only the given status (open, closed or cancelled) when asked. */
     public List<NonconformityResponse> list(String projectId, String status) {
@@ -182,6 +184,11 @@ public class NonconformityService {
         action.setCreatedBy(projectAccessService.requireCurrentUserId());
         action.setCreatedAt(OffsetDateTime.now());
         actionRepository.saveAndFlush(action);
+        // The owner hears of it (docs/domain/notification.md NT2), unless they gave it to themselves.
+        notifications.notifyAssignee(owner, action.getCreatedBy(), ncr.getProjectId(), "ncr_action",
+            "Action " + action.getActionNo() + " of " + ncr.getNcrNo() + " is yours",
+            action.getDescription() + (action.getDueDate() == null ? "" : " · due " + action.getDueDate()), "nonconformity",
+            ncr.getNonconformityId());
         return responses(List.of(ncr)).get(0);
     }
 
@@ -209,10 +216,10 @@ public class NonconformityService {
 
     /**
      * Closes a nonconformity whose root cause and disposition are recorded, with at least one action done and none
-     * still open. Everything missing is named at once.
+     * still open. Everything missing is named at once. A check date says when its actions are due to be checked (N13).
      */
     @Transactional
-    public NonconformityResponse close(String nonconformityId, String note) {
+    public NonconformityResponse close(String nonconformityId, String note, LocalDate verificationDueDate) {
         Nonconformity ncr = lockOpen(nonconformityId);
         List<CorrectiveAction> actions = actionRepository.findAllByNonconformityIdOrderByActionNoAsc(ncr.getNonconformityId());
         List<String> missing = new ArrayList<>();
@@ -232,7 +239,18 @@ public class NonconformityService {
         if (!missing.isEmpty()) {
             throw new BusinessException(ErrorCode.CONFLICT, "Before closing " + ncr.getNcrNo() + ", " + String.join(", ", missing) + ".");
         }
+        requireCheckDate(ncr, verificationDueDate);
         finish(ncr, "closed", trimToNull(note));
+        ncr.setVerificationDueDate(verificationDueDate);
+        return responses(List.of(nonconformityRepository.saveAndFlush(ncr))).get(0);
+    }
+
+    /** Moves or clears the day a closed nonconformity's actions are due to be checked (N13), until the check is recorded. */
+    @Transactional
+    public NonconformityResponse setVerificationDue(String nonconformityId, LocalDate verificationDueDate) {
+        Nonconformity ncr = lockClosedUnchecked(nonconformityId);
+        requireCheckDate(ncr, verificationDueDate);
+        ncr.setVerificationDueDate(verificationDueDate);
         return responses(List.of(nonconformityRepository.saveAndFlush(ncr))).get(0);
     }
 
@@ -242,16 +260,7 @@ public class NonconformityService {
      */
     @Transactional
     public NonconformityResponse verify(String nonconformityId, String result, String note) {
-        Nonconformity ncr = nonconformityRepository.findForUpdate(required(nonconformityId, "nonconformityId"))
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        projectAccessService.requireProjectWriteAccess(ncr.getProjectId());
-        if (!"closed".equals(ncr.getStatus())) {
-            throw new BusinessException(ErrorCode.CONFLICT,
-                ncr.getNcrNo() + " is " + ncr.getStatus() + "; only a closed nonconformity's actions can be checked.");
-        }
-        if (ncr.getVerifiedAt() != null) {
-            throw new BusinessException(ErrorCode.CONFLICT, ncr.getNcrNo() + " was already checked by " + ncr.getVerifiedBy() + ".");
-        }
+        Nonconformity ncr = lockClosedUnchecked(nonconformityId);
         String value = trimToNull(result) == null ? null : result.trim().toLowerCase(Locale.ROOT);
         if (value == null || !VERIFICATION_RESULTS.contains(value)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "result must be effective or not_effective.");
@@ -294,6 +303,32 @@ public class NonconformityService {
         ncr.setClosedBy(projectAccessService.requireCurrentUserId());
         ncr.setClosedAt(OffsetDateTime.now());
         ncr.setClosureNote(note);
+    }
+
+    /** A closed nonconformity whose actions were not checked yet, locked for the change. */
+    private Nonconformity lockClosedUnchecked(String nonconformityId) {
+        Nonconformity ncr = nonconformityRepository.findForUpdate(required(nonconformityId, "nonconformityId"))
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        projectAccessService.requireProjectWriteAccess(ncr.getProjectId());
+        if (!"closed".equals(ncr.getStatus())) {
+            throw new BusinessException(ErrorCode.CONFLICT,
+                ncr.getNcrNo() + " is " + ncr.getStatus() + "; only a closed nonconformity's actions can be checked.");
+        }
+        if (ncr.getVerifiedAt() != null) {
+            throw new BusinessException(ErrorCode.CONFLICT, ncr.getNcrNo() + " was already checked by " + ncr.getVerifiedBy() + ".");
+        }
+        return ncr;
+    }
+
+    /** A check date, when given, is the project's today or later. */
+    private void requireCheckDate(Nonconformity ncr, LocalDate day) {
+        if (day == null) {
+            return;
+        }
+        LocalDate today = projectCalendar.today(ncr.getProjectId());
+        if (day.isBefore(today)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "The check date " + day + " is before today (" + today + ").");
+        }
     }
 
     private Nonconformity lockOpen(String nonconformityId) {
@@ -402,7 +437,10 @@ public class NonconformityService {
                 lotNo(lots.get(ncr.getLotId())), ncr.getProductionRunId(), run == null ? null : run.runNumber(),
                 ncr.getRootCause(), ncr.getDisposition(), ncr.getRaisedBy(), ncr.getRaisedAt(), ncr.getClosedBy(),
                 ncr.getClosedAt(), ncr.getClosureNote(), ncr.getVerificationResult(), ncr.getVerificationNote(), ncr.getVerifiedBy(),
-                ncr.getVerifiedAt(), linked, actionList,
+                ncr.getVerifiedAt(), ncr.getVerificationDueDate(),
+                "closed".equals(ncr.getStatus()) && ncr.getVerifiedAt() == null && ncr.getVerificationDueDate() != null
+                    && ncr.getVerificationDueDate().isBefore(today),
+                linked, actionList,
                 (int) actionList.stream().filter(action -> OPEN.equals(action.status())).count(),
                 (int) actionList.stream().filter(NonconformityResponse.Action::overdue).count());
         }).toList();

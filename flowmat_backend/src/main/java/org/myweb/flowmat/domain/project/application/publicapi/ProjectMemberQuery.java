@@ -9,4 +9,10 @@ public interface ProjectMemberQuery {
 
     /** Whether the user is an active member of the project; the owner is not a member row, so ask about the owner apart. */
     boolean isActiveMember(String projectId, String userId);
+
+    /** Whether the user can read the project: it is not deleted, and they own it or are an active member. */
+    boolean canRead(String projectId, String userId);
+
+    /** The owner of a project that is not deleted; null otherwise. */
+    String ownerOf(String projectId);
 }

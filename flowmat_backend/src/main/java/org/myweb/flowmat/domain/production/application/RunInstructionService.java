@@ -19,6 +19,9 @@ import org.myweb.flowmat.domain.production.repository.ProductionRunRepository;
 import org.myweb.flowmat.domain.production.repository.RunInstructionCheckRepository;
 import org.myweb.flowmat.domain.production.repository.WorkInstructionRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.quality.application.publicapi.InspectionStandardQuery;
+import org.myweb.flowmat.domain.quality.application.publicapi.InspectionStandardView;
+import org.myweb.flowmat.domain.quality.application.publicapi.RunInspectionCommand;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
@@ -42,6 +45,8 @@ public class RunInstructionService {
     private final RunInstructionCheckRepository checkRepository;
     private final WorkInstructionRepository instructionRepository;
     private final WorkInstructionService workInstructionService;
+    private final InspectionStandardQuery standardQuery;
+    private final RunInspectionCommand inspections;
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
 
@@ -82,6 +87,8 @@ public class RunInstructionService {
         if (note != null && note.length() > 500) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "The note can be at most 500 characters.");
         }
+        InspectionStandardView followed = followedStandard(run, step);
+        String result = requestedResult(step, followed, request == null ? null : request.result());
         RunInstructionCheck check = new RunInstructionCheck();
         check.setCheckId(idGenerator.generate());
         check.setProductionRunId(run.getProductionRunId());
@@ -91,9 +98,66 @@ public class RunInstructionService {
         check.setNote(note);
         check.setCheckedBy(projectAccessService.requireCurrentUserId());
         check.setCheckedAt(OffsetDateTime.now());
+        RunInspectionCommand.RecordedInspection inspection = inspect(run, step, followed, value, result);
+        if (inspection != null) {
+            check.setInspectionId(inspection.inspectionId());
+            check.setInspectionResult(inspection.result());
+        }
         pinRevision(run, instruction);
         checkRepository.saveAndFlush(check);
         return response(run);
+    }
+
+    /** The standard a step follows when it can still be followed for this run's product (W13); null otherwise. */
+    private InspectionStandardView followedStandard(ProductionRun run, WorkInstructionResponse.Step step) {
+        if (step.standardId() == null) {
+            return null;
+        }
+        InspectionStandardView standard = standardQuery.findStandards(List.of(step.standardId())).get(step.standardId());
+        return standard != null && standard.active() && !"receipt".equals(standard.stage())
+            && standard.itemId().equals(run.getTargetItemId()) ? standard : null;
+    }
+
+    /**
+     * pass or fail for a step that follows a standard without limits, where a person decides (R10). A step whose standard
+     * has limits, or that follows none, takes no result: its value decides, or there is no inspection.
+     */
+    private static String requestedResult(WorkInstructionResponse.Step step, InspectionStandardView standard, String sent) {
+        String result = sent == null || sent.isBlank() ? null : sent.trim().toLowerCase(Locale.ROOT);
+        boolean personDecides = standard != null && standard.standardMin() == null && standard.standardMax() == null;
+        if (!personDecides) {
+            if (result != null) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Step " + step.stepNo() + " takes no result; "
+                    + (standard == null ? "it does not follow a pass/fail standard." : "its value decides the " + standard.inspectionType() + " result."));
+            }
+            return null;
+        }
+        if (!"pass".equals(result) && !"fail".equals(result)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "Step " + step.stepNo() + " follows the " + standard.inspectionType() + " check; say whether it passed (pass or fail).");
+        }
+        return result;
+    }
+
+    /**
+     * A step that follows an inspection standard records the run's inspection too (R9-R10), so the same check is not
+     * entered twice: with limits its number decides the result, without them the person's pass or fail does and the value
+     * is what they saw. A standard that can no longer be followed, or a value that is not a number, leaves only the
+     * confirmation.
+     */
+    private RunInspectionCommand.RecordedInspection inspect(ProductionRun run, WorkInstructionResponse.Step step,
+                                                            InspectionStandardView standard, String value, String result) {
+        if (standard == null) {
+            return null;
+        }
+        String note = "Work instruction step " + step.stepNo() + ": " + step.text();
+        if (result != null) {
+            return inspections.recordForRun(run.getProjectId(), run.getProductionRunId(), standard.standardId(),
+                standard.inspectionType(), null, result, value == null ? note : note + " (" + value + ")");
+        }
+        java.math.BigDecimal measured = number(value);
+        return measured == null ? null : inspections.recordForRun(run.getProjectId(), run.getProductionRunId(),
+            standard.standardId(), standard.inspectionType(), measured, null, note);
     }
 
     @Transactional
@@ -140,7 +204,8 @@ public class RunInstructionService {
             .map(step -> {
                 RunInstructionCheck check = byStep.get(step.stepId());
                 return new RunInstructionResponse.Check(step.stepId(), check.getCheckValue(), check.getNote(), check.getCheckedBy(),
-                    check.getCheckedAt(), outsideLimits(step, check.getCheckValue()));
+                    check.getCheckedAt(), outsideLimits(step, check.getCheckValue()), check.getInspectionId(),
+                    check.getInspectionResult());
             })
             .toList();
         int required = (int) body.steps().stream().filter(WorkInstructionResponse.Step::required).count();

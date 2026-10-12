@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ExecutionPolicySection } from './ExecutionPolicySection'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { useItemsQuery } from '../../../entities/catalog/api/useItemsQuery'
 import { getWorkflowNodeDefinition, getWorkflowPaletteDefinitions } from '../../../entities/workflow/model/nodeCatalog'
@@ -421,6 +422,8 @@ export function NodeInspector({
           </form>
         )}
       </section>
+
+      <ExecutionPolicySection key={node.id} processId={node.id} />
     </div>
   )
 }

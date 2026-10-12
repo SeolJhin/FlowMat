@@ -57,6 +57,11 @@ export interface InventoryCountHistoryDto {
   /** The differences at today's unit costs, signed. */
   valueChange: number
   valueComplete: boolean
+  /** The differences at the unit costs of the count's own time (docs/domain/stock-count.md CH1), signed. */
+  valueAtCount?: number
+  valueAtCountComplete?: boolean
+  /** A price in it was before the item's first recorded change, so it is an estimate. */
+  valueAtCountEstimated?: boolean
   lines: {
     inventoryId: string
     itemId: string

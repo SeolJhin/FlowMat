@@ -18,10 +18,12 @@ import org.myweb.flowmat.domain.inventory.api.dto.response.LotResponse;
 import org.myweb.flowmat.domain.inventory.api.dto.response.LotTraceResponse;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.domain.entity.LotMaster;
+import org.myweb.flowmat.domain.inventory.domain.entity.LotStatusEvent;
 import org.myweb.flowmat.domain.inventory.domain.entity.LotTrace;
 import org.myweb.flowmat.domain.inventory.domain.enums.LotStatus;
 import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
 import org.myweb.flowmat.domain.inventory.repository.LotMasterRepository;
+import org.myweb.flowmat.domain.inventory.repository.LotStatusEventRepository;
 import org.myweb.flowmat.domain.inventory.repository.LotTraceRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.global.exception.BusinessException;
@@ -47,6 +49,7 @@ public class LotServiceImpl implements LotService {
     private final InventoryCatalogReferences catalogReferences;
     private final InventoryCommandService inventoryCommandService;
     private final IdGenerator idGenerator;
+    private final LotStatusEventRepository lotStatusEventRepository;
 
     @Override
     @Transactional
@@ -115,12 +118,15 @@ public class LotServiceImpl implements LotService {
             throw new BusinessException(ErrorCode.CONFLICT, "LOT " + lot.getLotNo() + " is not closed.");
         }
         List<Inventory> stock = inventoryRepository.findAllByLotIdAndDeletedYn(lotId, NOT_DELETED);
+        // The reopening comes before the holds it causes, so the history lists them in that order (R9).
+        OffsetDateTime at = OffsetDateTime.now();
+        String actor = projectAccessService.requireCurrentUserId();
         boolean needsChecks = catalogReferences.item(lot.getItemId())
             .map(item -> "Y".equals(item.getLotReleaseRequiredYn())).orElse(false);
         if (needsChecks) {
             // Reopening counts as registering the LOT again, so it waits for its receipt checks and its records are held.
             // Checks that passed before still count, so Release LOT clears it at once (docs/domain/lot-release.md R6).
-            inventoryCommandService.holdForReceiptChecks(lotId, lot.getLotNo(), projectAccessService.requireCurrentUserId());
+            inventoryCommandService.holdForReceiptChecks(lotId, lot.getLotNo(), actor);
             lot.setLotStatus(LotStatus.INSPECTION_PENDING.code());
             stock = inventoryRepository.findAllByLotIdAndDeletedYn(lotId, NOT_DELETED);
         } else if (stock.stream().anyMatch(row -> InventoryCommandService.QUARANTINED.equals(row.getInventoryStatus()))) {
@@ -130,7 +136,9 @@ public class LotServiceImpl implements LotService {
             // A closed LOT held nothing, so it comes back as its stock says: consumed, or available with no stock record.
             lot.setLotStatus(stock.isEmpty() ? LotStatus.AVAILABLE.code() : InventoryCommandService.lotStatusFor(stock));
         }
-        return toResponse(lotMasterRepository.save(lot), stock);
+        LotMaster saved = lotMasterRepository.save(lot);
+        recordStatusEvent(saved, LotStatusEvent.REOPENED, LotStatus.CLOSED.code(), at, actor);
+        return toResponse(saved, stock);
     }
 
     @Override
@@ -144,8 +152,27 @@ public class LotServiceImpl implements LotService {
             throw new BusinessException(ErrorCode.CONFLICT,
                 "LOT " + lot.getLotNo() + " still holds " + InventoryCommandService.plain(onHand) + ". Issue it before closing.");
         }
+        String before = lot.getLotStatus();
         lot.setLotStatus(LotStatus.CLOSED.code());
-        return toResponse(lotMasterRepository.save(lot), stock);
+        LotMaster saved = lotMasterRepository.save(lot);
+        if (!LotStatus.CLOSED.code().equals(before)) {
+            // Closing moves no stock, so the event is kept on its own; closing a closed LOT again adds none (R9).
+            recordStatusEvent(saved, LotStatusEvent.CLOSED, before, OffsetDateTime.now(), projectAccessService.requireCurrentUserId());
+        }
+        return toResponse(saved, stock);
+    }
+
+    private void recordStatusEvent(LotMaster lot, String action, String fromStatus, OffsetDateTime at, String actor) {
+        LotStatusEvent event = new LotStatusEvent();
+        event.setLotStatusEventId(idGenerator.generate());
+        event.setLotId(lot.getLotId());
+        event.setProjectId(lot.getProjectId());
+        event.setAction(action);
+        event.setFromStatus(fromStatus);
+        event.setToStatus(lot.getLotStatus());
+        event.setCreatedBy(actor);
+        event.setCreatedAt(at);
+        lotStatusEventRepository.save(event);
     }
 
     @Override

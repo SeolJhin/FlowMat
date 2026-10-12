@@ -8,7 +8,8 @@ import java.util.List;
 /**
  * A nonconformity with its defects and actions (docs/domain/nonconformity.md).
  *
- * @param overdueActions open actions whose due date has passed
+ * @param overdueActions      open actions whose due date has passed
+ * @param verificationOverdue closed, not checked yet, and the day its actions were due to be checked has passed (N13)
  */
 public record NonconformityResponse(
     String nonconformityId,
@@ -36,6 +37,8 @@ public record NonconformityResponse(
     String verificationNote,
     String verifiedBy,
     OffsetDateTime verifiedAt,
+    LocalDate verificationDueDate,
+    boolean verificationOverdue,
     List<LinkedDefect> defects,
     List<Action> actions,
     int openActions,

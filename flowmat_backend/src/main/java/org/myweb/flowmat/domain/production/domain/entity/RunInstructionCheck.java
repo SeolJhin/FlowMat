@@ -27,4 +27,8 @@ public class RunInstructionCheck {
     /** Set when the confirmation was undone; the row stays as history (docs/domain/work-instruction.md R6). */
     private String undoneBy;
     private OffsetDateTime undoneAt;
+    /** The quality inspection this confirmation also recorded (R9, V72): a step that follows a standard with a limit. */
+    private String inspectionId;
+    /** pass or fail; the inspection does not change, so its result is kept here. */
+    private String inspectionResult;
 }

@@ -9,9 +9,14 @@ function signed(value: number): string {
   return value > 0 ? `+${formatQty(value)}` : formatQty(value)
 }
 
+function tone(value: number): string | undefined {
+  return value < 0 ? '#b91c1c' : value > 0 ? '#047857' : undefined
+}
+
 /**
  * Past counts, newest first (docs/domain/stock-count.md "실사 이력"): when, by whom, what they changed and what that is
- * worth at today's unit costs. Open one to see its records. Records counted without a difference are not listed.
+ * worth at today's unit costs and at those of the count's own time (CH1-CH4). Open one to see its records. Records counted
+ * without a difference are not listed.
  */
 export function CountHistory({ projectId }: { projectId: string }) {
   const historyQuery = useInventoryCountHistoryQuery(projectId)
@@ -29,11 +34,17 @@ export function CountHistory({ projectId }: { projectId: string }) {
           <summary style={{ cursor: 'pointer' }}>
             {new Date(count.countedAt).toLocaleString()} · {count.countedBy ?? '?'} · {count.adjusted} record
             {count.adjusted === 1 ? '' : 's'} changed <span style={{ color: '#047857' }}>+{formatQty(count.increase)}</span> /{' '}
-            <span style={{ color: '#b91c1c' }}>-{formatQty(count.decrease)}</span> · value{' '}
-            <strong style={{ color: count.valueChange < 0 ? '#b91c1c' : count.valueChange > 0 ? '#047857' : undefined }}>
-              {signed(count.valueChange)}
-            </strong>
+            <span style={{ color: '#b91c1c' }}>-{formatQty(count.decrease)}</span> · value today{' '}
+            <strong style={{ color: tone(count.valueChange) }}>{signed(count.valueChange)}</strong>
             {!count.valueComplete && <span style={{ opacity: 0.6 }}> (some items have no unit cost)</span>}
+            {count.valueAtCount != null && (
+              <>
+                {' · at the count '}
+                <strong style={{ color: tone(count.valueAtCount) }}>{signed(count.valueAtCount)}</strong>
+                {count.valueAtCountEstimated && <span style={{ opacity: 0.6 }}> (estimated)</span>}
+                {count.valueAtCountComplete === false && <span style={{ opacity: 0.6 }}> (some items had no unit cost then)</span>}
+              </>
+            )}
             {count.note && <span style={{ opacity: 0.7 }}> · {count.note}</span>}
           </summary>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 6 }}>

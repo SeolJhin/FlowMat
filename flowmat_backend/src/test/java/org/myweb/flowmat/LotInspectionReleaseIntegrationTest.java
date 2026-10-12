@@ -120,10 +120,26 @@ class LotInspectionReleaseIntegrationTest extends IntegrationTestSupport {
         call(get("/inventories/" + inventory)).andExpect(jsonPath("$.data.inventoryStatus").value("quarantined"));
         move(inventory, "receipt", 2).andExpect(status().isOk());
         call(get("/lots/" + lot)).andExpect(jsonPath("$.data.lotStatus").value("inspection_pending"));
-        // This item has no required check, so Release LOT clears it straight away.
+        // This item has no required check, so Release LOT clears it straight away, and says so (R7).
         call(post("/lots/" + lot + "/release"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.lotStatus").value("available"));
+            .andExpect(jsonPath("$.data.lotStatus").value("available"))
+            .andExpect(jsonPath("$.data.checkedStandards").value(0));
+        // The LOT keeps when it was held on reopening and released (R8), and when it was closed and reopened (R9), newest
+        // first; the refused reopenings left nothing.
+        call(get("/lots/" + lot + "/release-history"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.events.length()").value(4))
+            .andExpect(jsonPath("$.data.events[0].action").value("released"))
+            .andExpect(jsonPath("$.data.events[0].stockRows").value(1))
+            .andExpect(jsonPath("$.data.events[1].action").value("held"))
+            .andExpect(jsonPath("$.data.events[1].by").value(DEMO_OWNER))
+            .andExpect(jsonPath("$.data.events[2].action").value("reopened"))
+            .andExpect(jsonPath("$.data.events[2].status").value("inspection_pending"))
+            .andExpect(jsonPath("$.data.events[2].stockRows").value(0))
+            .andExpect(jsonPath("$.data.events[3].action").value("closed"))
+            .andExpect(jsonPath("$.data.events[3].status").value("closed"))
+            .andExpect(jsonPath("$.data.events[3].by").value(DEMO_OWNER));
 
         // A LOT of an item without the checks comes back as its stock says.
         String salt = item("RELR-" + tag, null);
@@ -133,9 +149,19 @@ class LotInspectionReleaseIntegrationTest extends IntegrationTestSupport {
             "location", "RELR-DOCK-" + tag, "lotId", plain)))).path("inventoryId").asText();
         move(plainRow, "issue", 3).andExpect(status().isOk());
         call(post("/lots/" + plain + "/close")).andExpect(status().isOk());
+        // Closing it again changes nothing and is not a second event (R9).
+        call(post("/lots/" + plain + "/close")).andExpect(status().isOk());
         call(post("/lots/" + plain + "/reopen"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.lotStatus").value("consumed"));
+        // An empty LOT moved no ledger row, yet its closing and reopening are kept.
+        call(get("/lots/" + plain + "/release-history"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.events.length()").value(2))
+            .andExpect(jsonPath("$.data.events[0].action").value("reopened"))
+            .andExpect(jsonPath("$.data.events[0].status").value("consumed"))
+            .andExpect(jsonPath("$.data.events[1].action").value("closed"))
+            .andExpect(jsonPath("$.data.events[1].by").value(DEMO_OWNER));
     }
 
     private String item(String code, String releaseRequired) throws Exception {

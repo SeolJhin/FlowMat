@@ -1,3 +1,4 @@
+import { NotificationsPanel } from './NotificationsPanel'
 import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { FlowCanvasBackground } from './FlowCanvasBackground'
@@ -206,6 +207,8 @@ function Dashboard({ onLogout, onRequestDormant, isLoggingOut }: DashboardProps)
         <p className="mb-8 text-[14.5px] text-[#9694a3]">
           오늘도 생산 흐름을 정리해볼까요.
         </p>
+
+        {currentUser?.userId && <NotificationsPanel userId={currentUser.userId} />}
 
         {projectLinks.length > 0 && (
           <div className="mb-8 flex flex-wrap gap-2">

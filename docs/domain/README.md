@@ -71,6 +71,12 @@
 | [inspection-standard.md](inspection-standard.md) | 품목별 검사 기준과 실행 품질 체크리스트 |
 | [nonconformity.md](nonconformity.md) | 부적합(NCR)과 시정 조치(CAPA) |
 
+## 알림
+
+| 문서 | 내용 |
+|---|---|
+| [notification.md](notification.md) | 맡긴 일의 앱 안 알림(NCR 조치·창고 작업·작업지시 담당자) |
+
 ## 설비
 
 | 문서 | 내용 |

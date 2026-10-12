@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest'
 import type { BomDto, ItemDto, MaterialRequirementDto, ReorderLineDto } from '../../../shared/types/api'
 import type { StockAlertDto } from '../../../shared/types/api'
 import {
-  alertsWithin, describeAlert, fromPacks, leftAfterOrders, needsCsv, orderAlerts, orderQuantity, orderValue, packsFor, reorderCsv,
-  subAssemblyDrafts, suggestedOrder,
+  alertsWithin, describeAlert, fromPacks, leftAfterOrders, needsCsv, orderAlerts, orderQuantity, orderValue, packsFor, placeSafetyPayload,
+  reorderCsv, reorderFileName, reorderPlaces, reorderTitle, subAssemblyDrafts, suggestedOrder,
 } from './stockAlertModel'
+import type { StorageLocationDto } from '../../../entities/inventory/api/useStorageLocations'
 
 function alert(id: string, patch: Partial<StockAlertDto> = {}): StockAlertDto {
   return {
@@ -188,5 +189,33 @@ describe('subAssemblyDrafts', () => {
       { itemId: 'cream', itemCode: 'CREAM', quantity: 4, bomId: 'b2' },
     ])
     expect(skipped).toEqual(['GLAZE has no approved BOM', 'ICING already has draft WO-0007', 'OLD is discontinued'])
+  })
+})
+
+describe('reorder list of a place', () => {
+  const place = (locationCode: string, path: string, active = true): StorageLocationDto => ({
+    locationId: `loc-${locationCode}`, projectId: 'p', parentLocationId: null, locationCode, locationName: null, locationType: 'warehouse',
+    active, note: null, path, depth: path.split(' / ').length - 1, stockRecords: 0, itemCount: 0,
+  })
+
+  it('offers the active places by path', () => {
+    const places = reorderPlaces([place('WH-B', 'WH-B'), place('BIN-A1', 'WH-A / BIN-A1'), place('OLD', 'OLD', false), place('WH-A', 'WH-A')])
+    expect(places.map((one) => one.locationCode)).toEqual(['WH-A', 'BIN-A1', 'WH-B'])
+  })
+
+  it('names what is short, and where', () => {
+    expect(reorderTitle(0, null)).toBe('No items below their safety stock')
+    expect(reorderTitle(1, 'WH-A')).toBe('1 item below safety stock at WH-A')
+    expect(reorderTitle(2, null)).toBe('2 items below safety stock')
+    expect(reorderFileName('WH A/1', '2026-10-11')).toBe('reorder-WH_A_1-2026-10-11.csv')
+    expect(reorderFileName(null, '2026-10-11')).toBe('reorder-2026-10-11.csv')
+  })
+
+  it('takes an item and 0 or more, where 0 removes it', () => {
+    expect(placeSafetyPayload('', '5').error).toBe('Pick the item to watch.')
+    expect(placeSafetyPayload('bolt', '').error).toBe('Give the safety stock here as a number of 0 or more (0 removes it).')
+    expect(placeSafetyPayload('bolt', '-1').input).toBeNull()
+    expect(placeSafetyPayload('bolt', ' 2.5 ').input).toEqual({ itemId: 'bolt', safetyStockQty: 2.5 })
+    expect(placeSafetyPayload('bolt', '0').input).toEqual({ itemId: 'bolt', safetyStockQty: null })
   })
 })

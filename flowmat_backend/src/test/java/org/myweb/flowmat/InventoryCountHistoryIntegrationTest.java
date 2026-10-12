@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -66,6 +67,20 @@ class InventoryCountHistoryIntegrationTest extends IntegrationTestSupport {
             .andExpect(jsonPath(firstCount + ".valueComplete").value(hasItem(false)))
             .andExpect(jsonPath(firstCount + ".note").value(hasItem("Stock count: month end")))
             .andExpect(jsonPath(firstCount + ".countedBy").value(hasItem(DEMO_OWNER)));
+
+        // Flour costs 5 from now on: today's value follows it, the value at the count keeps the price of that time (CH1).
+        call(put("/items/" + flour), json(Map.of("unitCost", 5))).andExpect(status().isOk());
+        call(get("/inventory-counts").param("projectId", DEMO_PROJECT))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath(lastCount + ".valueChange").value(hasItem(5.0)))
+            .andExpect(jsonPath(lastCount + ".valueAtCount").value(hasItem(2.0)))
+            .andExpect(jsonPath(lastCount + ".valueAtCountComplete").value(hasItem(true)))
+            .andExpect(jsonPath(lastCount + ".valueAtCountEstimated").value(hasItem(false)))
+            .andExpect(jsonPath(firstCount + ".valueChange").value(hasItem(-10.0)))
+            .andExpect(jsonPath(firstCount + ".valueAtCount").value(hasItem(-4.0)))
+            // Salt had no unit cost then either.
+            .andExpect(jsonPath(firstCount + ".valueAtCountComplete").value(hasItem(false)))
+            .andExpect(jsonPath(firstCount + ".valueAtCountEstimated").value(hasItem(false)));
 
         mockMvc.perform(get("/inventory-counts").param("projectId", DEMO_PROJECT)
                 .header("Authorization", "Bearer " + jwtProvider.generateAccessToken("count-history-outsider")))

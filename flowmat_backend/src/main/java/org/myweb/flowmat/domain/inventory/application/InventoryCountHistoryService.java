@@ -11,6 +11,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogUnitCostQuery;
+import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogUnitCostView;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.domain.entity.UnitMaster;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
@@ -29,7 +31,8 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Past stock counts (docs/domain/stock-count.md "실사 이력"), rebuilt from the adjustments each count wrote to the
  * ledger, newest first. Only records with a difference were adjusted, so only they appear. A count adjustment reversed
- * later still shows here: the count did find that difference. Read only.
+ * later still shows here: the count did find that difference. Read only. The value is shown at today's unit costs and at
+ * those of the count's own time (docs/domain/stock-count.md CH1-CH4, user decision 2026-10-12).
  */
 @Service
 @RequiredArgsConstructor
@@ -45,6 +48,7 @@ public class InventoryCountHistoryService {
     private final ItemRepository itemRepository;
     private final UnitMasterRepository unitMasterRepository;
     private final ProjectAccessService projectAccessService;
+    private final CatalogUnitCostQuery unitCosts;
 
     public List<InventoryCountHistoryResponse> history(String projectId) {
         projectAccessService.requireProjectReadAccess(projectId);
@@ -78,6 +82,13 @@ public class InventoryCountHistoryService {
         for (Map.Entry<String, List<InventoryTransaction>> entry : byCount.entrySet()) {
             List<InventoryTransaction> movements = entry.getValue();
             InventoryTransaction first = movements.get(movements.size() - 1);
+            // Prices of the count's own time: the history's price then, estimated before an item's first recorded change.
+            Map<String, CatalogUnitCostView> then = unitCosts.findUnitCostsAt(projectId,
+                movements.stream().map(InventoryTransaction::getItemId).filter(Objects::nonNull).collect(Collectors.toSet()),
+                first.getCreatedAt());
+            BigDecimal valueThen = BigDecimal.ZERO;
+            boolean completeThen = true;
+            boolean estimatedThen = false;
             BigDecimal increase = BigDecimal.ZERO;
             BigDecimal decrease = BigDecimal.ZERO;
             BigDecimal value = BigDecimal.ZERO;
@@ -97,6 +108,13 @@ public class InventoryCountHistoryService {
                 } else {
                     value = value.add(delta.multiply(unitCost));
                 }
+                CatalogUnitCostView costThen = movement.getItemId() == null ? null : then.get(movement.getItemId());
+                if (costThen == null || costThen.unitCost() == null) {
+                    completeThen = false;
+                } else {
+                    valueThen = valueThen.add(delta.multiply(costThen.unitCost()));
+                    estimatedThen |= costThen.costBasis() == CatalogUnitCostView.CostBasis.ESTIMATED;
+                }
                 Inventory record = records.get(movement.getInventoryId());
                 LotMaster lot = movement.getLotId() == null ? null : lots.get(movement.getLotId());
                 lines.add(new InventoryCountHistoryResponse.Line(
@@ -111,7 +129,8 @@ public class InventoryCountHistoryService {
                 ));
             }
             counts.add(new InventoryCountHistoryResponse(entry.getKey(), first.getCreatedAt(), first.getCreatedBy(), first.getNote(),
-                movements.size(), scale(increase), scale(decrease), scale(value), complete, lines));
+                movements.size(), scale(increase), scale(decrease), scale(value), complete, scale(valueThen), completeThen,
+                estimatedThen, lines));
         }
         return counts;
     }

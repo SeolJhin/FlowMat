@@ -13,6 +13,7 @@ import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import { EMPTY_LOT_FILTER, EXPIRES_SOON_DAYS, filterLots, type LotFilter } from '../model/listFilterModel'
 import { LotRecall } from './LotRecall'
+import { LotReleaseHistory } from './LotReleaseHistory'
 import { lotsCsv } from '../model/lotExportModel'
 import { ExpiryOutlook } from './ExpiryOutlook'
 import { ItemScanInput } from './ItemScanInput'
@@ -305,6 +306,13 @@ function LotDetail({
       {releaseMutation.isError && (
         <p role="alert" style={{ color: '#dc2626', fontSize: 12 }}>{errorMessage(releaseMutation.error, 'Failed to release LOT.')}</p>
       )}
+      {releaseMutation.data?.checkedStandards === 0 && (
+        <p role="status" style={{ fontSize: 12 }}>
+          Released without checks: this item has no required receipt standard. Add one under Quality → Inspection standards
+          to check its next LOTs.
+        </p>
+      )}
+      <LotReleaseHistory lotId={lot.lotId} />
       {reopenMutation.isError && (
         <p role="alert" style={{ color: '#dc2626', fontSize: 12 }}>{errorMessage(reopenMutation.error, 'Failed to reopen LOT.')}</p>
       )}

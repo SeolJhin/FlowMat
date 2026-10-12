@@ -12,9 +12,17 @@ import {
   ncrForValue,
   outOfLimitsNcrDescription,
   outOfLimitsNcrTitle,
+  failedCheckNcrTitle,
+  followableStandards,
+  inspectionText,
+  personDecides,
+  standardNote,
+  suggestedNcrTitle,
+  standardOptionText,
   stepPayload,
   undoneLine,
 } from './workInstructionModel'
+import type { InspectionStandardDto } from '../../../entities/quality/api/useInspectionStandards'
 
 function revision(itemId: string, revisionNo: number, status: WorkInstructionDto['status']): WorkInstructionDto {
   return {
@@ -84,6 +92,66 @@ describe('steps and links', () => {
     expect(finishNote({ ...open, instruction: { ...instruction, blocksFinish: true } })).toBe('Confirm 1 required instruction step before finishing.')
     expect(finishNote({ ...open, complete: true })).toBeNull()
     expect(finishNote({ ...open, instruction: null })).toBeNull()
+  })
+})
+
+describe('a step that follows an inspection standard', () => {
+  const standard = (standardId: string, itemId: string, inspectionType: string, stage: InspectionStandardDto['stage'], active = true,
+    standardMin: number | null = 10, standardMax: number | null = 12): InspectionStandardDto => ({
+    standardId, projectId: 'p', itemId, itemCode: null, itemName: null, inspectionType, stage, standardMin, standardMax, unit: '%',
+    required: false, active, note: null,
+  })
+
+  it('offers the product\'s active production standards', () => {
+    const offered = followableStandards([
+      standard('s1', 'bread', 'Moisture', 'production'), standard('s2', 'bread', 'Seal', 'receipt'),
+      standard('s3', 'bread', 'Colour', 'any'), standard('s4', 'bread', 'Weight', 'production', false),
+      standard('s5', 'cake', 'Moisture', 'production'),
+    ], 'bread')
+    expect(offered.map((one) => one.standardId)).toEqual(['s3', 's1'])
+    expect(standardOptionText(offered[1])).toBe('Moisture · 10–12 %')
+    expect(standardOptionText({ inspectionType: 'Visual', standardMin: null, standardMax: null, unit: null })).toBe('Visual · pass/fail')
+  })
+
+  it('sends the standard instead of limits', () => {
+    expect(stepPayload({ ...EMPTY_STEP, text: 'Check the dough', recordsValue: true, valueMin: '1', standardId: 's1' }).input)
+      .toEqual({ text: 'Check the dough', required: true, recordsValue: true, valueLabel: null, standardId: 's1' })
+    expect(stepPayload({ ...EMPTY_STEP, text: 'Sweep', recordsValue: false, standardId: 's1' }).input)
+      .toEqual({ text: 'Sweep', required: true, recordsValue: false, valueLabel: null })
+  })
+
+  it('asks for pass or fail when the standard has no limits', () => {
+    const step = { standardId: 's-visual', standardStatus: 'current' as const, valueMin: null, valueMax: null }
+    expect(personDecides(step)).toBe(true)
+    expect(personDecides({ ...step, valueMin: 10 })).toBe(false)
+    expect(personDecides({ ...step, standardStatus: 'inactive' })).toBe(false)
+    expect(personDecides({ ...step, standardId: null })).toBe(false)
+  })
+
+  it('suggests an NCR for a value outside its limits, or else for a failed inspection', () => {
+    const step = { stepNo: 2, valueLabel: 'Crust', valueMin: null, valueMax: null, standardName: 'Visual' }
+    expect(failedCheckNcrTitle(step, 'cracked')).toBe('Step 2 Visual failed: cracked')
+    expect(failedCheckNcrTitle({ ...step, standardName: null }, null)).toBe('Step 2 Crust failed')
+    expect(suggestedNcrTitle(step, { value: 'cracked', outOfLimits: false, inspectionResult: 'fail' })).toBe('Step 2 Visual failed: cracked')
+    expect(suggestedNcrTitle(step, { value: 'smooth', outOfLimits: false, inspectionResult: 'pass' })).toBeNull()
+    expect(suggestedNcrTitle({ ...step, valueLabel: 'Moisture %', valueMin: 10, valueMax: 12 }, { value: '13', outOfLimits: true, inspectionResult: 'fail' }))
+      .toBe('Step 2 Moisture % 13 outside 10–12')
+  })
+
+  it('names the inspection a confirmation also recorded', () => {
+    expect(inspectionText({ inspectionResult: 'fail' })).toBe('inspection fail')
+    expect(inspectionText({ inspectionResult: null })).toBe('')
+    expect(inspectionText({})).toBe('')
+  })
+
+  it('says when the standard moved on', () => {
+    expect(standardNote({ standardName: 'Moisture', standardStatus: 'current' }, true)).toBe('')
+    expect(standardNote({ standardName: 'Moisture', standardStatus: 'changed' }, true))
+      .toBe('The limits of the Moisture standard changed; releasing takes them.')
+    expect(standardNote({ standardName: 'Moisture', standardStatus: 'changed' }, false))
+      .toBe('The limits of the Moisture standard changed; make a new revision to follow them.')
+    expect(standardNote({ standardName: null, standardStatus: 'inactive' }, true))
+      .toBe('The standard is no longer active; remove this step to release.')
   })
 })
 

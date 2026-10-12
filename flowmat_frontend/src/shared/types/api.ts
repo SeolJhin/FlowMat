@@ -214,7 +214,8 @@ export interface WorkOrderReadinessDto {
 }
 
 export type RunCorrectionStatus = 'pending_approval' | 'applied' | 'rejected'
-export type RunCorrectionKind = 'void_item' | 'add_item' | 'set_output_qty' | 'cancel_setup' | 'add_setup'
+export type RunCorrectionKind =
+  | 'void_item' | 'add_item' | 'set_output_qty' | 'cancel_setup' | 'add_setup' | 'cancel_running_time' | 'add_running_time'
 
 export interface RunCorrectionLineDto {
   lineNo: number
@@ -233,6 +234,10 @@ export interface RunCorrectionLineDto {
   equipmentId?: string | null
   setupMinutes?: number | null
   createdRunSetupId?: string | null
+  /** Running-time corrections (docs/domain/equipment-setup-cost.md ER10); add_running_time uses equipmentId. */
+  targetRunEquipmentTimeId?: string | null
+  runningMinutes?: number | null
+  createdRunEquipmentTimeId?: string | null
 }
 
 /** A correction of a finished run (docs/domain/production-run-correction.md). */
@@ -258,6 +263,8 @@ export type RunCorrectionLineRequest =
   | { kind: 'set_output_qty'; afterQty: number }
   | { kind: 'cancel_setup'; targetRunSetupId: string }
   | { kind: 'add_setup'; equipmentId: string; setupMinutes: number }
+  | { kind: 'cancel_running_time'; targetRunEquipmentTimeId: string }
+  | { kind: 'add_running_time'; equipmentId: string; runningMinutes: number }
 
 export type InspectionResult = 'pass' | 'fail'
 export type DefectSeverity = 'minor' | 'major' | 'critical'
@@ -1056,6 +1063,8 @@ export interface ReorderLineDto {
   availableQuantity: number
   shortageQuantity: number
   leadTimeDays: number | null
+  /** The place the line is for (docs/domain/stock-alert.md PS4); null on the item-level list. */
+  location?: string | null
 }
 
 export interface ProcessDto {

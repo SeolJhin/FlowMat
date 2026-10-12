@@ -19,9 +19,12 @@ import { ItemScanInput } from '../../inventory/ui/ItemScanInput'
 import { pickableItems } from '../../inventory/model/itemStatusModel'
 import { WorkOrderReadiness } from './WorkOrderReadiness'
 import { WorkOrderWasteEstimate } from './WorkOrderWasteEstimate'
+import { WorkOrderSetupComparison } from './WorkOrderSetupComparison'
+import { WorkOrderRunningComparison } from './WorkOrderRunningComparison'
 import { plannedSupply } from '../model/readinessModel'
 import { WorkOrderEquipmentPicker } from './WorkOrderEquipmentPicker'
 import { WorkOrderPlanSuggestion } from './WorkOrderPlanSuggestion'
+import { WorkOrderBatchPlan } from './WorkOrderBatchPlan'
 import { WorkOrderAllocations } from './WorkOrderAllocations'
 import { WorkOrderReschedule } from './WorkOrderReschedule'
 import { useEquipmentQuery } from '../../../entities/catalog/api/useEquipment'
@@ -405,6 +408,8 @@ export function WorkOrdersPanel({
                           onMake={(material, quantity) => makeSubAssembly(order, material, quantity)} />
                         <WorkOrderAllocations order={order} projectId={projectId} />
                         <WorkOrderWasteEstimate workOrderId={order.workOrderId} />
+                        <WorkOrderSetupComparison workOrderId={order.workOrderId} />
+                        <WorkOrderRunningComparison workOrderId={order.workOrderId} />
                       </td>
                     </tr>
                   )}
@@ -419,6 +424,7 @@ export function WorkOrdersPanel({
             {errorMessage(transitionMutation.error, 'Failed to update work order.')}
           </p>
         )}
+        <WorkOrderBatchPlan projectId={projectId} orders={orders} />
       </section>
 
       <section style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 18 }}>

@@ -57,6 +57,8 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
     private final StockAllocationService stockAllocationService;
+    private final org.myweb.flowmat.domain.notification.application.publicapi.NotificationCommand notifications;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectMemberQuery projectMemberQuery;
 
     @Override
     public List<WorkOrderResponse> listWorkOrders(String projectId) {
@@ -93,7 +95,9 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         order.setInstructionUrl(instructionUrl(request.instructionUrl()));
         order.setCreatedBy(projectAccessService.requireCurrentUserId());
         order.setDeletedYn(NOT_DELETED);
-        return toResponse(workOrderRepository.save(order), List.of());
+        WorkOrder saved = workOrderRepository.save(order);
+        tellAssignee(saved, null);
+        return toResponse(saved, List.of());
     }
 
     @Override
@@ -105,6 +109,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 "Only draft work orders can be edited; " + order.getWorkOrderNumber() + " is " + order.getWorkOrderStatus() + ".");
         }
+        String assigneeBefore = order.getAssignedTo();
         String title = request.workOrderTitle() != null && !request.workOrderTitle().isBlank()
             ? request.workOrderTitle()
             : order.getWorkOrderTitle();
@@ -113,7 +118,22 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             request.bomId());
         order.setInstructionUrl(instructionUrl(request.instructionUrl()));
         order.setUpdatedBy(projectAccessService.requireCurrentUserId());
-        return toResponse(workOrderRepository.save(order));
+        WorkOrder saved = workOrderRepository.save(order);
+        tellAssignee(saved, assigneeBefore);
+        return toResponse(saved);
+    }
+
+    /**
+     * A newly named assignee hears of the order (docs/domain/notification.md NT2) when the name is a person who can read
+     * the project; the field also takes free text, such as a crew name, which tells no one.
+     */
+    private void tellAssignee(WorkOrder order, String before) {
+        String assignee = order.getAssignedTo();
+        if (assignee == null || assignee.equals(before) || !projectMemberQuery.canRead(order.getProjectId(), assignee)) {
+            return;
+        }
+        notifications.notifyAssignee(assignee, projectAccessService.requireCurrentUserId(), order.getProjectId(), "work_order",
+            "Work order " + order.getWorkOrderNumber() + " is yours", order.getWorkOrderTitle(), "work_order", order.getWorkOrderId());
     }
 
     @Override

@@ -72,6 +72,16 @@ test('a short sub-assembly fills in a work order for what open orders do not mak
         lines: [{ itemId: 'crumb', itemCode: 'CRUMB', itemName: 'crumb', quantity: 0.5, unit: 'kg', unitDisposalCost: 4, cost: 2 }],
         problem: null })
     }
+    if (pathname === '/api/work-orders/wo-cake/setup-comparison') {
+      // Planned changeover at today's rate beside the setups its runs recorded (docs/domain/equipment-setup-cost.md AS11).
+      return ok(route, { workOrderId: 'wo-cake', equipmentId: 'oven', plannedMinutes: 20, plannedCost: 10, runs: 1,
+        actualMinutes: 45, actualCost: 22.5, actualCostComplete: true })
+    }
+    if (pathname === '/api/work-orders/wo-cake/running-comparison') {
+      // Planned running time at the oven's capacity beside what its runs recorded (docs/domain/equipment-setup-cost.md ER8).
+      return ok(route, { workOrderId: 'wo-cake', equipmentId: 'oven', capacityPerHour: 10, plannedMinutes: 60, plannedCost: 30, runs: 1,
+        actualMinutes: 50, actualCost: 25, actualCostComplete: true })
+    }
     return ok(route, [])
   })
 
@@ -83,6 +93,14 @@ test('a short sub-assembly fills in a work order for what open orders do not mak
   const waste = page.getByRole('region', { name: 'Waste disposal estimate' })
   await expect(waste).toContainText('CRUMB: 0.5 kg · 2')
   await expect(waste).toContainText('Estimated disposal cost: 2')
+  const setup = page.getByRole('region', { name: 'Setup planned and actual' })
+  await expect(setup).toContainText("Planned: 20 min · 10 at today's rate")
+  await expect(setup).toContainText('Actual: 45 min · 22.5 over 1 run')
+  await expect(setup).toContainText('25 min more than planned')
+  const running = page.getByRole('region', { name: 'Running time planned and actual' })
+  await expect(running).toContainText("Planned: 60 min at 10/h · 30 at today's rate")
+  await expect(running).toContainText('Actual: 50 min · 25 over 1 run')
+  await expect(running).toContainText('10 min less than planned')
   const sponge = readiness.getByRole('row', { name: /SPONGE/ })
   // 17 short, 5 already planned by WO-0002: make 12.
   await expect(sponge).toContainText('Make 12')

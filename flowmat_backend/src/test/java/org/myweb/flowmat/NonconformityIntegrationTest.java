@@ -10,10 +10,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.LocalDate;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
+import org.myweb.flowmat.domain.quality.domain.entity.Nonconformity;
+import org.myweb.flowmat.domain.quality.repository.NonconformityRepository;
 import org.myweb.flowmat.global.security.JwtProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -30,6 +33,7 @@ class NonconformityIntegrationTest extends IntegrationTestSupport {
     @Autowired private JwtProvider jwtProvider;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private ItemRepository itemRepository;
+    @Autowired private NonconformityRepository nonconformityRepository;
 
     @Test
     void aNonconformityClosesOnlyWithCauseDispositionAndItsActionsFinished() throws Exception {
@@ -140,6 +144,58 @@ class NonconformityIntegrationTest extends IntegrationTestSupport {
             .andExpect(jsonPath("$.message").value(containsString("is cancelled; only a closed nonconformity")));
         callAs("unrelated-user", post("/nonconformities/" + ncrId + "/verify"), "{\"result\":\"effective\"}")
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void aClosedNonconformitysActionsAreDueToBeCheckedByADay() throws Exception {
+        String item = item();
+        String defect = id(defect(item, "Burr", "minor"), "defectLogId");
+        String ncrId = id(call(post("/nonconformities"), "{\"projectId\":\"" + DEMO_PROJECT + "\",\"title\":\"Burrs\","
+            + "\"defectLogIds\":[\"" + defect + "\"]}"), "nonconformityId");
+        String path = "/nonconformities/" + ncrId;
+        String action = data(call(post(path + "/actions"), "{\"actionType\":\"correction\",\"description\":\"Deburr\"}"))
+            .path("actions").get(0).path("correctiveActionId").asText();
+        call(post(path + "/actions/" + action + "/complete"), "{\"note\":\"Deburred\"}").andExpect(status().isOk());
+        call(put(path), "{\"rootCause\":\"Blunt cutter\",\"disposition\":\"rework\"}").andExpect(status().isOk());
+
+        // Only an open nonconformity is closed, and only a closed one has a check date (N13).
+        call(put(path + "/verification-due"), "{\"verificationDueDate\":\"2999-12-31\"}")
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.message").value(containsString("is open; only a closed nonconformity")));
+        call(post(path + "/close"), "{\"verificationDueDate\":\"soon\"}")
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value(containsString("a date is not YYYY-MM-DD")));
+        call(post(path + "/close"), "{\"verificationDueDate\":\"2000-01-01\"}")
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value(containsString("The check date 2000-01-01 is before today")));
+        call(get(path)).andExpect(jsonPath("$.data.status").value("open"));
+        call(post(path + "/close"), "{\"note\":\"Done\",\"verificationDueDate\":\"2999-12-31\"}")
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.status").value("closed"))
+            .andExpect(jsonPath("$.data.verificationDueDate").value("2999-12-31"))
+            .andExpect(jsonPath("$.data.verificationOverdue").value(false));
+
+        call(put(path + "/verification-due"), "{\"verificationDueDate\":\"2000-01-01\"}").andExpect(status().isBadRequest());
+        call(put(path + "/verification-due"), "{\"verificationDueDate\":null}")
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.verificationDueDate").doesNotExist())
+            .andExpect(jsonPath("$.data.verificationOverdue").value(false));
+        callAs("unrelated-user", put(path + "/verification-due"), "{\"verificationDueDate\":\"2999-12-31\"}")
+            .andExpect(status().isForbidden());
+
+        // A day that passed unchecked is overdue; recording the check ends that and keeps the day.
+        Nonconformity stored = nonconformityRepository.findById(ncrId).orElseThrow();
+        stored.setVerificationDueDate(LocalDate.of(2000, 1, 1));
+        nonconformityRepository.saveAndFlush(stored);
+        call(get("/nonconformities").param("projectId", DEMO_PROJECT).param("status", "closed"))
+            .andExpect(jsonPath("$.data[?(@.nonconformityId == '" + ncrId + "')].verificationOverdue").value(true));
+        call(post(path + "/verify"), "{\"result\":\"effective\"}")
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.verificationDueDate").value("2000-01-01"))
+            .andExpect(jsonPath("$.data.verificationOverdue").value(false));
+        call(put(path + "/verification-due"), "{\"verificationDueDate\":\"2999-12-31\"}")
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.message").value(containsString("was already checked by " + DEMO_OWNER)));
     }
 
     private ResultActions defect(String item, String type, String severity) throws Exception {

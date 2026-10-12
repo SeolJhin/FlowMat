@@ -1,4 +1,6 @@
-import type { WorkOrderPlanSuggestionDto } from '../../../entities/production/api/useWorkOrderPlan'
+import type {
+  WorkOrderBatchPlanDto, WorkOrderPlanOrderDto, WorkOrderPlanSuggestionDto,
+} from '../../../entities/production/api/useWorkOrderPlan'
 import type { WorkOrderInput } from '../../../entities/production/api/useWorkOrders'
 import type { WorkOrderDto } from '../../../shared/types/api'
 
@@ -40,6 +42,30 @@ export function planSummary(plan: WorkOrderPlanSuggestionDto): string {
     : ''
   const after = plan.movedPast.length > 0 ? ` · after ${plan.movedPast.join(', ')}` : ''
   return `${planStamp(plan.plannedStartAt)} → ${planStamp(plan.plannedEndAt)} · needs ${hours(plan.neededHours)}${changeover}${after}`
+}
+
+/** Orders a batch can plan: drafts and approved orders with equipment (docs/domain/equipment-schedule.md P8, P12). */
+export function batchPlannable(orders: WorkOrderDto[]): WorkOrderDto[] {
+  return orders.filter((order) => Boolean(order.equipmentId)
+    && (order.workOrderStatus === 'draft' || order.workOrderStatus === 'approved'))
+}
+
+/** The drafts of a batch answer that take their dates now; an approved order waits for the owner's reschedule (P12). */
+export function batchDrafts(
+  lines: WorkOrderBatchPlanDto['lines'],
+  orders: WorkOrderDto[],
+): { order: WorkOrderDto; plan: WorkOrderPlanSuggestionDto }[] {
+  return lines.flatMap((line) => {
+    const order = orders.find((one) => one.workOrderId === line.workOrderId)
+    return order && order.workOrderStatus === 'draft' && line.suggestion ? [{ order, plan: line.suggestion }] : []
+  })
+}
+
+/** What a suggested order saves, e.g. "Reordered for fewer changeovers: 20 min instead of 120 min." (P16). */
+export function orderSummary(order: Pick<WorkOrderPlanOrderDto, 'changeoverMinutes' | 'givenChangeoverMinutes'>): string {
+  return order.changeoverMinutes < order.givenChangeoverMinutes
+    ? `Reordered for fewer changeovers: ${order.changeoverMinutes} min instead of ${order.givenChangeoverMinutes} min.`
+    : `The ticked order already has the fewest changeovers: ${order.changeoverMinutes} min.`
 }
 
 /** The draft as it is with the suggested dates; the update replaces every editable field, so all of them are sent. */

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { useProjectTimeZone } from '../../../entities/project/api/useProjectTimeZone'
 import { useDefectsQuery } from '../../../entities/quality/api/useQuality'
 import {
   useNonconformitiesQuery,
@@ -12,15 +13,20 @@ import {
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import { formatQty } from '../../../shared/lib/formatQty'
 import type { DefectSeverity } from '../../../shared/types/api'
+import { zoneDay } from '../model/bomModel'
 import {
   ACTION_TYPES,
   ACTION_TYPE_LABELS,
+  CHECK_AFTER_DAYS,
   DISPOSITIONS,
   DISPOSITION_LABELS,
   EMPTY_ACTION_FORM,
   EMPTY_NCR_FORM,
   actionPayload,
   actionProgress,
+  addDays,
+  checkDate,
+  checkDueText,
   closeBlockers,
   followUpForm,
   ncrPayload,
@@ -145,7 +151,10 @@ export function NonconformityPanel({ projectId }: { projectId: string }) {
               </td>
               <td>
                 {ncr.status}
-                {ncr.status === 'closed' && !ncr.verificationResult && <span className="inspector-hint"> · not checked</span>}
+                {ncr.status === 'closed' && !ncr.verificationResult && (checkDueText(ncr)
+                  ? <span className={ncr.verificationOverdue ? undefined : 'inspector-hint'}
+                    style={{ color: ncr.verificationOverdue ? '#b91c1c' : undefined }}> · {checkDueText(ncr)}</span>
+                  : <span className="inspector-hint"> · not checked</span>)}
                 {ncr.verificationResult === 'not_effective' && <span style={{ color: '#b91c1c' }}> · not effective</span>}
               </td>
               <td><button type="button" onClick={() => setSelectedId(ncr.nonconformityId === selectedId ? null : ncr.nonconformityId)}>
@@ -172,7 +181,13 @@ function NonconformityDetail({ projectId, ncr, onFollowUp }: {
   /** Raise a new nonconformity for what this one's actions did not fix. */
   onFollowUp: (ncr: NonconformityDto) => void
 }) {
-  const { update, addAction, finishAction, close, cancel, verify } = useNonconformityMutations(projectId)
+  const { update, addAction, finishAction, close, cancel, verify, setVerificationDue } = useNonconformityMutations(projectId)
+  const today = zoneDay(useProjectTimeZone(projectId).query.data?.timeZone)
+  // Null until changed: the suggested day follows the project's today once its time zone is known.
+  const [checkBy, setCheckBy] = useState<string | null>(null)
+  const closeCheckBy = checkBy ?? addDays(today, CHECK_AFTER_DAYS)
+  const [dueDraft, setDueDraft] = useState(ncr.verificationDueDate ?? '')
+  const [checkDateError, setCheckDateError] = useState<string | null>(null)
   const [verification, setVerification] = useState<NcrVerification | ''>('')
   const [verificationNote, setVerificationNote] = useState('')
   const [verificationError, setVerificationError] = useState<string | null>(null)
@@ -185,7 +200,20 @@ function NonconformityDetail({ projectId, ncr, onFollowUp }: {
   const [closeNote, setCloseNote] = useState('')
   const open = ncr.status === 'open'
   const blockers = closeBlockers(ncr)
-  const failure = [update, addAction, finishAction, close, cancel, verify].find((mutation) => mutation.isError)
+  const failure = [update, addAction, finishAction, close, cancel, verify, setVerificationDue].find((mutation) => mutation.isError)
+
+  function closeWithCheckDate() {
+    const checked = checkDate(closeCheckBy, today)
+    setCheckDateError(checked.error)
+    if (!checked.error) close.mutate({ id: ncr.nonconformityId, note: closeNote, verificationDueDate: checked.day })
+  }
+
+  function saveCheckDate(event: FormEvent) {
+    event.preventDefault()
+    const checked = checkDate(dueDraft, today)
+    setCheckDateError(checked.error)
+    if (!checked.error) setVerificationDue.mutate({ id: ncr.nonconformityId, verificationDueDate: checked.day })
+  }
 
   function saveVerification(event: FormEvent) {
     event.preventDefault()
@@ -232,7 +260,19 @@ function NonconformityDetail({ projectId, ncr, onFollowUp }: {
             <button type="button" style={{ marginTop: 4 }} onClick={() => onFollowUp(ncr)}>Raise a follow-up</button>
           )}
         </section>
-      ) : (
+      ) : (<>
+        <form aria-label="Check date" onSubmit={saveCheckDate}
+          style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', margin: '0 0 8px' }}>
+          <span style={{ color: ncr.verificationOverdue ? '#b91c1c' : undefined }}>
+            {!ncr.verificationDueDate ? 'No check date'
+              : ncr.verificationOverdue ? `The check was due ${ncr.verificationDueDate}` : `Check by ${ncr.verificationDueDate}`}
+          </span>
+          <input type="date" aria-label="New check date" value={dueDraft} onChange={(event) => setDueDraft(event.target.value)} />
+          <button type="submit" disabled={setVerificationDue.isPending || dueDraft === (ncr.verificationDueDate ?? '')}>
+            {dueDraft ? 'Save check date' : 'Clear check date'}
+          </button>
+          {checkDateError && <p role="alert" style={{ color: '#dc2626', margin: 0, flexBasis: '100%' }}>{checkDateError}</p>}
+        </form>
         <form aria-label="Check the actions" onSubmit={saveVerification}
           style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', margin: '0 0 8px' }}>
           <span>Did the actions work?</span>
@@ -245,7 +285,7 @@ function NonconformityDetail({ projectId, ncr, onFollowUp }: {
           <button type="submit" disabled={verify.isPending}>{verify.isPending ? 'Saving...' : 'Record check'}</button>
           {verificationError && <p role="alert" style={{ color: '#dc2626', margin: 0, flexBasis: '100%' }}>{verificationError}</p>}
         </form>
-      ))}
+      </>))}
 
       {ncr.defects.length > 0 && (
         <ul aria-label="Gathered defects" style={{ margin: '0 0 8px', paddingLeft: 18 }}>
@@ -340,9 +380,14 @@ function NonconformityDetail({ projectId, ncr, onFollowUp }: {
           )}
           <input aria-label="Closing note" value={closeNote} maxLength={1000} placeholder="How it was verified, or why it is cancelled"
             onChange={(event) => setCloseNote(event.target.value)} />
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>Check the actions by
+            <input type="date" value={closeCheckBy} onChange={(event) => setCheckBy(event.target.value)} />
+            <span className="inspector-hint">Empty: no check date.</span>
+          </label>
+          {checkDateError && <p role="alert" style={{ color: '#dc2626', margin: 0 }}>{checkDateError}</p>}
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" disabled={blockers.length > 0 || close.isPending}
-              onClick={() => close.mutate({ id: ncr.nonconformityId, note: closeNote })}>Close nonconformity</button>
+              onClick={closeWithCheckDate}>Close nonconformity</button>
             <button type="button" disabled={!closeNote.trim() || cancel.isPending}
               onClick={() => cancel.mutate({ id: ncr.nonconformityId, note: closeNote })}>Cancel nonconformity</button>
           </div>

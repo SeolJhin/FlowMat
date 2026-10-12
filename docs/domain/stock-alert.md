@@ -91,7 +91,22 @@ V1 `stock_alert`에는 FK·CHECK·유일 제약이 없습니다. "행·종류별
 - `stockAlertModel.test.ts`의 `suggestedOrder` 2건: 부족 5 + 2/일 × 10일 = 25, 소비·리드타임 없으면 5. `orderValue`(25 × 1.2 = 30, 단가 0·없음은 null), `reorderCsv`(쉼표 든 이름, 모르는 값 빈 칸). 브라우저: 표에 Order value 열, 위에 "suggested orders ≈ 560 (2 without a unit cost)", CSV `reorder-….csv` 헤더·9줄, 단가 없는 품목의 가치는 `-`/빈 칸
 - 실 화면(2026-09-25): 안전재고 50, 리드타임 10일, 30 입고 후 15 출고 → `15 kg / 50 / 35 / 10 d / 30 days / 40 kg`, 콘솔 오류 0
 
+## 위치별 재주문 (2026-10-11, V73)
+
+품목 전체 기준(위)과 별도로, [위치 목록](storage-location.md)의 **한 위치**에 품목별 안전재고를 두고 그 위치에서 모자란 품목을 봅니다. 창고마다 따로 채워야 하는 재고(현장 창고·라인 옆 보관)를 위한 것입니다. 개발 DB에는 V73을 적용하지 않았습니다.
+
+| # | 규칙 | 위반 응답 |
+|---|---|---|
+| PS1 | **저장:** `place_safety_stock`(품목, 위치 `location_id` → `storage_location` FK, `safety_stock_qty` numeric(14,4) > 0 CHECK, 만든·고친 사람·시각). (품목, 위치)마다 하나(유일 제약). 품목 안전재고(`item.safety_stock_qty`)와 따로이며 서로 더하거나 대신하지 않는다 | |
+| PS2 | **정하기·지우기:** `PUT /stock-alerts/place-safety-stocks {projectId, itemId, locationId, safetyStockQty}`(쓰기 권한). 0보다 크면 넣거나 고치고, 비우거나 0이면 지운다. 음수·소수 다섯째 자리·10^10 이상은 400. 프로젝트의 품목·위치여야 하고, 정할 때는 품목이 active이고 위치가 활성이어야 한다. 응답은 프로젝트의 목록 전체 | 400 `The safety stock cannot be negative.` / 400 `The item was not found in this project.` / 400 `The place is not in this project's location list.` / 409 `Item … is inactive; it takes no new stock, so it is not watched.` / 409 `Location … is inactive; activate it first.` / 400 형식 `The request body is not valid JSON, or safetyStockQty is not a number.` |
+| PS3 | **목록:** `GET /stock-alerts/place-safety-stocks?projectId=`(읽기). 위치 코드, 품목 코드 순. 목록에서 지운 위치의 행은 남지만 보이지 않는다 | |
+| PS4 | **위치의 재주문 목록:** `GET /stock-alerts/reorder?projectId=&location=WH-A`(읽기). 그 위치(대소문자 무시, A5와 같은 찾기)에 **바로** 안전재고를 둔 품목만, 쓸 수 있는 재고는 그 위치와 **안의 모든 위치**의 행만 센다(격리·종료·만료 LOT 제외는 품목 기준과 같음). 모자란 품목만, 부족 비율 큰 순. 각 줄 `location`은 목록의 철자. `location`이 없으면 지금의 품목 기준 목록(`location: null`) | 400 `Location … is not in this project's location list.` |
+| PS5 | **화면:** Stock 탭의 **Below safety stock**에 위치 목록이 있으면 **Reorder at**(`all places (item safety stock)` 또는 위치 경로). 위치를 고르면 제목 `1 item below safety stock at WH-A`(없으면 `No items below their safety stock at WH-A`), Lasts·제안량은 그 위치의 30일 소비(A5), CSV `reorder-WH-A-YYYY-MM-DD.csv`. 아래 **Safety stock at WH-A**: 그 위치의 품목별 안전재고 목록과 **Remove**, **Item to watch**·**Safety stock here**·**Save**(0이면 지움). 위치 목록이 없는 프로젝트는 지금처럼 모자란 품목이 있을 때만 보인다 | 화면 `Pick the item to watch.` |
+| PS6 | **경계:** 저장하는 경보(`stock_alert`)는 만들지 않는다(품목 기준 목록과 같이 요청 때 계산). 계산 공유는 inventory 안의 `ReorderLines`(품목 기준 목록도 같은 계산으로 옮김, 동작 같음) | |
+
+검증: `PlaceSafetyStockIntegrationTest` — 자기 프로젝트에 WH-A(안에 BIN-A1)·WH-B, BOLT 10 @bin-a1·50 @WH-B, NUT 3 @WH-A. 음수 400, 소수 다섯째 자리 400, 없는 품목·위치 400, inactive 품목 409, 숫자 아닌 값 400 → BOLT@WH-A 20·NUT@WH-A 2·BOLT@WH-B 30 → `wh-a` 목록 BOLT(쓸 수 있는 10, 부족 10, `location` WH-A)만, WH-B 없음, 품목 기준 목록 없음, 없는 위치 400 → BOLT@WH-A 5면 없음 → 0으로 지우기 → 외부인 읽기·쓰기 403. 재고 경보·재고 분석·아키텍처·마이그레이션과 함께 14건 실패 0, 전체 백엔드 1,271건 실패 0(2dc–2df 포함). `stockAlertModel.test.ts` 3건(위치 선택지, 제목·파일 이름, 요청 검사). 모의 E2E `e2e/place-reorder.spec.ts`(선택지 경로, WH-A 목록, 위치 안전재고 목록·빈 저장 경고·NUT 저장 본문·BOLT 지우기 본문과 목록 갱신)
+
 ## 이후
 
-- 알림 연동: 열린 경보를 `notification`으로 보내기(담당자·구독 설정 필요)
+- ~~알림 연동: 열린 경보를 `notification`으로 보내기~~ → 프로젝트 소유자에게(2026-10-11, [알림](notification.md) NT7). 남은 것: 구성원별 구독
 - ~~작업지시 준비 점검(readiness)과 연결: 부족 예상 경보~~ → [열린 작업지시 자재 소요](material-requirements.md) "주문 뒤 남는 양"(2026-10-03, 프런트만): 열린 작업지시를 다 만들고 나면 안전재고 밑으로 내려가는 자재를 Open work order needs에 표시. 저장하는 경보(`stock_alert`)는 아님

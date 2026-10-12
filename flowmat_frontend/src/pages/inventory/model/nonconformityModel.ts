@@ -118,6 +118,34 @@ export function followUpForm(
   }
 }
 
+/** How many days after closing the close form suggests checking the actions (N13); the day can be changed or cleared. */
+export const CHECK_AFTER_DAYS = 30
+
+/** The YYYY-MM-DD day a number of days after another. */
+export function addDays(day: string, days: number): string {
+  const [year, month, date] = day.split('-').map(Number)
+  return new Date(Date.UTC(year, month - 1, date + days)).toISOString().slice(0, 10)
+}
+
+/** A check date before it is sent: empty for none, otherwise the project's today or later (N13). */
+export function checkDate(value: string, today: string): { day: string | null; error: null } | { day: null; error: string } {
+  if (!value) return { day: null, error: null }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return { day: null, error: 'The check date is not a date.' }
+  if (value < today) return { day: null, error: 'The check date is before today.' }
+  return { day: value, error: null }
+}
+
+/**
+ * When a closed nonconformity's actions are due to be checked, e.g. "check by 2026-11-10" or "check overdue (due
+ * 2026-11-10)"; empty once they are checked or when no day was set.
+ */
+export function checkDueText(
+  ncr: Pick<NonconformityDto, 'status' | 'verificationResult' | 'verificationDueDate' | 'verificationOverdue'>,
+): string {
+  if (ncr.status !== 'closed' || ncr.verificationResult || !ncr.verificationDueDate) return ''
+  return ncr.verificationOverdue ? `check overdue (due ${ncr.verificationDueDate})` : `check by ${ncr.verificationDueDate}`
+}
+
 /** Checks whether the actions worked before it is sent: a "no" says what still goes wrong. */
 export function verificationPayload(
   result: NcrVerification | '',

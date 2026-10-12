@@ -32,7 +32,16 @@ public record WorkInstructionResponse(
         String valueLabel,
         /** Limits for the recorded value; null when there are none. */
         java.math.BigDecimal valueMin,
-        java.math.BigDecimal valueMax
+        java.math.BigDecimal valueMax,
+        /** The inspection standard the limits come from (W13); null when they were typed. */
+        String standardId,
+        /** The standard's check, such as "Moisture". */
+        String standardName,
+        /**
+         * current: the step's limits are the standard's; changed: the standard's limits changed since (a draft takes them
+         * when released); inactive: the standard is no longer an active production standard. Null without a standard.
+         */
+        String standardStatus
     ) {
     }
 }

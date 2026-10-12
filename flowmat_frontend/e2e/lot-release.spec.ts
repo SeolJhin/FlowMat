@@ -26,7 +26,18 @@ test('a held LOT is released after its receipt checks and a closed one is reopen
           body: JSON.stringify({ success: false, data: null, message: 'Before releasing LOT HELD-1: record Moisture.' }) })
       }
       lots[0] = { ...lots[0], lotStatus: 'available' }
-      return ok(route, { lotId: 'held', lotNo: 'HELD-1', lotStatus: 'available' })
+      return ok(route, { lotId: 'held', lotNo: 'HELD-1', lotStatus: 'available', checkedStandards: 1 })
+    }
+    if (pathname === '/api/lots/held/release-history') {
+      // The release moved both held stock records (docs/domain/lot-release.md R8).
+      return ok(route, { lotId: 'held', events: releaseCalls < 2 ? [] : [{ action: 'released', at: '2030-01-01T09:00:00Z',
+        by: 'demo-owner', stockRows: 2 }] })
+    }
+    if (pathname === '/api/lots/done/release-history') {
+      // The empty LOT moved no stock, yet its closing and reopening are kept (docs/domain/lot-release.md R9).
+      const closed = { action: 'closed', at: '2030-01-01T08:00:00Z', by: 'demo-owner', stockRows: 0, status: 'closed' }
+      return ok(route, { lotId: 'done', events: reopened.length === 0 ? [closed]
+        : [{ action: 'reopened', at: '2030-01-02T08:00:00Z', by: 'demo-owner', stockRows: 0, status: 'consumed' }, closed] })
     }
     if (request.method() === 'POST' && pathname === '/api/lots/done/reopen') {
       reopened.push('done')
@@ -61,10 +72,18 @@ test('a held LOT is released after its receipt checks and a closed one is reopen
   await page.getByRole('button', { name: 'Release LOT' }).click()
   await expect(page.getByRole('button', { name: 'Release LOT' })).toHaveCount(0)
   expect(releaseCalls).toBe(2)
+  await expect(page.getByRole('region', { name: 'Release history' })).toContainText('Released after its receipt checks · demo-owner')
+  await expect(page.getByRole('region', { name: 'Release history' })).toContainText('2 stock records')
+  await expect(page.getByText('Released without checks')).toHaveCount(0)
 
   await page.getByRole('row', { name: /DONE-1/ }).click()
+  const history = page.getByRole('region', { name: 'Release history' })
+  await expect(history).toContainText('Closed · demo-owner')
+  await expect(history).not.toContainText('stock record')
   page.once('dialog', (dialog) => void dialog.accept())
   await page.getByRole('button', { name: 'Reopen LOT' }).click()
   await expect.poll(() => reopened).toEqual(['done'])
   await expect(page.getByRole('button', { name: 'Reopen LOT' })).toHaveCount(0)
+  await expect(history).toContainText('Reopened as consumed · demo-owner')
+  await expect(history).toContainText('Closed · demo-owner')
 })

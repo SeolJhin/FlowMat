@@ -8,7 +8,10 @@ import java.math.BigDecimal;
 import lombok.Getter;
 import lombok.Setter;
 
-/** One change in a run correction: void a recording, add a recording, or set the run's output quantity. */
+/**
+ * One change in a run correction: void a recording, add a recording, set the run's output quantity, or cancel or add a
+ * setup or running time.
+ */
 @Getter
 @Setter
 @Entity
@@ -21,6 +24,9 @@ public class ProductionRunCorrectionLine {
     /** Setup corrections (docs/domain/equipment-setup-cost.md AS7). */
     public static final String CANCEL_SETUP = "cancel_setup";
     public static final String ADD_SETUP = "add_setup";
+    /** Running-time corrections (docs/domain/equipment-setup-cost.md ER10). */
+    public static final String CANCEL_RUNNING_TIME = "cancel_running_time";
+    public static final String ADD_RUNNING_TIME = "add_running_time";
 
     @Id
     private String productionRunCorrectionLineId;
@@ -53,4 +59,10 @@ public class ProductionRunCorrectionLine {
     private String equipmentId;
     private Integer setupMinutes;
     private String createdRunSetupId;
+
+    /** cancel_running_time: the running time it cancels. */
+    private String targetRunEquipmentTimeId;
+    /** add_running_time: whole minutes on {@link #equipmentId}, and the running time it made once applied. */
+    private Integer runningMinutes;
+    private String createdRunEquipmentTimeId;
 }

@@ -69,6 +69,24 @@ async function mockAuthApi(page: Page) {
     })
   })
 
+  for (const [path, data] of [
+    ['/notifications', []],
+    ['/notifications/unread-count', { unread: 0 }],
+  ] as const) {
+    await page.route(`**/api${path}`, async (route) => {
+      await route.fulfill({ status: 200, headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ success: true, data, message: null }) })
+    })
+  }
+
+  await page.route('**/api/organizations', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, data: [], message: null }),
+    })
+  })
+
   await page.route('**/api/projects', async (route) => {
     await route.fulfill({
       status: 200,
@@ -248,6 +266,47 @@ test('two tabs keep separate in-memory access tokens while sharing the cookie se
   await second.goto('/projects/prj-e2e/workflows/wf-e2e')
   await expect(second.getByText('E2E Workflow')).toBeVisible()
   await context.close()
+})
+
+test('authenticated home keeps organization lookup inside the mocked API', async ({ page }) => {
+  let backendOrganizationRequests = 0
+  // A leaked fake token would be rejected by the real backend running in CI.
+  await page.context().route('**/api/organizations', async (route) => {
+    backendOrganizationRequests += 1
+    await route.fulfill({ status: 401, contentType: 'application/json',
+      body: JSON.stringify({ success: false, data: null, message: 'Unmocked organization request' }) })
+  })
+  await mockAuthApi(page)
+  await page.goto('/')
+  await page.locator('input').nth(0).fill('demo-owner')
+  await page.locator('input[type="password"]').fill('demo1234')
+  const organizations = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/organizations')
+  await page.getByRole('button', { name: 'Log in' }).click()
+  expect((await organizations).status()).toBe(200)
+  await expect(page.getByText('안녕하세요, Demo Owner님')).toBeVisible()
+  expect(backendOrganizationRequests).toBe(0)
+})
+
+test('authenticated home keeps notification queries inside the mocked API', async ({ page }) => {
+  let backendNotificationRequests = 0
+  await page.context().route('**/api/notifications**', async (route) => {
+    backendNotificationRequests += 1
+    await route.fulfill({ status: 401, contentType: 'application/json',
+      body: JSON.stringify({ success: false, data: null, message: 'Unmocked notification request' }) })
+  })
+  await mockAuthApi(page)
+  await page.goto('/')
+  await page.locator('input').nth(0).fill('demo-owner')
+  await page.locator('input[type="password"]').fill('demo1234')
+  const list = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/notifications')
+  const count = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/notifications/unread-count')
+  await page.getByRole('button', { name: 'Log in' }).click()
+  expect((await list).status()).toBe(200)
+  const counted = await count
+  expect(counted.status()).toBe(200)
+  expect((await counted.json()).data).toEqual({ unread: 0 })
+  await expect(page.getByRole('region', { name: 'Notifications' })).toContainText('All read')
+  expect(backendNotificationRequests).toBe(0)
 })
 
 test('simultaneous tabs serialize rotating refresh cookies', async ({ browser }) => {

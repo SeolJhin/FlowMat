@@ -1,23 +1,29 @@
 package org.myweb.flowmat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery;
 import org.myweb.flowmat.global.security.JwtProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /** Staged material covers a pick only while its LOT can actually be used in production. */
@@ -25,9 +31,18 @@ import org.springframework.test.web.servlet.MockMvc;
 class WarehousePickReadinessIntegrationTest extends IntegrationTestSupport {
 
     @Autowired private MockMvc mockMvc;
+    @Autowired private ProjectCalendarQuery calendar;
+    @MockitoBean private Clock projectClock;
+
     @Autowired private JwtProvider jwtProvider;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private JdbcTemplate jdbc;
+
+    @BeforeEach
+    void fixProjectClock() {
+        // Seoul is already on the next day while UTC is still on October 8.
+        when(projectClock.instant()).thenReturn(Instant.parse("2026-10-08T15:30:00Z"));
+    }
 
     @ParameterizedTest
     @CsvSource({"-1, 0, 6, 2", "0, 4, 4, 0", "1, 4, 4, 0"})
@@ -39,9 +54,9 @@ class WarehousePickReadinessIntegrationTest extends IntegrationTestSupport {
             "itemName", "Pick readiness material", "unitId", "unit_kg", "lotManageYn", "Y"))
             .path("itemId").asText();
         String stagedLot = call("/lots", Map.of("projectId", project, "itemId", item, "lotNo", "STAGED-" + tag,
-            "expiryDate", LocalDate.now().plusDays(expiryDays).toString())).path("lotId").asText();
+            "expiryDate", calendar.today(project).plusDays(expiryDays).toString())).path("lotId").asText();
         String usableLot = call("/lots", Map.of("projectId", project, "itemId", item, "lotNo", "USABLE-" + tag,
-            "expiryDate", LocalDate.now().plusDays(30).toString())).path("lotId").asText();
+            "expiryDate", calendar.today(project).plusDays(30).toString())).path("lotId").asText();
         call("/inventories", Map.of("projectId", project, "itemId", item, "lotId", stagedLot, "quantity", 4, "location", "LINE"));
         String source = call("/inventories", Map.of("projectId", project, "itemId", item, "lotId", usableLot,
             "quantity", 6, "location", "STORE")).path("inventoryId").asText();
@@ -66,9 +81,9 @@ class WarehousePickReadinessIntegrationTest extends IntegrationTestSupport {
         String item = call("/items", Map.of("projectId", project, "itemCode", "QUEUE-" + tag,
             "itemName", "Queued pick material", "unitId", "unit_kg", "lotManageYn", "Y")).path("itemId").asText();
         String queuedLot = call("/lots", Map.of("projectId", project, "itemId", item, "lotNo", "QUEUED-" + tag,
-            "expiryDate", LocalDate.now().plusDays(1).toString())).path("lotId").asText();
+            "expiryDate", calendar.today(project).plusDays(1).toString())).path("lotId").asText();
         String replacementLot = call("/lots", Map.of("projectId", project, "itemId", item, "lotNo", "REPLACEMENT-" + tag,
-            "expiryDate", LocalDate.now().plusDays(30).toString())).path("lotId").asText();
+            "expiryDate", calendar.today(project).plusDays(30).toString())).path("lotId").asText();
         String queuedSource = call("/inventories", Map.of("projectId", project, "itemId", item, "lotId", queuedLot,
             "quantity", 4, "location", "STORE-A")).path("inventoryId").asText();
         String replacementSource = call("/inventories", Map.of("projectId", project, "itemId", item, "lotId", replacementLot,
@@ -77,7 +92,7 @@ class WarehousePickReadinessIntegrationTest extends IntegrationTestSupport {
             "quantity", 4, "toLocation", "LINE")).path("taskId").asText();
         if (state.equals("expired")) {
             // Simulate the date passing after the task was planned, only in this Testcontainers fixture.
-            jdbc.update("update lot_master set expiry_date = ? where lot_id = ?", LocalDate.now().minusDays(1), queuedLot);
+            jdbc.update("update lot_master set expiry_date = ? where lot_id = ?", calendar.today(project).minusDays(1), queuedLot);
         } else if (state.equals("quarantined")) {
             call("/lots/" + queuedLot + "/recall/quarantine", Map.of("reason", "Hold the queued LOT for inspection"));
         } else if (state.equals("drained")) {

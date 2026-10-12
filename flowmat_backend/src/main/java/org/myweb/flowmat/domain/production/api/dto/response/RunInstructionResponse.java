@@ -41,7 +41,11 @@ public record RunInstructionResponse(
         String checkedBy,
         OffsetDateTime checkedAt,
         /** The value lies outside the step's limits (R7); it is recorded all the same. */
-        boolean outOfLimits
+        boolean outOfLimits,
+        /** The quality inspection the confirmation also recorded (R9); null when the step does not follow a standard. */
+        String inspectionId,
+        /** pass or fail, by the standard's limits when it was recorded. */
+        String inspectionResult
     ) {
     }
 }

@@ -58,6 +58,8 @@ ADR-001~003(Architecture Decision Freeze)과 재고·BOM·LOT 계약의 구현 �
 | FlowRun 범용성을 "검증됨"으로 바꿀지 | 9-(a) 통합 테스트 통과(2026-10-03). 결정 8은 아직 "목표" | 사용자 결정. 화면까지 포함한 vertical slice를 더 요구할지 함께 정한다 |
 | 공통 Resource contract | 없음(R5) | 두 종류 이상의 비제조 흐름에서 같은 검증·lifecycle이 반복될 때(원문 §51) |
 | 노드 실행기(Flow Run이 노드를 스스로 실행)와 실행 정책(시간 제한·재시도 간격·동시 실행 제한, FM-RUN-005) | 외부 보고 방식만 있음, 연결 실패 시 고정 3회 즉시 재시도 | 실행 정책은 [ADR-004](adr/ADR-004-flow-run-execution-policy.md) **Proposed**(2026-10-03): 정책은 노드에, 기본값은 지금 동작, 재시도 간격은 외부 보고 모델 위에서, 시간 제한만 서버 감시. 수용 기준 5개를 의사결정자가 닫아야 구현한다. 노드 실행기는 여전히 별도 결정(원문 §45 보완 (b), 2026-09-24 인계의 D7) |
+| 노드 종류(Operation Type)·배타 선택·합류(FM-PLAN-001) | 없음. 통과한 연결마다 별도 단계(GR-04) | [ADR-006](adr/ADR-006-operation-types.md) Proposed(2026-10-11) 수용 기준을 사용자가 정한 뒤 |
+| 실행 정책 편집 화면 | 2026-10-11 사용자 결정: 노드 인스펙터(구현 2di, [EP13](../domain/flow-run-execution-policy.md)) | 정해짐 — ADR-004 "결정하지 않은 것"의 이 항목은 이 결정으로 닫는다(ADR 본문은 고치지 않음) |
 | 다른 도메인 Entity import 금지(ArchUnit Stage C) | 미적용 | Stage A·B 정리 후 |
 | Domain Event 발행 방식과 Outbox | 없음 | 첫 비동기 외부 연동 때(원문 Phase 7) |
 | 편집 협업 충돌 모델(문서 단위 409 / 요소 patch / CRDT) | 문서 단위 409 | 사용자 결정(2026-09-24 D1, [C5 비교](../archive/2026-09-handoff/reports/C-collab-model-comparison.md)) |

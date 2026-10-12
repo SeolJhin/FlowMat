@@ -2,6 +2,7 @@ import type { BomDto, ItemDto, MaterialRequirementDto, ReorderLineDto, StockAler
 import { approvedRevision, localDay } from './bomModel'
 import { isActiveItem } from './itemStatusModel'
 import { csvCell } from './ledgerModel'
+import type { StorageLocationDto } from '../../../entities/inventory/api/useStorageLocations'
 
 const SEVERITY_ORDER: Record<StockAlertDto['severity'], number> = { critical: 0, warning: 1, info: 2 }
 
@@ -181,4 +182,34 @@ export function subAssemblyDrafts(
     else drafts.push({ itemId: line.itemId, itemCode: code, quantity: line.shortage, bomId: bom.bomId })
   }
   return { drafts, skipped }
+}
+
+/** The places a reorder list can be for (docs/domain/stock-alert.md PS4): active places of the location list, by path. */
+export function reorderPlaces(locations: StorageLocationDto[]): StorageLocationDto[] {
+  return locations.filter((location) => location.active).sort((a, b) => a.path.localeCompare(b.path))
+}
+
+/** "2 items below safety stock at WH-A", or "No items below their safety stock" when none is short. */
+export function reorderTitle(count: number, place: string | null): string {
+  const at = place ? ` at ${place}` : ''
+  return count === 0 ? `No items below their safety stock${at}` : `${count} item${count === 1 ? '' : 's'} below safety stock${at}`
+}
+
+/** The purchase list's file name, "reorder-2026-10-11.csv", or "reorder-WH-A-2026-10-11.csv" for a place. */
+export function reorderFileName(place: string | null, day: string): string {
+  return `reorder-${place ? `${place.replace(/[^A-Za-z0-9._-]+/g, '_')}-` : ''}${day}.csv`
+}
+
+/** A safety stock at a place before it is sent (PS2): the item, and a quantity of 0 or more, where 0 removes it. */
+export function placeSafetyPayload(
+  itemId: string,
+  quantity: string,
+): { input: { itemId: string; safetyStockQty: number | null }; error: null } | { input: null; error: string } {
+  if (!itemId) return { input: null, error: 'Pick the item to watch.' }
+  const text = quantity.trim()
+  const value = Number(text)
+  if (!text || !Number.isFinite(value) || value < 0) {
+    return { input: null, error: 'Give the safety stock here as a number of 0 or more (0 removes it).' }
+  }
+  return { input: { itemId, safetyStockQty: value === 0 ? null : value }, error: null }
 }

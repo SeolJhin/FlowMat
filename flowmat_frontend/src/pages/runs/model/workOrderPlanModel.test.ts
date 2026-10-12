@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { WorkOrderPlanSuggestionDto } from '../../../entities/production/api/useWorkOrderPlan'
 import type { WorkOrderDto } from '../../../shared/types/api'
-import { defaultPlanFrom, localInput, planInput, planStamp, planSummary } from './workOrderPlanModel'
+import {
+  batchDrafts, batchPlannable, defaultPlanFrom, localInput, orderSummary, planInput, planStamp, planSummary,
+} from './workOrderPlanModel'
 
 function local(year: number, month: number, day: number, hour: number, minute: number): string {
   return new Date(year, month - 1, day, hour, minute).toISOString()
@@ -25,6 +27,35 @@ function order(overrides: Partial<WorkOrderDto> = {}): WorkOrderDto {
     instructionUrl: 'https://example.com/sop', equipmentId: 'eq-1', ...overrides,
   }
 }
+
+describe('several orders', () => {
+  it('offers drafts and approved orders that have equipment', () => {
+    const orders = [
+      order({ workOrderId: 'd' }), order({ workOrderId: 'a', workOrderStatus: 'approved' }),
+      order({ workOrderId: 'run', workOrderStatus: 'in_progress' }), order({ workOrderId: 'loose', equipmentId: null }),
+      order({ workOrderId: 'gone', workOrderStatus: 'cancelled' }),
+    ]
+    expect(batchPlannable(orders).map((one) => one.workOrderId)).toEqual(['d', 'a'])
+  })
+
+  it('says what a suggested order saves', () => {
+    expect(orderSummary({ changeoverMinutes: 20, givenChangeoverMinutes: 120 }))
+      .toBe('Reordered for fewer changeovers: 20 min instead of 120 min.')
+    expect(orderSummary({ changeoverMinutes: 0, givenChangeoverMinutes: 0 }))
+      .toBe('The ticked order already has the fewest changeovers: 0 min.')
+  })
+
+  it('lets only drafts with a suggestion take their dates', () => {
+    const orders = [order({ workOrderId: 'd' }), order({ workOrderId: 'a', workOrderStatus: 'approved' }), order({ workOrderId: 'p' })]
+    const line = (workOrderId: string, status: string, suggestion: WorkOrderPlanSuggestionDto | null) => ({
+      workOrderId, workOrderNumber: workOrderId, workOrderStatus: status, suggestion, problem: suggestion ? null : 'Set a target quantity first.',
+    })
+    const drafts = batchDrafts([line('a', 'approved', plan()), line('p', 'draft', null), line('d', 'draft', plan()),
+      line('missing', 'draft', plan())], orders)
+    expect(drafts.map((one) => one.order.workOrderId)).toEqual(['d'])
+    expect(drafts[0].plan.plannedStartAt).toBe(local(2030, 1, 7, 9, 0))
+  })
+})
 
 describe('dates', () => {
   it('writes local times for the field and the summary', () => {

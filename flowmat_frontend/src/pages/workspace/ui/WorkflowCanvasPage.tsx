@@ -23,6 +23,7 @@ import { useWorkflowValidationQuery, workflowValidationQueryKey } from '../../..
 import type { PresenceMessage, GraphChangeMessage } from '../../../entities/workflow/api/useWorkflowSync'
 import { Link, useNavigate } from 'react-router-dom'
 import { PALETTE_DRAG_MIME } from './canvasConstants'
+import { EditorPublish } from './EditorPublish'
 import type {
   WorkspaceEditorCommandApi,
   WorkspaceEditorSelectionSnapshot,
@@ -1534,6 +1535,11 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
           if (showValidation) void validationQuery.refetch()
           else setShowValidation(true)
         }}>Check workflow</button>
+        <EditorPublish workflowId={canvas.workflow.workflowId} projectId={canvas.workflow.projectId} editable={canEditAnnotations}
+          onRefused={() => {
+            if (showValidation) void validationQuery.refetch()
+            else setShowValidation(true)
+          }} />
         {showValidation && (
           <div role="status" style={{ marginTop: 8 }}>
             {validationQuery.isPending && <p>Checking workflow...</p>}

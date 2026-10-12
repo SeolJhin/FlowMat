@@ -89,6 +89,11 @@ export function describeCorrectionLine(
     const on = line.equipmentId ? ` on ${equipmentLabel ? equipmentLabel(line.equipmentId) : line.equipmentId}` : ''
     return `Add a setup of ${line.setupMinutes ?? '?'} min${on}`
   }
+  if (line.kind === 'cancel_running_time') return 'Cancel running time'
+  if (line.kind === 'add_running_time') {
+    const on = line.equipmentId ? ` on ${equipmentLabel ? equipmentLabel(line.equipmentId) : line.equipmentId}` : ''
+    return `Add ${line.runningMinutes ?? '?'} min of running time${on}`
+  }
   if (line.kind === 'void_item') {
     const target = runItems.find((item) => item.productionRunItemId === line.targetRunItemId)
     if (!target) return 'Void a recording'

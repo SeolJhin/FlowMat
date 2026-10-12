@@ -1,11 +1,13 @@
 package org.myweb.flowmat.domain.production.application;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
@@ -18,6 +20,8 @@ import org.myweb.flowmat.domain.production.domain.entity.WorkInstructionStep;
 import org.myweb.flowmat.domain.production.repository.WorkInstructionRepository;
 import org.myweb.flowmat.domain.production.repository.WorkInstructionStepRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.quality.application.publicapi.InspectionStandardQuery;
+import org.myweb.flowmat.domain.quality.application.publicapi.InspectionStandardView;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
@@ -42,6 +46,7 @@ public class WorkInstructionService {
     private final InstructionAttachmentService attachments;
     private final WorkInstructionStepRepository stepRepository;
     private final CatalogQuery catalogQuery;
+    private final InspectionStandardQuery standardQuery;
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
 
@@ -111,6 +116,10 @@ public class WorkInstructionService {
         if (request.valueMin() != null && request.valueMax() != null && request.valueMin().compareTo(request.valueMax()) > 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "valueMin must not be above valueMax.");
         }
+        InspectionStandardView standard = followedStandard(instruction, recordsValue, request);
+        if (standard != null && label == null) {
+            label = standardLabel(standard);
+        }
         List<WorkInstructionStep> steps = stepRepository.findAllByInstructionIdOrderByStepNoAsc(instruction.getInstructionId());
         WorkInstructionStep step = new WorkInstructionStep();
         step.setStepId(idGenerator.generate());
@@ -120,11 +129,88 @@ public class WorkInstructionService {
         step.setRequiredYn(Boolean.FALSE.equals(request.required()) ? "N" : "Y");
         step.setRecordsValueYn(recordsValue ? "Y" : "N");
         step.setValueLabel(label);
-        step.setValueMin(request.valueMin());
-        step.setValueMax(request.valueMax());
+        step.setValueMin(standard == null ? request.valueMin() : standard.standardMin());
+        step.setValueMax(standard == null ? request.valueMax() : standard.standardMax());
+        step.setStandardId(standard == null ? null : standard.standardId());
         stepRepository.save(step);
         touch(instruction);
         return response(instruction);
+    }
+
+    /**
+     * The inspection standard a new step follows (W13): an active production or any standard of the instruction's product,
+     * for a step that records a value. Its limits are the step's, so others sent with it are refused, not overwritten.
+     */
+    private InspectionStandardView followedStandard(WorkInstruction instruction, boolean recordsValue, WorkInstructionStepRequest request) {
+        String standardId = ProductionText.trimToNull(request.standardId(), "standardId");
+        if (standardId == null) {
+            return null;
+        }
+        if (!recordsValue) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "A standard needs a step that records a value.");
+        }
+        InspectionStandardView standard = standardQuery.findStandards(List.of(standardId)).get(standardId);
+        if (standard == null || !standard.active() || !instruction.getProjectId().equals(standard.projectId())
+            || !instruction.getItemId().equals(standard.itemId())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "The standard is not an active inspection standard of this product.");
+        }
+        if ("receipt".equals(standard.stage())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "A receipt standard is for incoming LOTs; follow a production one.");
+        }
+        if (!sameLimit(request.valueMin(), standard.standardMin()) || !sameLimit(request.valueMax(), standard.standardMax())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "The standard sets the limits; leave them empty or send the same.");
+        }
+        return standard;
+    }
+
+    /** "Moisture %": the check and its unit, as the value is named when the step does not name it. */
+    private static String standardLabel(InspectionStandardView standard) {
+        String label = standard.unit() == null || standard.unit().isBlank()
+            ? standard.inspectionType() : standard.inspectionType() + " " + standard.unit().trim();
+        return label.length() > 100 ? label.substring(0, 100) : label;
+    }
+
+    /** A limit sent with a standard: none, or the standard's own. */
+    private static boolean sameLimit(BigDecimal sent, BigDecimal standard) {
+        return sent == null || (standard != null && sent.compareTo(standard) == 0);
+    }
+
+    private static boolean equalLimit(BigDecimal one, BigDecimal other) {
+        return one == null ? other == null : other != null && one.compareTo(other) == 0;
+    }
+
+    /** Whether the standard can still be followed: active, and for production (W13). */
+    private static boolean followable(InspectionStandardView standard) {
+        return standard != null && standard.active() && !"receipt".equals(standard.stage());
+    }
+
+    /**
+     * Steps that follow a standard take its current limits (W14). On release a standard that can no longer be followed
+     * stops it; a new revision keeps the old limits for such a step, so its release says so.
+     */
+    private void takeStandardLimits(List<WorkInstructionStep> steps, boolean releasing) {
+        List<String> ids = steps.stream().map(WorkInstructionStep::getStandardId).filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) {
+            return;
+        }
+        Map<String, InspectionStandardView> standards = standardQuery.findStandards(ids);
+        for (WorkInstructionStep step : steps) {
+            if (step.getStandardId() == null) {
+                continue;
+            }
+            InspectionStandardView standard = standards.get(step.getStandardId());
+            if (!followable(standard)) {
+                if (releasing) {
+                    throw new BusinessException(ErrorCode.CONFLICT, "Step " + step.getStepNo() + " follows "
+                        + (standard == null ? "an inspection standard" : "the " + standard.inspectionType() + " standard")
+                        + ", which is no longer an active production standard; remove the step before releasing.");
+                }
+                continue;
+            }
+            step.setValueMin(standard.standardMin());
+            step.setValueMax(standard.standardMax());
+        }
+        stepRepository.saveAll(steps);
     }
 
     /** Removes a draft's step and numbers the rest again from 1. */
@@ -153,9 +239,11 @@ public class WorkInstructionService {
         if (!DRAFT.equals(instruction.getStatus())) {
             throw new BusinessException(ErrorCode.CONFLICT, "Revision " + instruction.getRevisionNo() + " is " + instruction.getStatus() + ".");
         }
-        if (stepRepository.findAllByInstructionIdOrderByStepNoAsc(instruction.getInstructionId()).isEmpty()) {
+        List<WorkInstructionStep> steps = stepRepository.findAllByInstructionIdOrderByStepNoAsc(instruction.getInstructionId());
+        if (steps.isEmpty()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Add at least one step before releasing.");
         }
+        takeStandardLimits(steps, true);
         String actor = projectAccessService.requireCurrentUserId();
         instructionRepository.findFirstByItemIdAndStatusAndDeletedYn(instruction.getItemId(), RELEASED, NOT_DELETED).ifPresent(previous -> {
             previous.setStatus(RETIRED);
@@ -193,6 +281,7 @@ public class WorkInstructionService {
         copy.setCreatedBy(actor);
         instructionRepository.save(copy);
         attachments.copyReferences(source.getInstructionId(), copy.getInstructionId(), actor);
+        List<WorkInstructionStep> copiedSteps = new ArrayList<>();
         for (WorkInstructionStep sourceStep : stepRepository.findAllByInstructionIdOrderByStepNoAsc(source.getInstructionId())) {
             WorkInstructionStep step = new WorkInstructionStep();
             step.setStepId(idGenerator.generate());
@@ -204,8 +293,10 @@ public class WorkInstructionService {
             step.setValueLabel(sourceStep.getValueLabel());
             step.setValueMin(sourceStep.getValueMin());
             step.setValueMax(sourceStep.getValueMax());
-            stepRepository.save(step);
+            step.setStandardId(sourceStep.getStandardId());
+            copiedSteps.add(stepRepository.save(step));
         }
+        takeStandardLimits(copiedSteps, false);
         return response(copy);
     }
 
@@ -235,14 +326,20 @@ public class WorkInstructionService {
                 instructions.stream().map(WorkInstruction::getInstructionId).toList()).stream()
             .collect(Collectors.groupingBy(WorkInstructionStep::getInstructionId));
         Map<String, CatalogItemView> items = catalogQuery.findItems(instructions.stream().map(WorkInstruction::getItemId).distinct().toList());
+        Map<String, InspectionStandardView> standards = standardQuery.findStandards(steps.values().stream().flatMap(List::stream)
+            .map(WorkInstructionStep::getStandardId).filter(Objects::nonNull).distinct().toList());
         return instructions.stream()
             .map(instruction -> {
                 CatalogItemView item = items.get(instruction.getItemId());
                 List<WorkInstructionResponse.Step> stepResponses = steps.getOrDefault(instruction.getInstructionId(), List.of()).stream()
                     .sorted(Comparator.comparing(WorkInstructionStep::getStepNo))
-                    .map(step -> new WorkInstructionResponse.Step(step.getStepId(), step.getStepNo(), step.getStepText(),
-                        "Y".equals(step.getRequiredYn()), "Y".equals(step.getRecordsValueYn()), step.getValueLabel(),
-                        step.getValueMin(), step.getValueMax()))
+                    .map(step -> {
+                        InspectionStandardView standard = standards.get(step.getStandardId());
+                        return new WorkInstructionResponse.Step(step.getStepId(), step.getStepNo(), step.getStepText(),
+                            "Y".equals(step.getRequiredYn()), "Y".equals(step.getRecordsValueYn()), step.getValueLabel(),
+                            step.getValueMin(), step.getValueMax(), step.getStandardId(),
+                            standard == null ? null : standard.inspectionType(), standardStatus(step, standard));
+                    })
                     .toList();
                 return new WorkInstructionResponse(instruction.getInstructionId(), instruction.getProjectId(), instruction.getItemId(),
                     item == null ? null : item.itemCode(), item == null ? null : item.itemName(), instruction.getRevisionNo(),
@@ -251,6 +348,18 @@ public class WorkInstructionService {
                     "Y".equals(instruction.getBlocksFinishYn()));
             })
             .toList();
+    }
+
+    /** current, changed or inactive for a step that follows a standard (W15); null for one that does not. */
+    private static String standardStatus(WorkInstructionStep step, InspectionStandardView standard) {
+        if (step.getStandardId() == null) {
+            return null;
+        }
+        if (!followable(standard)) {
+            return "inactive";
+        }
+        return equalLimit(step.getValueMin(), standard.standardMin()) && equalLimit(step.getValueMax(), standard.standardMax())
+            ? "current" : "changed";
     }
 
     /**

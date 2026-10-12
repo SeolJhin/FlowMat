@@ -3,6 +3,7 @@ package org.myweb.flowmat.domain.quality.domain.entity;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import lombok.Getter;
 import lombok.Setter;
@@ -47,4 +48,7 @@ public class Nonconformity {
     private String verificationNote;
     private String verifiedBy;
     private OffsetDateTime verifiedAt;
+
+    /** The day a closed nonconformity's actions are due to be checked (N13, V70); null when none was set. */
+    private LocalDate verificationDueDate;
 }

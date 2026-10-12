@@ -5,6 +5,9 @@ import {
   EMPTY_NCR_FORM,
   actionPayload,
   actionProgress,
+  addDays,
+  checkDate,
+  checkDueText,
   closeBlockers,
   followUpForm,
   ncrPayload,
@@ -55,6 +58,29 @@ describe('payloads', () => {
     expect(actionPayload({ ...EMPTY_ACTION_FORM, description: 'Swap mould', dueDate: '2026-10-01', ownerId: ' ' }).input).toEqual({
       actionType: 'corrective', description: 'Swap mould', ownerId: null, dueDate: '2026-10-01',
     })
+  })
+})
+
+describe('the day the actions are due to be checked', () => {
+  it('suggests a day after closing, across months and years', () => {
+    expect(addDays('2026-10-11', 30)).toBe('2026-11-10')
+    expect(addDays('2026-12-15', 30)).toBe('2027-01-14')
+    expect(addDays('2028-02-28', 1)).toBe('2028-02-29')
+  })
+
+  it('takes no day, or today and later', () => {
+    expect(checkDate('', '2026-10-11')).toEqual({ day: null, error: null })
+    expect(checkDate('2026-10-11', '2026-10-11')).toEqual({ day: '2026-10-11', error: null })
+    expect(checkDate('2026-10-10', '2026-10-11').error).toBe('The check date is before today.')
+    expect(checkDate('soon', '2026-10-11').error).toBe('The check date is not a date.')
+  })
+
+  it('says when a closed one is due until it is checked', () => {
+    const closed = { status: 'closed' as const, verificationResult: null, verificationDueDate: '2026-11-10', verificationOverdue: false }
+    expect(checkDueText(closed)).toBe('check by 2026-11-10')
+    expect(checkDueText({ ...closed, verificationOverdue: true })).toBe('check overdue (due 2026-11-10)')
+    expect(checkDueText({ ...closed, verificationResult: 'effective' })).toBe('')
+    expect(checkDueText({ ...closed, verificationDueDate: null })).toBe('')
   })
 })
 

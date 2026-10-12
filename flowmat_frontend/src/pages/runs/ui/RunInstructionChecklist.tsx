@@ -4,22 +4,25 @@ import { useRunInstructionMutations, useRunInstructionQuery } from '../../../ent
 import { useNonconformitiesQuery, useNonconformityMutations } from '../../../entities/quality/api/useNonconformities'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import {
-  finishNote, limitText, ncrForValue, outOfLimitsNcrDescription, outOfLimitsNcrTitle, progressText, undoneLine,
+  finishNote, inspectionText, limitText, ncrForValue, personDecides, outOfLimitsNcrDescription, progressText, suggestedNcrTitle, undoneLine,
 } from '../../inventory/model/workInstructionModel'
 
 /**
  * The run's work instruction checklist (docs/domain/work-instruction.md): the released steps of the run's product, each
  * confirmed by an operator (with its value where the step records one). Hidden when the product has no instruction.
- * A value outside its step's limits offers a nonconformity about the run (R8), or names the one already raised.
+ * A value outside its step's limits, or an inspection the confirmation recorded that failed, offers a nonconformity about
+ * the run (R8), or names the one already raised.
  */
 export function RunInstructionChecklist({ projectId, runId }: { projectId: string; runId: string }) {
   const query = useRunInstructionQuery(runId)
   const { check, uncheck } = useRunInstructionMutations(runId)
   const [values, setValues] = useState<Record<string, string>>({})
+  // pass or fail per step that follows a standard without limits (R10).
+  const [results, setResults] = useState<Record<string, 'pass' | 'fail' | ''>>({})
   const checklist = query.data
-  // The project's nonconformities are only fetched once a value lies outside its limits.
-  const outside = checklist?.checks.some((one) => one.outOfLimits) ?? false
-  const ncrsQuery = useNonconformitiesQuery(outside ? projectId : '', null)
+  // The project's nonconformities are only fetched once a value lies outside its limits or a recorded inspection failed.
+  const wrong = checklist?.checks.some((one) => one.outOfLimits || one.inspectionResult === 'fail') ?? false
+  const ncrsQuery = useNonconformitiesQuery(wrong ? projectId : '', null)
   const { create: raiseNcr } = useNonconformityMutations(projectId)
   if (!checklist?.instruction) return null
   const instruction = checklist.instruction
@@ -46,8 +49,12 @@ export function RunInstructionChecklist({ projectId, runId }: { projectId: strin
                 <span style={{ marginLeft: 6, color: '#047857' }}>
                   ✓ {confirmed.value && `${step.valueLabel ?? 'value'} ${confirmed.value} `}
                   {confirmed.outOfLimits && <span style={{ color: '#b91c1c', fontWeight: 600 }}>(outside {limitText(step)}) </span>}
-                  {confirmed.outOfLimits && confirmed.value && (() => {
-                    const title = outOfLimitsNcrTitle(step, confirmed.value)
+                  {inspectionText(confirmed) && (
+                    <span style={{ color: confirmed.inspectionResult === 'fail' ? '#b91c1c' : undefined }}>{inspectionText(confirmed)} </span>
+                  )}
+                  {(() => {
+                    const title = suggestedNcrTitle(step, confirmed)
+                    if (!title) return null
                     const raised = ncrForValue(ncrsQuery.data ?? [], runId, title)
                     return raised ? (
                       <span style={{ color: '#b91c1c' }}>{raised.ncrNo} </span>
@@ -73,8 +80,18 @@ export function RunInstructionChecklist({ projectId, runId }: { projectId: strin
                       style={{ width: 90, marginRight: 4 }} onChange={(event) => setValues({ ...values, [step.stepId]: event.target.value })} />
                   )}
                   {limitText(step) && <span className="inspector-hint" style={{ marginRight: 4 }}>{limitText(step)}</span>}
-                  <button type="button" style={{ fontSize: 11 }} disabled={check.isPending}
-                    onClick={() => check.mutate({ stepId: step.stepId, value: values[step.stepId]?.trim() || null, note: null })}>Done</button>
+                  {personDecides(step) && (
+                    <select aria-label={`Result for step ${step.stepNo}`} value={results[step.stepId] ?? ''} style={{ marginRight: 4 }}
+                      onChange={(event) => setResults({ ...results, [step.stepId]: event.target.value as 'pass' | 'fail' | '' })}>
+                      <option value="">{step.standardName ?? 'Result'}…</option>
+                      <option value="pass">Pass</option>
+                      <option value="fail">Fail</option>
+                    </select>
+                  )}
+                  <button type="button" style={{ fontSize: 11 }} disabled={check.isPending || (personDecides(step) && !results[step.stepId])}
+                    onClick={() => check.mutate({
+                      stepId: step.stepId, value: values[step.stepId]?.trim() || null, note: null, result: results[step.stepId] || null,
+                    })}>Done</button>
                 </span>
               )}
             </li>

@@ -64,11 +64,17 @@ class AllocatedStockTransferIntegrationTest extends IntegrationTestSupport {
     }
     @Test
     void allocationSaveFailureRollsBackBothTransferLegs() throws Exception {
-        var fixture=fixture();jdbc.execute("alter table stock_allocation add constraint test_allocated_move_rollback check (quantity<>3)");
+        // Another order may already have a split of three; failure injection belongs only to this fixture.
+        var unrelated=fixture();
+        JsonNode unrelatedMove=data(call(post("/allocated-stock-transfers"),input(unrelated,3)));
+        var fixture=fixture();jdbc.execute("alter table stock_allocation add constraint test_allocated_move_rollback check (work_order_id <> '"
+            + fixture.order().replace("'", "''") + "' or quantity<>3)");
         try {
             call(post("/allocated-stock-transfers"),input(fixture,3)).andExpect(status().isConflict());
             assertStock(fixture.stock(),10,6);
             assertEquals(0,jdbc.queryForObject("select count(*) from inventory where item_id=? and location='PICK-STAGING'",Integer.class,fixture.item()));
+            assertStock(unrelated.stock(),7,3);
+            assertStock(unrelatedMove.path("in").path("inventoryId").asText(),3,3);
         } finally {jdbc.execute("alter table stock_allocation drop constraint test_allocated_move_rollback");}
     }
     @Test

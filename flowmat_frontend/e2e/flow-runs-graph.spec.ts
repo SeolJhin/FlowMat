@@ -127,6 +127,7 @@ test('graph Flow Run shows the exact source step and connection policy', async (
   await page.locator('input').nth(0).fill('demo-owner')
   await page.locator('input[type="password"]').fill('demo1234')
   await page.getByRole('button', { name: 'Log in' }).click()
+  await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible()
   await page.goto('/projects/prj-graph/runs?view=flow-runs')
 
   await page.getByRole('combobox', { name: 'Execution mode' }).selectOption('graph')

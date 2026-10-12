@@ -3,6 +3,7 @@ package org.myweb.flowmat;
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -15,6 +16,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -134,23 +136,51 @@ class RunInputReservationIntegrationTest extends IntegrationTestSupport {
         }
     }
 
-    @Test
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     @Timeout(45)
-    void anInputSplitWaitsForTheAllocationLockBeforeLockingStock() throws Exception {
+    void anInputSplitWaitsForTheAllocationLockBeforeLockingStock(boolean concurrentSweep) throws Exception {
         Fixture fixture = fixture();
         String runId = run(fixture, fixture.orderId(), "actual");
-        ExecutorService pool = Executors.newSingleThreadExecutor();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        Future<?>[] sweep = new Future<?>[1];
         try {
             Future<Integer> pending = new TransactionTemplate(transactionManager).execute(transaction -> {
                 jdbcTemplate.queryForObject("select 1 from pg_advisory_xact_lock(hashtext(?))", Integer.class, "stock-allocation|" + DEMO_PROJECT);
                 Future<Integer> request = pool.submit(() -> fefo(fixture, runId, 8).andReturn().getResponse().getStatus());
                 DatabaseContention.awaitWaitingOrDone(jdbcTemplate, request, jdbcTemplate.queryForObject("select pg_backend_pid()", Integer.class));
                 assertFalse(request.isDone(), "FEFO must wait for the allocation transaction before taking stock.");
+                if (concurrentSweep) {
+                    CountDownLatch rowLocked = new CountDownLatch(1);
+                    sweep[0] = pool.submit(() -> new TransactionTemplate(transactionManager).execute(status -> {
+                        jdbcTemplate.queryForObject("select inventory_id from inventory where inventory_id = ? for update",
+                            String.class, fixture.soonStock());
+                        int sweepPid = jdbcTemplate.queryForObject("select pg_backend_pid()", Integer.class);
+                        rowLocked.countDown();
+                        // Like the scheduled sweep, a separate transaction may briefly hold this row.
+                        // Release once the allocation holder actually waits; no fixed sleep is needed.
+                        DatabaseContention.awaitWaitingOrDone(jdbcTemplate, request, sweepPid);
+                        return null;
+                    }));
+                    try {
+                        assertTrue(rowLocked.await(10, TimeUnit.SECONDS), "The independent stock check did not lock its row.");
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(exception);
+                    }
+                }
                 // The lock holder can still plan against stock. Taking stock before the project lock would deadlock it.
-                jdbcTemplate.queryForObject("select inventory_id from inventory where inventory_id = ? for update nowait", String.class, fixture.soonStock());
+                // A scheduled stock alert check may briefly own this row too. Bound the wait instead of
+                // mistaking that independent lock for the request taking stock before allocations.
+                // Reversed allocation/stock order still creates a deadlock and fails this assertion.
+                jdbcTemplate.execute("set local lock_timeout = '5s'");
+                jdbcTemplate.queryForObject("select inventory_id from inventory where inventory_id = ? for update", String.class, fixture.soonStock());
                 return request;
             });
             assertEquals(200, pending.get(15, TimeUnit.SECONDS));
+            if (sweep[0] != null) {
+                sweep[0].get(15, TimeUnit.SECONDS);
+            }
             stock(fixture.soonStock(), 0, 0);
             stock(fixture.lateStock(), 2, 2);
             otherReservation(fixture);

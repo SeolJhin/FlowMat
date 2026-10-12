@@ -78,6 +78,7 @@ public class WarehouseTaskService {
     private final ProjectAccessService projectAccessService;
     private final ProjectMemberQuery projectMemberQuery;
     private final IdGenerator idGenerator;
+    private final org.myweb.flowmat.domain.notification.application.publicapi.NotificationCommand notifications;
 
     /** Newest first; one status, one work order and one assignee only when asked. */
     public List<WarehouseTaskResponse> list(String projectId, String status, String workOrderId, String assignedTo) {
@@ -309,8 +310,20 @@ public class WarehouseTaskService {
                 throw new BusinessException(ErrorCode.BAD_REQUEST, userId + " is not a member of this project.");
             }
         }
+        String before = task.getAssignedTo();
         task.setAssignedTo(userId);
-        return responses(List.of(taskRepository.saveAndFlush(task))).get(0);
+        WarehouseTask saved = taskRepository.saveAndFlush(task);
+        if (userId != null && !userId.equals(before)) {
+            // The new assignee hears of it (docs/domain/notification.md NT2), unless they took it themselves.
+            String kind = task.getTaskType() == null || task.getTaskType().isEmpty() ? "Warehouse"
+                : task.getTaskType().substring(0, 1).toUpperCase(java.util.Locale.ROOT) + task.getTaskType().substring(1);
+            notifications.notifyAssignee(userId, projectAccessService.requireCurrentUserId(), task.getProjectId(), "warehouse_task",
+                kind + " task " + task.getTaskNo() + " is yours",
+                "From " + (task.getFromLocation() == null ? "-" : task.getFromLocation()) + " to "
+                    + (task.getToLocation() == null ? "-" : task.getToLocation()) + ".",
+                "warehouse_task", task.getTaskId());
+        }
+        return responses(List.of(saved)).get(0);
     }
 
     @Transactional

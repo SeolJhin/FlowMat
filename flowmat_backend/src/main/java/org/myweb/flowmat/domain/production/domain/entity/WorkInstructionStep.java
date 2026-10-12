@@ -37,4 +37,7 @@ public class WorkInstructionStep {
     /** Limits for the recorded value (R7); a value outside them is recorded and marked. */
     private java.math.BigDecimal valueMin;
     private java.math.BigDecimal valueMax;
+
+    /** The inspection standard the limits come from (W13, V71); null when they were typed. */
+    private String standardId;
 }

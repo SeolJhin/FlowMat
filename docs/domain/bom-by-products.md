@@ -98,7 +98,9 @@ BOM 줄마다 `lineType`:
 | WD5 | `GET /production-runs/{id}/waste-disposal-cost`: 취소되지 않은 산출 기록 중 폐기물 품목을 품목 단위로 환산해 × 폐기 처리비(4자리). 진행 중은 현재, 끝난 실행은 원래 마감 시각 기준. 미상·환산 불가 줄은 금액 null, `costComplete=false`, 알려진 합계만. **재료비·부산물 가치에 더하거나 빼지 않는다** | §4: 별도 표시 |
 | WD6 | 화면: Items 상세 **Disposal cost**(버전 편집·409 뒤 입력 보존·명시적 Reload·미확인 저장 안내), 실행 상세 **Waste disposal cost**(기준 표시·미상 표시·조회 재시도) | |
 | WD7 | `GET /items/{id}/disposal-cost/history`(Project read): 최근 50개 변경, 새것부터(이전/새 값·작성자·UTC 시각). Items 상세에 최근 5개(`not set → 2.5`, `2.5 → free`). 저장하면 다시 읽는다(2026-10-10 2ck) | 기록만 되던 이력을 볼 수 있게 |
+| WD8 | `GET /work-orders/{id}/waste-disposal-estimate`(Project read, 2026-10-10 2cw): 작업지시 BOM의 `waste` 줄을 **아직 만들 수량**(목표 − 끝난 물리 실행 산출)으로 펼치고(팬텀은 계획 시작일 revision, P3) 품목 단위 수량 × **현재** 폐기 처리비. 0은 무료, 미상·환산 불가는 금액 null·`costComplete=false`·알려진 합계만. BOM·수량이 없거나 BOM을 쓸 수 없으면 빈 줄과 `problem`. 저장하지 않고 재료비에 더하지 않는다 | 계획 단계에서 처분 비용을 미리 본다 |
+| WD9 | 화면: 작업지시 **Readiness** 펼침 아래 **Waste disposal (estimate)**(폐기물이 있을 때만): 줄별 수량·금액, 합계 또는 알려진 합계, 미상 안내 | |
 
 검증(2026-10-10, 격리 복사본): `ItemDisposalCostIntegrationTest` 2건(버전·재송신·409·0 알려진 값·해제·이력 3행·단가 불변·입력 400·viewer/외부인 권한, 진행 중 현재 기준 20·끝난 뒤 이력 기준 15·무료 폐기 0·미상 줄·취소 제외·g→kg 환산·재료비와 부산물 가치 불변·BOM 없는 실행·외부인 403), 품목·부산물·실행 원가·경계 묶음 79건 실패 0. 프런트 타입·lint·모델 단위 2, 모의 E2E 2건 포함 기본 모의 E2E 122 통과·16 의도적 제외.
 
-남은 것: 작업지시 계획 단계의 폐기 처리비 추정, 폐기물의 실제 처분(외부 업체·처분 기록)과 연결, 배출량 모델(§4, 보류).
+~~작업지시 계획 단계의 폐기 처리비 추정~~ → WD8–WD9(2cw: `ItemDisposalCostIntegrationTest` 1 추가, 모의 E2E `sub-assembly-order.spec.ts` 확장). 남은 것: 폐기물의 실제 처분(외부 업체·처분 기록)과 연결, 배출량 모델(§4, 보류).

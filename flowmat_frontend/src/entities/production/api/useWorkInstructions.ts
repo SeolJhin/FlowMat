@@ -14,6 +14,12 @@ export interface WorkInstructionStepDto {
   /** Limits for the value (docs/domain/work-instruction.md R7); null when there are none. */
   valueMin: number | null
   valueMax: number | null
+  /** The inspection standard the limits come from (W13); null when they were typed. */
+  standardId?: string | null
+  /** The standard's check, such as "Moisture". */
+  standardName?: string | null
+  /** current; changed: the standard's limits changed since; inactive: it can no longer be followed (W15). */
+  standardStatus?: 'current' | 'changed' | 'inactive' | null
 }
 
 /** One revision of a product's work instruction (docs/domain/work-instruction.md). */
@@ -42,8 +48,20 @@ export interface RunInstructionDto {
   /** The run can still be confirmed (pending or running). */
   open: boolean
   instruction: WorkInstructionDto | null
-  /** {@code outOfLimits}: the value lies outside the step's limits; it is recorded all the same. */
-  checks: { stepId: string; value: string | null; note: string | null; checkedBy: string; checkedAt: string; outOfLimits: boolean }[]
+  /**
+   * {@code outOfLimits}: the value lies outside the step's limits; it is recorded all the same. {@code inspectionResult}:
+   * the quality inspection a step that follows a standard also recorded (R9), pass or fail.
+   */
+  checks: {
+    stepId: string
+    value: string | null
+    note: string | null
+    checkedBy: string
+    checkedAt: string
+    outOfLimits: boolean
+    inspectionId?: string | null
+    inspectionResult?: 'pass' | 'fail' | null
+  }[]
   requiredSteps: number
   requiredDone: number
   complete: boolean
@@ -74,6 +92,8 @@ export interface WorkInstructionStepInput {
   valueLabel: string | null
   valueMin?: number
   valueMax?: number
+  /** Follow this inspection standard's limits instead of typing them (W13). */
+  standardId?: string
 }
 
 const listKey = (projectId: string) => ['work-instructions', projectId]
@@ -142,9 +162,21 @@ export function useRunInstructionMutations(runId: string) {
   const path = (stepId: string) => `/production-runs/${encodeURIComponent(runId)}/instruction/steps/${encodeURIComponent(stepId)}/check`
   return {
     check: useMutation({
-      mutationFn: async ({ stepId, value, note }: { stepId: string; value: string | null; note: string | null }) =>
-        unwrapApiResponse(await httpClient.post<ApiEnvelope<RunInstructionDto>>(path(stepId), { value, note })),
-      onSuccess,
+      mutationFn: async ({ stepId, value, note, result }: {
+        stepId: string
+        value: string | null
+        note: string | null
+        /** pass or fail for a step that follows a standard without limits (R10). */
+        result?: 'pass' | 'fail' | null
+      }) => unwrapApiResponse(await httpClient.post<ApiEnvelope<RunInstructionDto>>(path(stepId), { value, note, ...(result ? { result } : {}) })),
+      onSuccess: (checklist: RunInstructionDto) => {
+        onSuccess(checklist)
+        // A step that follows a standard records an inspection too (R9): the run's quality checklist and records change.
+        if (checklist.checks.some((one) => one.inspectionId)) {
+          void queryClient.invalidateQueries({ queryKey: ['quality-inspections'] })
+          void queryClient.invalidateQueries({ queryKey: ['quality-summary'] })
+        }
+      },
     }),
     uncheck: useMutation({
       mutationFn: async (stepId: string) => unwrapApiResponse(await httpClient.delete<ApiEnvelope<RunInstructionDto>>(path(stepId))),

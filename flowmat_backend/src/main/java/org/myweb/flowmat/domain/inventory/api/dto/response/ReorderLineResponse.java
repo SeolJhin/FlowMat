@@ -14,6 +14,8 @@ public record ReorderLineResponse(
     BigDecimal safetyStockQty,
     BigDecimal availableQuantity,
     BigDecimal shortageQuantity,
-    Integer leadTimeDays
+    Integer leadTimeDays,
+    /** The place the line is for (PS4), as the location list spells it; null on the item-level list. */
+    String location
 ) {
 }

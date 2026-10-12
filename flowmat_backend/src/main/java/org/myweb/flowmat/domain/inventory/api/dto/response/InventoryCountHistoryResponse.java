@@ -12,6 +12,9 @@ import java.util.List;
  * @param decrease what the count took away, as a positive number
  * @param valueChange the differences at today's unit costs, signed
  * @param valueComplete false when a changed record's item has no unit cost; the value leaves it out
+ * @param valueAtCount the differences at the unit costs of the count's own time, from the price history (CH1)
+ * @param valueAtCountComplete false when a changed record's item had no known unit cost then
+ * @param valueAtCountEstimated true when a price in it was not covered by the history (before its first recorded change)
  */
 public record InventoryCountHistoryResponse(
     String countId,
@@ -23,6 +26,9 @@ public record InventoryCountHistoryResponse(
     BigDecimal decrease,
     BigDecimal valueChange,
     boolean valueComplete,
+    BigDecimal valueAtCount,
+    boolean valueAtCountComplete,
+    boolean valueAtCountEstimated,
     List<Line> lines
 ) {
 

@@ -1,6 +1,7 @@
 package org.myweb.flowmat;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -10,20 +11,25 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.myweb.flowmat.batch.StockAlertBatchService;
 import org.myweb.flowmat.domain.catalog.domain.entity.Item;
 import org.myweb.flowmat.domain.catalog.repository.ItemRepository;
 import org.myweb.flowmat.domain.inventory.domain.entity.Inventory;
 import org.myweb.flowmat.domain.inventory.repository.InventoryRepository;
+import org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery;
 import org.myweb.flowmat.global.security.JwtProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -33,11 +39,20 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 class StockAlertIntegrationTest extends IntegrationTestSupport {
 
     @Autowired private MockMvc mockMvc;
+    @Autowired private ProjectCalendarQuery calendar;
+    @MockitoBean private Clock projectClock;
+
     @Autowired private JwtProvider jwtProvider;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private ItemRepository itemRepository;
     @Autowired private InventoryRepository inventoryRepository;
     @Autowired private StockAlertBatchService stockAlertBatchService;
+
+    @BeforeEach
+    void fixProjectClock() {
+        // Seoul is already on the next day while UTC is still on October 8.
+        when(projectClock.instant()).thenReturn(Instant.parse("2026-10-08T15:30:00Z"));
+    }
 
     @Test
     void anAlertOpensFollowsTheStockAndClosesByItself() throws Exception {
@@ -113,9 +128,9 @@ class StockAlertIntegrationTest extends IntegrationTestSupport {
     @Test
     void stockOfALotNearOrPastItsExpiryDateRaisesAnExpiryAlert() throws Exception {
         String item = item("Y");
-        String soon = lotStock(item, LocalDate.now().plusDays(3), "5");
-        String past = lotStock(item, LocalDate.now().minusDays(1), "4");
-        String later = lotStock(item, LocalDate.now().plusDays(30), "5");
+        String soon = lotStock(item, calendar.today(DEMO_PROJECT).plusDays(3), "5");
+        String past = lotStock(item, calendar.today(DEMO_PROJECT).minusDays(1), "4");
+        String later = lotStock(item, calendar.today(DEMO_PROJECT).plusDays(30), "5");
 
         List<JsonNode> soonAlerts = alertsOf(soon, true);
         assertThat(soonAlerts).extracting(a -> a.path("alertType").asText()).containsExactly("expiry");
@@ -126,7 +141,7 @@ class StockAlertIntegrationTest extends IntegrationTestSupport {
         List<JsonNode> pastAlerts = alertsOf(past, true);
         assertThat(pastAlerts).extracting(a -> a.path("severity").asText()).containsExactly("critical");
         assertThat(pastAlerts.get(0).path("actualValue").asInt()).isEqualTo(-1);
-        assertThat(pastAlerts.get(0).path("message").asText()).contains("expired on " + LocalDate.now().minusDays(1));
+        assertThat(pastAlerts.get(0).path("message").asText()).contains("expired on " + calendar.today(DEMO_PROJECT).minusDays(1));
         assertThat(alertsOf(later, true)).isEmpty();
 
         // Scrapping the expired stock leaves nothing to warn about.
@@ -155,7 +170,7 @@ class StockAlertIntegrationTest extends IntegrationTestSupport {
         // A LOT item whose only stock has expired has nothing usable.
         String milk = item("Y");
         setSafety(milk, "10");
-        lotStock(milk, LocalDate.now().minusDays(1), "30");
+        lotStock(milk, calendar.today(DEMO_PROJECT).minusDays(1), "30");
 
         // Enough stock: not listed.
         String sugar = item();

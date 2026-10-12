@@ -201,6 +201,7 @@ S6 이유: 승인된 작업지시의 할당·준비 점검·자재 소요는 그
 | M4 | **교체 도우미(2026-10-10, §2 2cu):** owner가 승인할 때 `endEarlier: true`(명시적 선택, 기본 없음)를 주면, 같은 품목의 겹치는 approved revision의 끝을 이 revision 시작일의 전날로 바꾸고 같은 트랜잭션에서 승인한다. 주지 않으면 M2 그대로 409 | 기간 두 번과 승인을 한 번에. §5의 "명시적 사용자 동작"을 지킨다 |
 | M5 | 끝낼 수 있는 것: 이 revision에 시작일 X가 있고, 겹치는 approved revision이 X보다 먼저 시작하며(열린 시작 포함) 이 revision에 끝이 있으면 그 안에서 끝나는 경우만. 아니면 아무것도 바꾸지 않고 409(`has no start day` / `cannot be ended before X`). 바꾼 기간은 기간 이력에 `Ended by approving vN, which starts X.`로 남는다. 승인 lock(프로젝트 → 품목 → 헤더) 안에서 끝낼 revision의 행도 잠근다 | 전부 아니면 없음, 이력 유지 |
 | M6 | 화면: 승인 대기 revision의 겹침 경고 아래, M5로 끝낼 수 있을 때만 **End v1 on 2030-01-31 when approving** 체크박스(기본 꺼짐). 켜고 Approve하면 `endEarlier`를 보낸다 | 끝나는 날을 미리 보이고 선택하게 |
+| M7 | **날짜를 받는 보기(2026-10-10, §2 2cv):** 다단계 전개(`GET /boms/{id}/explosion`), 반제품 원가 누적(`GET /boms/cost-rollup`), 다단계 역전개(`GET /boms/where-used/all-levels`)는 선택 `on`(YYYY-MM-DD, 프로젝트 달력 날)을 받아 그날 유효한 revision으로 계산하고 응답 `asOf`로 쓴 날을 돌려준다. 없으면 M3대로 프로젝트 오늘. 잘못된 날짜는 400. 전개는 요청한 revision 자신은 그대로, 아래 단계와 팬텀을 그날 기준으로 푼다. 화면의 세 보기에 **As of** 날짜 입력(빈칸 = 프로젝트 오늘), 날짜를 고른 원가 누적에서는 **Use**(품목 단가 쓰기)를 막는다 | 작업지시 날짜·미래 교체 시점의 자재·원가를 미리 본다. 단가는 오늘 기준만 쓴다 |
 
 교체 흐름(예: 2월 1일부터 v1 → v2): editor가 v2 초안의 Effective periods에 시작일 `2030-02-01`을 넣고 제출 → owner가 v1의 끝을 `2030-01-31`로 바꾼 뒤 v2를 승인한다. 승인 대기 revision의 기간은 바꿀 수 없으므로(E2), 시작일 없이 제출된 revision은 반려 → 초안에서 기간 설정 → 재제출한다. 바로 바꾸려면 v1을 retire하고 v2를 승인한다(그 사이 approved가 없는 순간이 생긴다). 한 번에(2cu): v2에 시작일이 있으면 승인 대기 상세의 **End v1 on 2030-01-31 when approving**을 켜고 Approve — v1의 끝과 v2 승인이 한 트랜잭션(M4–M6).
 
@@ -208,7 +209,7 @@ S6 이유: 승인된 작업지시의 할당·준비 점검·자재 소요는 그
 
 검증(2026-10-10, 격리 복사본): `BomMultipleApprovalIntegrationTest` 2건(겹침 409·v1 유지·기간 조정 뒤 공존·날짜 경계 선택, 오늘 revision으로 전개·과거 revision을 거친 순환 거절), 기존 교체 흐름을 쓰던 `BomIntegrationTest`·`BomWhereUsedIntegrationTest`는 v1을 명시적으로 retire하도록 고침. 전체 백엔드 1,205건 중 그 두 기존 테스트만 실패 → 고친 뒤 BOM·자재·경계 68건 실패 0. 프런트 타입·lint·단위 290, 모의 BOM E2E 26.
 
-남은 것: 작업지시 날짜를 받는 트리/원가(지금은 오늘 기준, MRP의 반제품 전개와 팬텀은 작업지시 계획일), ~~교체를 한 번에 하는 화면 도우미~~ → M4–M6(2cu). ~~팬텀~~ → 아래 2ci·2cn·2cr·2cs. ~~화면 기본 채우기의 브라우저 오늘~~ → 2ct(`bomModel.zoneDay`: 프로젝트 시간대의 오늘, `bomModel.test.ts` 경계 2건).
+~~작업지시 날짜를 받는 트리/원가~~ → M7(2cv, `on`), MRP의 반제품 전개와 팬텀은 작업지시 계획일. ~~교체를 한 번에 하는 화면 도우미~~ → M4–M6(2cu). ~~팬텀~~ → 아래 2ci·2cn·2cr·2cs. ~~화면 기본 채우기의 브라우저 오늘~~ → 2ct(`bomModel.zoneDay`: 프로젝트 시간대의 오늘, `bomModel.test.ts` 경계 2건).
 
 ## 팬텀 반제품 설계 제안 (2026-10-10, 리드 — 구현 전)
 

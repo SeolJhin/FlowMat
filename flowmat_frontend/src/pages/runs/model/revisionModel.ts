@@ -18,6 +18,13 @@ export function revisionLine(revision: WorkflowRevisionDto): string {
   return `${published} · retired${by}${revision.retiredAt ? ` ${stamp(revision.retiredAt)}` : ''}`
 }
 
+/** The newest revision new runs can start from; the server lists the newest number first. */
+export function latestPublished(revisions: WorkflowRevisionDto[]): WorkflowRevisionDto | null {
+  return revisions
+    .filter((revision) => revision.status === 'published')
+    .reduce<WorkflowRevisionDto | null>((newest, revision) => (newest && newest.revisionNo > revision.revisionNo ? newest : revision), null)
+}
+
 /** "2 published, 1 retired". */
 export function revisionCounts(revisions: WorkflowRevisionDto[]): string {
   const published = revisions.filter((revision) => revision.status === 'published').length

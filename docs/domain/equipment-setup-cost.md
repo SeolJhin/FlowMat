@@ -51,7 +51,38 @@
 
 검증(2026-10-10, 격리 복사본): `RunSetupCostIntegrationTest` 2건(작업지시 설비 기본값, 30/h 45분 22.5 → 원가 60으로 바뀐 뒤 15분 15·이전 행 유지, 같은 키 재송신·다른 내용 409, 원가 없는 설비 known subtotal, 재료비 불변, 취소 사유·합계 제외, viewer 읽기·쓰기 403·외부인 403, 마감 뒤 거절, 입력 검증·없는 실행 404), 설비·실행 원가·경계 테스트 묶음 60건 실패 0. 프런트 타입·lint, 모의 E2E `run-setup-cost.spec.ts`(503 뒤 같은 requestId 재시도, 취소) 포함 기본 모의 E2E 120 통과·16 의도적 제외.
 
-남은 것: 작업지시별 계획 추정과 실제의 비교 화면, 설비 사용 시간(가동)의 실제 원가, 폐기 처리비(Waste Disposal Cost) 별도 설계.
+~~작업지시별 계획 추정과 실제의 비교 화면~~ → AS11–AS12(2cy). ~~폐기 처리비 별도 설계~~ → [부산물](bom-by-products.md) WD1–WD9. ~~설비 사용 시간(가동)의 실제 원가~~ → 아래 ER1–ER9(2dk V75, 2dl).
+
+## 실행 설비 가동 시간 (2026-10-12, 리드, §2 2dk)
+
+상태: **구현 — 로컬 격리 검증만.** 사용자 결정(2026-10-12): 가동 시간은 **기록**하고 실행 시간으로 미리 채우며, 비용은 setup처럼 **재료비와 따로** 보인다. 새 마이그레이션 **V75** `production_run_equipment_time`(개발 DB 미적용). 실제 setup(AS1–AS6)과 같은 모양이다.
+
+| # | 규칙 | 오류 |
+|---|---|---|
+| ER1 | 저장: 실행 × 설비의 가동 분(1–10 080, 7일), 기록 순간 설비 시간당 원가·버전, 금액(분 × 원가 / 60, 소수 4자리 HALF_UP, 원가 미상이면 원가·금액 null), 실행 안에서 유일한 `requestId`, 메모 500자, 취소 표시(사람·시각·사유). 행은 지우지 않는다 | |
+| ER2 | `POST /production-runs/{id}/equipment-time` `{requestId, equipmentId?, runningMinutes, note?}`(Project write, 열린 실행만, 실행 행 잠금). 설비를 비우면 작업지시 설비. 같은 작성자·같은 내용 재송신은 지금 상태, 다른 내용은 409. 원가는 기록 순간 값으로 고정(AS2와 같음) | 400 분 범위·설비 없음·끝난 실행 `already finished` / 409 `requestId already belongs to different running time.` / 400 형식 `requestId must be a UUID and runningMinutes a whole number.` |
+| ER3 | `POST …/equipment-time/{id}/cancel` `{reason}`: 열린 실행에서만, 사유 필수, 다시 취소하면 그대로 | 400 `Give a reason when cancelling running time.` |
+| ER4 | `GET …/equipment-time`(Project read): 취소되지 않은 분·알려진 금액 합계, `costComplete`, `defaultEquipmentId`, 모든 행, **`suggestedMinutes`** = 실행 시작(`created_at`)부터 마감(열린 동안은 지금)까지의 분에서 셈에 드는 setup 분과 이미 기록한 가동 분을 뺀 값(같은 분에 setup과 가동을 두 번 매기지 않게), 남은 것이 없으면 null, 최대 10 080 | |
+| ER5 | 재료비(`/cost`)·단위 원가에 더하지 않는다(setup과 같은 원칙, DECISIONS §4) | |
+| ER6 | 화면: 실행 상세 **Equipment time (actual)**(setup 패널 아래): 설비(기본 작업지시 설비)·분(제안값으로 채움, 안내 `Suggested from the run's time so far, less recorded setups and running time.`)·메모, **Record running time**, 응답 유실 뒤 같은 입력은 같은 requestId로 **Retry running time**, 행마다 **Cancel time**(사유). 합계 `100 min · Running cost: 50`, 원가 없는 설비는 `Known running cost`. 끝난 실행은 기록하지 않고 보정을 요청한다(ER12) | |
+| ER7 | 범위 밖: ~~끝난 실행의 가동 시간 보정(AS7 같은 보정 줄)~~ → ER10–ER12(2dm V76), 가동 원가를 단위 원가에 넣는 것 | |
+| ER8 | `GET /work-orders/{id}/running-comparison`(Project read, 2dl): **계획**은 목표 수량 ÷ 설비 시간당 산출(`capacityPerHour`) × 60분(올림, 작업지시 계획 제안과 같은 셈) × 설비의 **현재** 원가, **실제**는 그 작업지시의 물리 실행들이 기록한 가동 분·금액 합(기록 당시 원가, ER2). 설비·산출·목표가 없으면 계획 null, 원가 미상은 금액 null·`actualCostComplete=false`. 재료비에 더하지 않는다 | |
+| ER9 | 화면: 작업지시 **Readiness** 펼침의 **Running time**(setup 비교 아래): `Planned: 60 min at 10/h · 30 at today's rate`, `Actual: 50 min · 25 over 1 run`, 차이(`10 min less than planned`). 계획·실제가 모두 없으면 숨김 | |
+
+검증(2026-10-12, 격리 복사본): `RunEquipmentTimeIntegrationTest` — 원가 30 설비·작업지시·실행, 시작을 2시간 앞당기고 setup 20분 → 제안 100 → 90분 기록(원가 30·금액 45, 제안 10) → 같은 키 재송신 1행·다른 내용 409 → 원가 60으로 바꾼 뒤 10분은 10, 첫 행 45 유지, 제안 없음 → 0분·10 081분·UUID 아닌 키 400 → 사유 없는 취소 400, 취소 뒤 합계 90분·45 → 재료비 0 그대로, 외부인 403, 마감 뒤 기록 400. 둘째(2dl): 산출 10/h·원가 30 설비, 목표 5 → 계획 30분·15, 실행에서 40분 기록 → 실제 1실행·40분·20, 설비 없는 작업지시는 계획 null, 외부인 403. setup·아키텍처·마이그레이션과 함께 13건 실패 0(2dk 시점), 전체 백엔드 1,294건 중 실패 6(모두 오류 담당의 새 RED FactsProxySerializationIntegrationTest, 이 작업과 무관), 2dl 뒤 가동·setup·아키텍처 6건 실패 0. 모의 E2E `e2e/run-equipment-time.spec.ts`(제안 100과 안내, 기본 설비, 기록 본문, 행 `30/h`, 합계 `100 min · Running cost: 50`, 제안이 없어지면 빈 칸), `e2e/sub-assembly-order.spec.ts` 확장(Running time 계획·실제·차이).
+
+## 끝난 실행의 가동 시간 보정 (2026-10-12, 리드, §2 2dm)
+
+상태: **구현 — 로컬 격리 검증만.** 사용자 결정 "가동 원가는 setup처럼 따로"(2026-10-12)를 끝난 실행까지 잇는다. 새 마이그레이션 **V76**(가동 행 원가 기준·보정 줄 종류, 개발 DB 미적용). 아래 setup 보정(AS7–AS10)과 같은 모양이다.
+
+| # | 규칙 | 오류 |
+|---|---|---|
+| ER10 | [완료 실행 보정](production-run-correction.md) 줄에 `cancel_running_time`(`targetRunEquipmentTimeId`)과 `add_running_time`(`equipmentId`, `runningMinutes` 1–10 080)을 더한다. 설비를 비우면 작업지시 설비(ER2와 같음). 요청 때 검사: 없는 가동 404, 이미 취소됨 409, 같은 가동 두 번 400, 분 범위·없는 설비·작업지시 설비도 없음 400. 열린 실행은 보정하지 않고 ER2–ER3으로 직접 고친다 | 400 `runningMinutes must be whole minutes from 1 to 10080.` / `Choose the equipment of the running time to add; this run's work order has none.` / `The same running time is cancelled twice.` / 409 `This running time was already cancelled by …` |
+| ER11 | 승인 때 setup 줄과 함께 재고 이동 뒤에 반영. 취소는 사유 `Correction #N: 사유`, 추가는 원래 마감 시각의 설비 원가(AS8의 원가 이력)로 금액을 매기고 행의 `rateBasis`를 `historical`로, 이력이 그 시각을 덮지 못하면 AS9처럼 `estimated`(마감 뒤 처음 원가를 정한 설비는 원가·금액 null). 메모도 `Correction #N: 사유`. 같은 보정 줄은 두 번 더하지 않는다(줄 ID에서 만든 requestId). 직접 기록한 행은 `recorded`. 응답 줄에 `targetRunEquipmentTimeId`·`runningMinutes`·`createdRunEquipmentTimeId` | |
+| ER12 | 화면: 끝난 실행의 **Equipment time (actual)**(기록이 있거나 아직 세지 않은 실행 시간이 있으면 보인다)에 접힌 **Request a running time correction**: 취소할 행 체크(`Cancel OVEN-1 60 min`), **Add running time on**(기본 작업지시 설비, `No running time to add`로 끈다)·**Minutes**(ER4 제안으로 채움, 안내 `Suggested from the run's time, less recorded setups and running time.`)·**Reason**, **Request correction** → `Requested correction #N; the project owner approves it under Corrections.` 보정 목록 문장은 `Cancel running time`·`Add 30 min of running time on OVEN-1`. 행에 `rate at the run's finish`·`estimated rate`. 승인하면 가동 패널을 다시 읽는다 | |
+| ER13 | 범위 밖: 가동 원가를 단위 원가에 넣는 것(ER5 그대로) | |
+
+검증(2026-10-12, 격리 복사본): `RunEquipmentTimeCorrectionIntegrationTest` — 원가 30 설비로 45분 기록(`recorded`) → 마감 → 마감 뒤 직접 기록 400 → 원가 90으로 올림, 마감 뒤 처음 원가를 정한 둘째 설비 → 첫 행 취소 + 20분 + 둘째 설비 10분 보정 요청, 승인 전 합계 45 그대로 → 승인: 취소 사유·추가 메모 `Correction #1: …`, 추가 20분은 원가 30·금액 10·`historical`, 둘째 설비는 `estimated`·금액 null, 합계 30분·`costComplete=false`, 재료비 0 그대로. 둘째: 열린 실행 보정 400, 없는 가동 404, 취소된 가동 409, 0분·10 081분·없는 설비·설비 없음 400, 같은 가동 두 번 400, 거절된 요청은 보정을 남기지 않음. 가동·setup·보정·아키텍처·마이그레이션 20건 실패 0. 프런트 typecheck·lint, `correctionModel.test.ts` 10건. 모의 E2E `e2e/run-equipment-time-correction.spec.ts` 2건(제안·기본 설비로 채운 요청 본문과 보정 목록 문장, 추가 없이 취소만), `run-equipment-time.spec.ts`·`run-setup-cost.spec.ts`와 함께 통과.
 
 ## 끝난 실행의 setup 보정 (2026-10-10, 리드, §2 2cl)
 
@@ -63,6 +94,8 @@
 | AS8 | 보정으로 더한 setup은 **실행의 원래 마감 시각의 설비 원가**를 쓴다(§1 "완료 실행 보정은 원래 마감 단가"와 같은 원칙). 원가 이력이 그 시각을 덮지 않으면(첫 변경 전·마감 시각 없음) 처음 알려진 값으로 `estimated` | 보정 시점의 원가로 과거 실행 금액이 바뀌지 않게 |
 | AS9 | 설비 시간당 원가가 **바뀔 때마다** `equipment_hourly_cost_history`에 이전/새 값·버전·작성자·UTC 시각을 남긴다(V66부터). 공개 `EquipmentCostQuery.findHourlyRateAt(projectId, equipmentId, at)` | AS8의 근거 |
 | AS10 | setup 행의 `rateBasis`: `recorded`(기록 때 원가, 기존 모든 행), `historical`(보정, 마감 시각 이력), `estimated`(보정, 이력이 덮지 않음). 화면에 `rate at the run's finish`·`estimated rate` 표시 | 금액의 근거를 보이게 |
+| AS11 | `GET /work-orders/{id}/setup-comparison`(Project read, 2026-10-10 2cy): **계획**은 부하표와 같은 전환 추정(같은 설비의 앞 작업지시 → 이 작업지시의 전환 분 × 설비의 **현재** 원가, SC6), **실제**는 그 작업지시의 물리 실행들이 기록한 setup 분·원가 합(기록 당시 원가, AS2·AS10). 설비·품목·앞 작업지시가 없으면 계획 null, 원가 미상은 금액 null·`actualCostComplete=false`. 재료비에 더하지 않는다 | 작업지시별로 계획한 전환과 실제 setup을 나란히 |
+| AS12 | 화면: 작업지시 **Readiness** 펼침의 **Setup**: `Planned: 20 min · 10 at today's rate`, `Actual: 45 min · 22.5 over 1 run`, 차이(`25 min more than planned`). 계획·실제가 모두 없으면 숨김 | |
 
 화면: 끝난 실행의 **Setup (actual)** 아래 접힌 **Request a setup correction**(취소할 setup 선택·더할 설비/분·사유 → 보정 요청). 승인은 기존 Corrections에서 하고, 승인되면 setup 목록을 다시 읽는다. 보정 줄 설명 `Cancel a setup`·`Add a setup of 20 min`.
 

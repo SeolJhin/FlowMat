@@ -35,7 +35,7 @@ public class WorkflowProductionQueryImpl implements WorkflowProductionQuery {
     public Optional<Revision> findRevision(String id,String workflowId) { return revisions.findByWorkflowRevisionIdAndWorkflowId(id,workflowId).map(this::revision); }
     public Optional<Revision> latestPublishedRevision(String workflowId) { return revisions.findTopByWorkflowIdAndStatusOrderByRevisionNoDesc(workflowId,"published").map(this::revision); }
     private Facts facts(Object row) {
-        try { return new Facts(json.writeValueAsString(row)); }
+        try { return new Facts(json.writeValueAsString(org.hibernate.Hibernate.unproxy(row))); }
         catch(JsonProcessingException error) { throw new IllegalStateException("Cannot serialize internal rule facts.",error); }
     }
     private Revision revision(WorkflowRevision row) { return new Revision(row.getWorkflowRevisionId(),row.getStatus(),row.getSnapshotJson(),row.getRevisionNo()); }

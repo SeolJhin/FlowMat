@@ -65,6 +65,10 @@ export interface NonconformityDto {
   verificationNote: string | null
   verifiedBy: string | null
   verifiedAt: string | null
+  /** yyyy-MM-dd the closed nonconformity's actions are due to be checked by (N13); null when none was set. */
+  verificationDueDate: string | null
+  /** Closed, not checked, and that day has passed. */
+  verificationOverdue: boolean
   defects: NcrDefect[]
   actions: NcrAction[]
   openActions: number
@@ -167,7 +171,8 @@ export function useNonconformityMutations(projectId: string) {
     onSuccess,
   })
   const close = useMutation({
-    mutationFn: ({ id, note }: { id: string; note: string }) => post(`${path(id)}/close`, { note }),
+    mutationFn: ({ id, note, verificationDueDate }: { id: string; note: string; verificationDueDate: string | null }) =>
+      post(`${path(id)}/close`, { note, verificationDueDate }),
     onSuccess,
   })
   const cancel = useMutation({
@@ -179,5 +184,10 @@ export function useNonconformityMutations(projectId: string) {
       post(`${path(id)}/verify`, { result, note }),
     onSuccess,
   })
-  return { create, update, addDefects, addAction, finishAction, close, cancel, verify }
+  const setVerificationDue = useMutation({
+    mutationFn: async ({ id, verificationDueDate }: { id: string; verificationDueDate: string | null }) =>
+      unwrapApiResponse(await httpClient.put<ApiEnvelope<NonconformityDto>>(`${path(id)}/verification-due`, { verificationDueDate })),
+    onSuccess,
+  })
+  return { create, update, addDefects, addAction, finishAction, close, cancel, verify, setVerificationDue }
 }

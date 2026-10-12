@@ -8,12 +8,18 @@ import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.OptionalInt;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogEquipmentView;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.catalog.application.publicapi.EquipmentSlot;
+import org.myweb.flowmat.domain.production.api.dto.request.WorkOrderBatchPlanRequest;
+import org.myweb.flowmat.domain.production.api.dto.response.WorkOrderBatchPlanResponse;
 import org.myweb.flowmat.domain.production.api.dto.response.WorkOrderPlanSuggestionResponse;
 import org.myweb.flowmat.domain.production.domain.entity.ProductionRun;
 import org.myweb.flowmat.domain.production.domain.entity.WorkOrder;
@@ -29,7 +35,8 @@ import org.springframework.stereotype.Service;
  * Suggests a work order's planned start and end from its equipment's calendar (docs/domain/equipment-schedule.md
  * "계획 기간 제안"): the earliest stretch from a given time that holds what is still to produce at the equipment's
  * capacity per hour, plus the changeover from the order before it, and does not overlap an approved or running order
- * planned on the same equipment. Read only, like readiness; the order is not changed.
+ * planned on the same equipment. Read only, like readiness; the order is not changed. Several orders can be planned in
+ * one go, each after the ones before it (P8-P12).
  */
 @Service
 @RequiredArgsConstructor
@@ -38,6 +45,7 @@ public class WorkOrderPlanService {
     private static final String NOT_DELETED = "N";
     private static final BigDecimal SECONDS_PER_HOUR = BigDecimal.valueOf(3600);
     private static final BigDecimal MINUTES_PER_HOUR = BigDecimal.valueOf(60);
+    private static final int MAX_BATCH = 50;
 
     private final WorkOrderRepository workOrderRepository;
     private final ProductionRunRepository productionRunRepository;
@@ -48,6 +56,72 @@ public class WorkOrderPlanService {
         WorkOrder order = workOrderRepository.findByWorkOrderIdAndDeletedYn(workOrderId, NOT_DELETED)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         projectAccessService.requireProjectReadAccess(order.getProjectId());
+        OffsetDateTime requested = parseFrom(from);
+        return place(order, requested != null ? requested : defaultStart(order), Set.of(order.getWorkOrderId()), List.of());
+    }
+
+    /**
+     * Suggestions for several orders in the order given (P8-P11). Each is placed like a single suggestion, except that the
+     * orders of the request do not count where they stand now (they are being planned again), and each one placed counts
+     * as approved work in its suggested dates for the ones after it, changeover included. An order that cannot be placed
+     * says why; the others go on.
+     */
+    public WorkOrderBatchPlanResponse suggestAll(WorkOrderBatchPlanRequest request) {
+        List<WorkOrder> orders = batchOrders(request);
+        OffsetDateTime requested = parseFrom(request.from());
+        Set<String> batch = orders.stream().map(WorkOrder::getWorkOrderId).collect(Collectors.toUnmodifiableSet());
+        List<WorkOrder> placed = new ArrayList<>();
+        List<WorkOrderBatchPlanResponse.Line> lines = new ArrayList<>();
+        for (WorkOrder order : orders) {
+            try {
+                WorkOrderPlanSuggestionResponse suggestion =
+                    place(order, requested != null ? requested : defaultStart(order), batch, placed);
+                placed.add(asPlanned(order, suggestion));
+                lines.add(new WorkOrderBatchPlanResponse.Line(order.getWorkOrderId(), order.getWorkOrderNumber(),
+                    order.getWorkOrderStatus(), suggestion, null));
+            } catch (BusinessException refused) {
+                if (refused.getErrorCode() != ErrorCode.CONFLICT) {
+                    throw refused;
+                }
+                lines.add(new WorkOrderBatchPlanResponse.Line(order.getWorkOrderId(), order.getWorkOrderNumber(),
+                    order.getWorkOrderStatus(), null, refused.getMessage()));
+            }
+        }
+        return new WorkOrderBatchPlanResponse(requested, List.copyOf(lines));
+    }
+
+    /**
+     * The orders of a batch request in the order given, after the project read check (P8): 1 to 50 distinct orders of the
+     * project. The order suggestion (P13) takes the same request.
+     */
+    List<WorkOrder> batchOrders(WorkOrderBatchPlanRequest request) {
+        String projectId = request == null ? null : ProductionText.trimToNull(request.projectId(), "projectId");
+        if (projectId == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "projectId is required.");
+        }
+        projectAccessService.requireProjectReadAccess(projectId);
+        List<String> ids = request.workOrderIds() == null ? List.of() : request.workOrderIds();
+        if (ids.isEmpty() || ids.size() > MAX_BATCH) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Choose 1 to " + MAX_BATCH + " work orders.");
+        }
+        if (ids.stream().anyMatch(id -> id == null || id.isBlank()) || new HashSet<>(ids).size() != ids.size()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Name each work order once.");
+        }
+        List<WorkOrder> orders = new ArrayList<>();
+        for (String id : ids) {
+            orders.add(workOrderRepository.findByWorkOrderIdAndDeletedYn(id, NOT_DELETED)
+                .filter(order -> projectId.equals(order.getProjectId()))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND)));
+        }
+        return orders;
+    }
+
+    /**
+     * Places one order from {@code start} (P1-P6). Orders in {@code excluded} do not count where they stand; orders in
+     * {@code placed} (suggested earlier in a batch, not saved) count as planned work on their equipment.
+     */
+    private WorkOrderPlanSuggestionResponse place(WorkOrder order, OffsetDateTime start, Set<String> excluded,
+                                                  List<WorkOrder> placed) {
         WorkOrderStatus status = WorkOrderServiceImpl.status(order);
         if (status == WorkOrderStatus.COMPLETED || status == WorkOrderStatus.CANCELLED) {
             throw conflict(order.getWorkOrderNumber() + " is " + order.getWorkOrderStatus() + "; it is not planned any more.");
@@ -73,11 +147,11 @@ public class WorkOrderPlanService {
             throw conflict("The target quantity has already been produced.");
         }
         BigDecimal productionHours = remaining.divide(rate, 2, RoundingMode.UP);
-        OffsetDateTime start = start(order, from);
 
-        List<WorkOrder> others = workOrderRepository.findAllByEquipmentIdAndDeletedYn(equipment.equipmentId(), NOT_DELETED)
-            .stream()
-            .filter(other -> !other.getWorkOrderId().equals(order.getWorkOrderId()))
+        List<WorkOrder> others = Stream.concat(
+                workOrderRepository.findAllByEquipmentIdAndDeletedYn(equipment.equipmentId(), NOT_DELETED).stream()
+                    .filter(other -> !excluded.contains(other.getWorkOrderId())),
+                placed.stream().filter(other -> equipment.equipmentId().equals(other.getEquipmentId())))
             .toList();
         // Drafts are not planned work yet, as in readiness's "schedule" check.
         List<WorkOrder> planned = others.stream()
@@ -120,19 +194,38 @@ public class WorkOrderPlanService {
         throw conflict("No free time found on " + name + " around the orders already planned on it.");
     }
 
-    /** {@code from} when given; otherwise the planned start if it is still ahead, or the next whole minute. */
-    private static OffsetDateTime start(WorkOrder order, String from) {
-        if (from != null && !from.isBlank()) {
-            try {
-                return OffsetDateTime.parse(from.trim());
-            } catch (DateTimeParseException exception) {
-                throw new BusinessException(ErrorCode.BAD_REQUEST,
-                    "from must be a date and time with an offset, such as 2030-01-07T09:00:00+09:00.");
-            }
+    /** {@code from} as an instant; null when not given. */
+    static OffsetDateTime parseFrom(String from) {
+        if (from == null || from.isBlank()) {
+            return null;
         }
+        try {
+            return OffsetDateTime.parse(from.trim());
+        } catch (DateTimeParseException exception) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                "from must be a date and time with an offset, such as 2030-01-07T09:00:00+09:00.");
+        }
+    }
+
+    /** Without {@code from}: the planned start if it is still ahead, or the next whole minute. */
+    private static OffsetDateTime defaultStart(WorkOrder order) {
         OffsetDateTime now = wholeMinute(OffsetDateTime.now(ZoneOffset.UTC));
         OffsetDateTime planned = order.getPlannedStartAt();
         return planned != null && planned.isAfter(now) ? planned : now;
+    }
+
+    /** An order placed in a batch, as approved work in its suggested dates for the orders placed after it (P9). Not saved. */
+    private static WorkOrder asPlanned(WorkOrder order, WorkOrderPlanSuggestionResponse suggestion) {
+        WorkOrder planned = new WorkOrder();
+        planned.setWorkOrderId(order.getWorkOrderId());
+        planned.setWorkOrderNumber(order.getWorkOrderNumber());
+        planned.setProjectId(order.getProjectId());
+        planned.setTargetItemId(order.getTargetItemId());
+        planned.setEquipmentId(suggestion.equipmentId());
+        planned.setWorkOrderStatus(WorkOrderStatus.APPROVED.code());
+        planned.setPlannedStartAt(suggestion.plannedStartAt());
+        planned.setPlannedEndAt(suggestion.plannedEndAt());
+        return planned;
     }
 
     /** The changeover from what {@code previous} makes to what this order makes; zero without either item or a rule. */

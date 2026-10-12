@@ -17,7 +17,7 @@ public class CatalogItemFactsQueryImpl implements CatalogItemFactsQuery {
     public java.util.List<Facts> findItems(java.util.Collection<String> ids) { return items.findAllById(ids).stream().map(this::facts).toList(); }
     public java.util.List<Facts> findProjectItems(String id) { return items.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(id,"N").stream().map(this::facts).toList(); }
     private Facts facts(Object row) {
-        try { return new Facts(json.writeValueAsString(row)); }
+        try { return new Facts(json.writeValueAsString(org.hibernate.Hibernate.unproxy(row))); }
         catch(JsonProcessingException error) { throw new IllegalStateException("Cannot serialize internal catalog facts.",error); }
     }
 }

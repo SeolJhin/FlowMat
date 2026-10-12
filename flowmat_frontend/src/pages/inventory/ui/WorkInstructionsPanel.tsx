@@ -5,16 +5,20 @@ import {
   useWorkInstructionsQuery,
   type WorkInstructionDto,
 } from '../../../entities/production/api/useWorkInstructions'
+import { useInspectionStandardsQuery } from '../../../entities/quality/api/useInspectionStandards'
 import { errorMessage } from '../../../shared/lib/errorMessage'
 import type { ItemDto } from '../../../shared/types/api'
 import { pickableItems } from '../model/itemStatusModel'
 import {
   EMPTY_STEP,
   documentUrlProblem,
+  followableStandards,
   instructionStatus,
   limitText,
   revisionsByItem,
   shownRevision,
+  standardNote,
+  standardOptionText,
   stepPayload,
 } from '../model/workInstructionModel'
 
@@ -97,6 +101,10 @@ function InstructionDetail({ instruction, revisions, projectId }: {
   })
   const [step, setStep] = useState(EMPTY_STEP)
   const [problem, setProblem] = useState<string | null>(null)
+  // Only a draft adds steps, so only a draft needs the standards it can follow.
+  const standardsQuery = useInspectionStandardsQuery(projectId, draft)
+  const standards = followableStandards(standardsQuery.data ?? [], instruction.itemId)
+  const followed = standards.find((one) => one.standardId === step.standardId)
   const released = revisions.find((one) => one.status === 'released')
   const failure = [mutations.update, mutations.addStep, mutations.removeStep, mutations.release, mutations.revise, mutations.remove]
     .find((mutation) => mutation.isError)
@@ -167,7 +175,9 @@ function InstructionDetail({ instruction, revisions, projectId }: {
             {one.text}
             {!one.required && <span className="inspector-hint"> (optional)</span>}
             {one.recordsValue && <span className="inspector-hint">
-              {' '}· records {one.valueLabel ?? 'a value'}{limitText(one) && ` (${limitText(one)})`}</span>}
+              {' '}· records {one.valueLabel ?? 'a value'}{limitText(one) && ` (${limitText(one)})`}
+              {one.standardId && ` · follows ${one.standardName ?? 'a standard'}`}</span>}
+            {standardNote(one, draft) && <div role="note" style={{ color: '#b45309', fontSize: 12 }}>{standardNote(one, draft)}</div>}
             {draft && (
               <button type="button" style={{ marginLeft: 6, fontSize: 11 }} disabled={mutations.removeStep.isPending}
                 onClick={() => mutations.removeStep.mutate({ instructionId: instruction.instructionId, stepId: one.stepId })}>Remove</button>
@@ -186,11 +196,17 @@ function InstructionDetail({ instruction, revisions, projectId }: {
             <label><input type="checkbox" checked={step.required} onChange={(event) => setStep({ ...step, required: event.target.checked })} /> Required</label>
             <label><input type="checkbox" checked={step.recordsValue}
               onChange={(event) => setStep({ ...step, recordsValue: event.target.checked })} /> Records a value</label>
-            {step.recordsValue && <label>Value label <input value={step.valueLabel} maxLength={100} placeholder="Oven °C"
+            {step.recordsValue && standards.length > 0 && <label>Limits from
+              <select value={step.standardId ?? ''} onChange={(event) => setStep({ ...step, standardId: event.target.value })}>
+                <option value="">(typed here)</option>
+                {standards.map((one) => <option key={one.standardId} value={one.standardId}>{standardOptionText(one)}</option>)}
+              </select></label>}
+            {step.recordsValue && <label>Value label <input value={step.valueLabel} maxLength={100}
+              placeholder={followed ? `${followed.inspectionType}${followed.unit ? ` ${followed.unit}` : ''}` : 'Oven °C'}
               onChange={(event) => setStep({ ...step, valueLabel: event.target.value })} /></label>}
-            {step.recordsValue && <label>Min <input type="number" step="any" value={step.valueMin ?? ''} style={{ width: 80 }}
+            {step.recordsValue && !followed && <label>Min <input type="number" step="any" value={step.valueMin ?? ''} style={{ width: 80 }}
               onChange={(event) => setStep({ ...step, valueMin: event.target.value })} /></label>}
-            {step.recordsValue && <label>Max <input type="number" step="any" value={step.valueMax ?? ''} style={{ width: 80 }}
+            {step.recordsValue && !followed && <label>Max <input type="number" step="any" value={step.valueMax ?? ''} style={{ width: 80 }}
               onChange={(event) => setStep({ ...step, valueMax: event.target.value })} /></label>}
           </div>
           <button type="submit" disabled={mutations.addStep.isPending}>Add step</button>

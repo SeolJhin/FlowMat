@@ -76,7 +76,8 @@ test('a nonconformity is raised from a defect and closed once its cause, disposi
   await expect(section.getByRole('table', { name: 'Nonconformity list' }).getByRole('row', { name: new RegExp(TITLE) })).toHaveCount(0)
   await section.getByLabel('Nonconformity status').selectOption('closed')
   const row = section.getByRole('table', { name: 'Nonconformity list' }).getByRole('row', { name: new RegExp(TITLE) })
-  await expect(row).toContainText('closed · not checked')
+  // Closing suggests checking the actions a month later (N13).
+  await expect(row).toContainText(/closed · check by \d{4}-\d{2}-\d{2}/)
 
   // Whether the actions worked is checked once on the closed nonconformity (N12); a "no" offers a follow-up.
   const check = detail.getByRole('form', { name: 'Check the actions' })

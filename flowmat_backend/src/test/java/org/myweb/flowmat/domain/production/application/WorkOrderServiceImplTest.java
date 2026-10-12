@@ -45,6 +45,8 @@ class WorkOrderServiceImplTest {
     @Mock private ProjectAccessService projectAccessService;
     @Mock private IdGenerator idGenerator;
     @Mock private StockAllocationService stockAllocationService;
+    @Mock private org.myweb.flowmat.domain.notification.application.publicapi.NotificationCommand notifications;
+    @Mock private org.myweb.flowmat.domain.project.application.publicapi.ProjectMemberQuery projectMemberQuery;
 
     @InjectMocks
     private WorkOrderServiceImpl workOrderService;

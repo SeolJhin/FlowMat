@@ -48,30 +48,66 @@ export function useCreateLotMutation(projectId: string) {
 /** Releases a LOT that waits for its receipt checks; the server refuses while a required check is missing or failed. */
 export function useReleaseLotMutation(projectId: string) {
   const onSuccess = useInvalidateStock(projectId)
+  const client = useQueryClient()
   return useMutation({
+    // checkedStandards 0: released without any required receipt check (docs/domain/lot-release.md R7).
     mutationFn: async (lotId: string) =>
-      unwrapApiResponse(await httpClient.post<ApiEnvelope<{ lotId: string; lotNo: string; lotStatus: string }>>(
+      unwrapApiResponse(await httpClient.post<ApiEnvelope<{ lotId: string; lotNo: string; lotStatus: string; checkedStandards?: number }>>(
         `/lots/${encodeURIComponent(lotId)}/release`, {})),
-    onSuccess,
+    onSuccess: async (_result, lotId) => {
+      await onSuccess()
+      void client.invalidateQueries({ queryKey: ['lot-release-history', lotId] })
+    },
+  })
+}
+
+/** A LOT's release history with its closing and reopening, newest first (docs/domain/lot-release.md R8-R9). */
+export interface LotReleaseHistoryDto {
+  lotId: string
+  events: {
+    action: 'released' | 'held' | 'closed' | 'reopened'
+    at: string
+    by: string
+    stockRows: number
+    /** The LOT's status after closing or reopening. */
+    status?: string | null
+  }[]
+}
+
+export function useLotReleaseHistoryQuery(lotId: string) {
+  return useQuery<LotReleaseHistoryDto>({
+    queryKey: ['lot-release-history', lotId],
+    queryFn: async () => unwrapApiResponse(await httpClient.get<ApiEnvelope<LotReleaseHistoryDto>>(
+      `/lots/${encodeURIComponent(lotId)}/release-history`)),
+    enabled: Boolean(lotId),
+    retry: false,
   })
 }
 
 /** Opens a closed LOT again; project owners only (docs/domain/lot-release.md). */
 export function useReopenLotMutation(projectId: string) {
   const onSuccess = useInvalidateStock(projectId)
+  const client = useQueryClient()
   return useMutation({
     mutationFn: async (lotId: string) =>
       unwrapApiResponse(await httpClient.post<ApiEnvelope<LotDto>>(`/lots/${encodeURIComponent(lotId)}/reopen`, {})),
-    onSuccess,
+    onSuccess: async (_result, lotId) => {
+      await onSuccess()
+      void client.invalidateQueries({ queryKey: ['lot-release-history', lotId] })
+    },
   })
 }
 
 export function useCloseLotMutation(projectId: string) {
   const onSuccess = useInvalidateStock(projectId)
+  const client = useQueryClient()
   return useMutation({
     mutationFn: async (lotId: string) =>
       unwrapApiResponse(await httpClient.post<ApiEnvelope<LotDto>>(`/lots/${encodeURIComponent(lotId)}/close`, {})),
-    onSuccess,
+    onSuccess: async (_result, lotId) => {
+      await onSuccess()
+      void client.invalidateQueries({ queryKey: ['lot-release-history', lotId] })
+    },
   })
 }
 

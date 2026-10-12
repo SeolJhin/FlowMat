@@ -53,6 +53,8 @@ public class StockAlertService {
     private final org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery projectCalendar;
     private final InventoryCatalogReferences catalogReferences;
     private final IdGenerator idGenerator;
+    private final org.myweb.flowmat.domain.notification.application.publicapi.NotificationCommand notifications;
+    private final org.myweb.flowmat.domain.project.application.publicapi.ProjectMemberQuery projectMemberQuery;
 
     /** How many days ahead of a LOT's expiry date its stock raises an expiry alert. */
     @Value("${app.stock-alert.expiry-warning-days:7}")
@@ -154,30 +156,10 @@ public class StockAlertService {
         List<Inventory> rows = inventoryRepository.findAllByProjectIdAndDeletedYnOrderByCreatedAtAsc(projectId, NOT_DELETED);
         LocalDate today = projectCalendar.today(projectId);
         Map<String, LotMaster> lots = byId(lotMasterRepository.findAllById(ids(rows.stream().map(Inventory::getLotId))), LotMaster::getLotId);
-        Map<String, BigDecimal> usable = new java.util.HashMap<>();
-        for (Inventory row : rows) {
-            if ("quarantined".equals(row.getInventoryStatus())) {
-                continue;
-            }
-            LotMaster lot = row.getLotId() == null ? null : lots.get(row.getLotId());
-            if (lot != null && ("closed".equals(lot.getLotStatus()) || lot.isExpiredOn(today))) {
-                continue;
-            }
-            usable.merge(row.getItemId(), zeroIfNull(row.getAvailableQuantity()), BigDecimal::add);
-        }
+        Map<String, BigDecimal> usable = ReorderLines.usable(rows, lots, today, row -> true);
         Map<String, String> units = catalogReferences.unitCodes(ids(watched.stream().map(Item::getUnitId)));
-        return watched.stream()
-            .map(item -> {
-                BigDecimal available = usable.getOrDefault(item.getItemId(), BigDecimal.ZERO);
-                return new ReorderLineResponse(item.getItemId(), item.getItemCode(), item.getItemName(), units.get(item.getUnitId()),
-                    item.getSafetyStockQty(), available, item.getSafetyStockQty().subtract(available), item.getLeadTimeDays());
-            })
-            .filter(line -> line.shortageQuantity().signum() > 0)
-            .sorted(java.util.Comparator.comparing(
-                    (ReorderLineResponse line) -> line.shortageQuantity().divide(line.safetyStockQty(), 6, java.math.RoundingMode.HALF_UP))
-                .reversed()
-                .thenComparing(ReorderLineResponse::itemCode))
-            .toList();
+        return ReorderLines.shortLines(watched, watched.stream().collect(Collectors.toMap(Item::getItemId, Item::getSafetyStockQty)),
+            usable, units, null);
     }
 
     private void sync(Inventory inventory, String type, boolean breached, BigDecimal threshold, BigDecimal actual,
@@ -192,6 +174,7 @@ public class StockAlertService {
             && sameAmount(open.get().getActualValue(), actual) && sameAmount(open.get().getThresholdValue(), threshold)) {
             return;
         }
+        boolean opening = open.isEmpty();
         StockAlert alert = open.orElseGet(() -> {
             OffsetDateTime now = OffsetDateTime.now();
             StockAlert created = new StockAlert();
@@ -210,6 +193,29 @@ public class StockAlertService {
         alert.setActualValue(actual);
         alert.setAlertMessage(message);
         stockAlertRepository.save(alert);
+        if (opening) {
+            tellOwner(inventory, alert);
+        }
+    }
+
+    /**
+     * An alert that opens tells the project's owner (docs/domain/notification.md NT7), whoever moved the stock and also from
+     * the sweep; one that only changes severity, or stays open, tells no one again.
+     */
+    private void tellOwner(Inventory inventory, StockAlert alert) {
+        String owner = projectMemberQuery.ownerOf(inventory.getProjectId());
+        if (owner == null) {
+            return;
+        }
+        String what = switch (alert.getAlertType()) {
+            case StockAlert.LOW -> "Low stock";
+            case StockAlert.OVER -> "Over the maximum";
+            default -> "Expiring stock";
+        };
+        String item = catalogReferences.item(inventory.getItemId()).map(Item::getItemCode).orElse(inventory.getItemId());
+        String place = inventory.getLocation() == null || inventory.getLocation().isBlank() ? "" : " at " + inventory.getLocation();
+        notifications.tell(owner, inventory.getProjectId(), "stock_alert", what + ": " + item + place, alert.getAlertMessage(),
+            "stock_alert", alert.getStockAlertId());
     }
 
     private void close(StockAlert alert) {

@@ -48,11 +48,12 @@ public class LotReleaseService {
         newestFirst.sort(Comparator.comparing(QualityInspection::getInspectedAt, Comparator.nullsLast(Comparator.reverseOrder())));
         List<String> missing = new ArrayList<>();
         List<String> failed = new ArrayList<>();
-        standardRepository.findAllByItemIdAndDeletedYn(lot.itemId(), NOT_DELETED).stream()
+        List<InspectionStandard> required = standardRepository.findAllByItemIdAndDeletedYn(lot.itemId(), NOT_DELETED).stream()
             .filter(standard -> YES.equals(standard.getActiveYn()) && YES.equals(standard.getRequiredYn())
                 && !"production".equals(standard.getStage()))
             .sorted(Comparator.comparing(standard -> standard.getInspectionType().toLowerCase()))
-            .forEach(standard -> {
+            .toList();
+        required.forEach(standard -> {
                 QualityInspection latest = newestFirst.stream().filter(one -> follows(one, standard)).findFirst().orElse(null);
                 if (latest == null) {
                     missing.add(standard.getInspectionType());
@@ -72,7 +73,7 @@ public class LotReleaseService {
                 "Before releasing LOT " + lot.lotNo() + ": " + String.join("; ", reasons) + ".");
         }
         String status = lotReleaseCommand.releaseAfterReceiptChecks(lot.lotId(), projectAccessService.requireCurrentUserId());
-        return new LotReleaseResponse(lot.lotId(), lot.lotNo(), status);
+        return new LotReleaseResponse(lot.lotId(), lot.lotNo(), status, required.size());
     }
 
     /** The inspection followed the standard, or names no standard but is the same check of the same item. */

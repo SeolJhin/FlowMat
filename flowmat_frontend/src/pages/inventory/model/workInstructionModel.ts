@@ -1,4 +1,5 @@
 import type { RunInstructionDto, WorkInstructionDto, WorkInstructionStepDto, WorkInstructionStepInput } from '../../../entities/production/api/useWorkInstructions'
+import type { InspectionStandardDto } from '../../../entities/quality/api/useInspectionStandards'
 
 /** Revisions per product, newest first (the order the server sends). */
 export function revisionsByItem(instructions: WorkInstructionDto[]): Map<string, WorkInstructionDto[]> {
@@ -31,6 +32,8 @@ export interface StepForm {
   /** Limits typed for a value step; blank for none. */
   valueMin?: string
   valueMax?: string
+  /** An inspection standard of the product to take the limits from (W13); blank to type them. */
+  standardId?: string
 }
 
 export const EMPTY_STEP: StepForm = { text: '', required: true, recordsValue: false, valueLabel: '', valueMin: '', valueMax: '' }
@@ -40,6 +43,11 @@ export function stepPayload(form: StepForm): { input: WorkInstructionStepInput; 
   if (!text) return { input: null, error: 'Write what the step is.' }
   if (text.length > 500) return { input: null, error: 'A step can be at most 500 characters.' }
   const label = form.recordsValue ? form.valueLabel.trim() : ''
+  const standardId = form.recordsValue ? form.standardId ?? '' : ''
+  if (standardId) {
+    // The standard sets the limits (W13); the server names the value after it when no name is typed.
+    return { input: { text, required: form.required, recordsValue: true, valueLabel: label || null, standardId }, error: null }
+  }
   const limit = (typed: string | undefined) => (form.recordsValue && (typed ?? '').trim() !== '' ? Number(typed) : null)
   const valueMin = limit(form.valueMin)
   const valueMax = limit(form.valueMax)
@@ -56,6 +64,51 @@ export function stepPayload(form: StepForm): { input: WorkInstructionStepInput; 
     },
     error: null,
   }
+}
+
+/** The product's standards a step can follow (W13): active, for production or any stage, ordered by check. */
+export function followableStandards(standards: InspectionStandardDto[], itemId: string): InspectionStandardDto[] {
+  return standards
+    .filter((standard) => standard.itemId === itemId && standard.active && standard.stage !== 'receipt')
+    .sort((a, b) => a.inspectionType.localeCompare(b.inspectionType))
+}
+
+/** "Moisture · 10–12 %" for the standard picker; "Visual · pass/fail" without limits. */
+export function standardOptionText(standard: Pick<InspectionStandardDto, 'inspectionType' | 'standardMin' | 'standardMax' | 'unit'>): string {
+  const limits = limitText({ valueMin: standard.standardMin, valueMax: standard.standardMax })
+  return `${standard.inspectionType} · ${limits ? `${limits}${standard.unit ? ` ${standard.unit}` : ''}` : 'pass/fail'}`
+}
+
+/** What a step that follows a standard says about it (W15); empty for one that does not or is in step with it. */
+export function standardNote(
+  step: Pick<WorkInstructionStepDto, 'standardName' | 'standardStatus'>,
+  draft: boolean,
+): string {
+  const name = step.standardName ? `the ${step.standardName} standard` : 'the standard'
+  if (step.standardStatus === 'changed') {
+    return draft ? `The limits of ${name} changed; releasing takes them.` : `The limits of ${name} changed; make a new revision to follow them.`
+  }
+  if (step.standardStatus === 'inactive') {
+    return draft ? `${capitalize(name)} is no longer active; remove this step to release.` : `${capitalize(name)} is no longer active.`
+  }
+  return ''
+}
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+/**
+ * Whether confirming the step asks for pass or fail (R10): it follows a standard without limits, which a person decides.
+ * The step's copy of the limits is the standard's as released; the server checks the standard as it is now.
+ */
+export function personDecides(step: Pick<WorkInstructionStepDto, 'standardId' | 'standardStatus' | 'valueMin' | 'valueMax'>): boolean {
+  return Boolean(step.standardId) && step.standardStatus !== 'inactive' && step.valueMin === null && step.valueMax === null
+}
+
+/** "inspection pass" for a confirmation that also recorded the run's inspection (R9); empty otherwise. */
+export function inspectionText(check: { inspectionResult?: 'pass' | 'fail' | null }): string {
+  return check.inspectionResult ? `inspection ${check.inspectionResult}` : ''
 }
 
 /** "200–230", "≥ 200", "≤ 230", or "" without limits. */
@@ -118,6 +171,27 @@ export function outOfLimitsNcrTitle(
 }
 
 /** What the suggested nonconformity says about where the value came from (R8). */
+/** "Step 2 Visual failed: cracked": a check whose recorded inspection failed (R10) without a limit being crossed. */
+export function failedCheckNcrTitle(
+  step: Pick<WorkInstructionStepDto, 'stepNo' | 'standardName' | 'valueLabel'>,
+  value: string | null,
+): string {
+  return `Step ${step.stepNo} ${step.standardName ?? step.valueLabel ?? 'check'} failed${value ? `: ${value}` : ''}`.slice(0, 200)
+}
+
+/**
+ * The nonconformity a confirmed step suggests (R8): a value outside the step's limits, or else an inspection the
+ * confirmation recorded that failed (R9-R10); null when nothing went wrong.
+ */
+export function suggestedNcrTitle(
+  step: Pick<WorkInstructionStepDto, 'stepNo' | 'valueLabel' | 'valueMin' | 'valueMax' | 'standardName'>,
+  check: { value: string | null; outOfLimits: boolean; inspectionResult?: 'pass' | 'fail' | null },
+): string | null {
+  if (check.outOfLimits && check.value) return outOfLimitsNcrTitle(step, check.value)
+  if (check.inspectionResult === 'fail') return failedCheckNcrTitle(step, check.value)
+  return null
+}
+
 export function outOfLimitsNcrDescription(
   instruction: Pick<WorkInstructionDto, 'title' | 'revisionNo'>,
   step: Pick<WorkInstructionStepDto, 'stepNo' | 'text'>,

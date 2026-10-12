@@ -126,6 +126,53 @@ class RunSetupCostIntegrationTest extends IntegrationTestSupport {
         call(get(setups("no-such-run"))).andExpect(status().isNotFound());
     }
 
+    @Test
+    void anOrdersPlannedChangeoverStandsBesideItsRunsActualSetups() throws Exception {
+        String tag = UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
+        String press = equipment("Compare press " + tag);
+        rate(press, 30, 0);
+        String red = data(call(post("/items"), json(Map.of("projectId", DEMO_PROJECT, "itemCode", "CMP-RED-" + tag,
+            "itemName", "red", "itemType", "product", "unitId", "unit_ea")))).path("itemId").asText();
+        String white = data(call(post("/items"), json(Map.of("projectId", DEMO_PROJECT, "itemCode", "CMP-WHITE-" + tag,
+            "itemName", "white", "itemType", "product", "unitId", "unit_ea")))).path("itemId").asText();
+        Map<String, Object> rule = new HashMap<>();
+        rule.put("fromItemId", null);
+        rule.put("toItemId", null);
+        rule.put("minutes", 20);
+        call(post("/equipments/" + press + "/changeovers"), json(rule)).andExpect(status().isOk());
+        String first = order("Compare first", red, "2030-03-01T00:00:00Z", "2030-03-01T08:00:00Z", press);
+        String second = order("Compare second", white, "2030-03-02T00:00:00Z", "2030-03-02T08:00:00Z", press);
+        // Only planned work is the order before it on the load board, so the first one is approved (EquipmentSequence).
+        call(post("/work-orders/" + first + "/approve")).andExpect(status().isOk());
+
+        // Before any run: 20 planned minutes at 30 an hour, nothing actual yet (AS11).
+        call(get("/work-orders/" + second + "/setup-comparison"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.plannedMinutes").value(20))
+            .andExpect(jsonPath("$.data.plannedCost").value(10.0))
+            .andExpect(jsonPath("$.data.runs").value(0))
+            .andExpect(jsonPath("$.data.actualMinutes").value(0));
+        call(get("/work-orders/" + first + "/setup-comparison")).andExpect(jsonPath("$.data.plannedMinutes").isEmpty());
+
+        call(post("/work-orders/" + second + "/approve")).andExpect(status().isOk());
+        String run = data(call(post("/production-runs/start"), json(Map.of("projectId", DEMO_PROJECT, "workflowId", DEMO_WORKFLOW,
+            "workOrderId", second, "plannedOutputQty", 1, "runType", "actual")))).path("productionRunId").asText();
+        call(post(setups(run)), json(setup(null, 45, "Longer clean"))).andExpect(status().isOk());
+        call(get("/work-orders/" + second + "/setup-comparison"))
+            .andExpect(jsonPath("$.data.runs").value(1))
+            .andExpect(jsonPath("$.data.actualMinutes").value(45))
+            .andExpect(jsonPath("$.data.actualCost").value(22.5))
+            .andExpect(jsonPath("$.data.actualCostComplete").value(true));
+    }
+
+    private String order(String title, String itemId, String start, String end, String equipmentId) throws Exception {
+        String orderId = data(call(post("/work-orders"), json(Map.of("projectId", DEMO_PROJECT, "workOrderTitle", title,
+            "workflowId", DEMO_WORKFLOW, "targetItemId", itemId, "targetQuantity", 1, "plannedStartAt", start,
+            "plannedEndAt", end)))).path("workOrderId").asText();
+        call(put("/work-orders/" + orderId + "/equipment"), json(Map.of("equipmentId", equipmentId))).andExpect(status().isOk());
+        return orderId;
+    }
+
     private static String setups(String runId) {
         return "/production-runs/" + runId + "/setups";
     }

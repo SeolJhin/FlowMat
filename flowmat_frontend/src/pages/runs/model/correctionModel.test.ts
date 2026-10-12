@@ -176,5 +176,11 @@ describe('setup correction lines', () => {
       .toBe('Add a setup of 20 min on press')
     expect(describeCorrectionLine({ ...base, kind: 'add_setup', equipmentId: 'press', setupMinutes: 20 }, [], String, String,
       () => 'PRESS')).toBe('Add a setup of 20 min on PRESS')
+    expect(describeCorrectionLine({ ...base, kind: 'cancel_running_time', targetRunEquipmentTimeId: 't1' }, [], String, String))
+      .toBe('Cancel running time')
+    expect(describeCorrectionLine({ ...base, kind: 'add_running_time', equipmentId: 'oven', runningMinutes: 30 }, [], String, String,
+      () => 'OVEN-1')).toBe('Add 30 min of running time on OVEN-1')
+    expect(describeCorrectionLine({ ...base, kind: 'add_running_time', equipmentId: null, runningMinutes: null }, [], String, String))
+      .toBe('Add ? min of running time')
   })
 })

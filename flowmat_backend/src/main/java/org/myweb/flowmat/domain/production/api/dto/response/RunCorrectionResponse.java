@@ -22,7 +22,7 @@ public record RunCorrectionResponse(
 
     public record Line(
         int lineNo,
-        /** void_item, add_item or set_output_qty. */
+        /** void_item, add_item, set_output_qty, cancel_setup, add_setup, cancel_running_time or add_running_time. */
         String kind,
         String targetRunItemId,
         String direction,
@@ -36,7 +36,10 @@ public record RunCorrectionResponse(
         String targetRunSetupId,
         String equipmentId,
         Integer setupMinutes,
-        String createdRunSetupId
+        String createdRunSetupId,
+        String targetRunEquipmentTimeId,
+        Integer runningMinutes,
+        String createdRunEquipmentTimeId
     ) {
     }
 }

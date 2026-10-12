@@ -202,4 +202,8 @@ public interface InventoryTransactionRepository
     Optional<InventoryTransaction> findByReferenceIdAndTransactionType(String referenceId, String transactionType);
 
     List<InventoryTransaction> findAllByReferenceTypeAndReferenceId(String referenceType, String referenceId);
+
+    /** A LOT's release and hold rows, newest first (docs/domain/lot-release.md R8). */
+    List<InventoryTransaction> findAllByReferenceIdAndReferenceTypeInOrderByCreatedAtDescInventoryTransactionIdDesc(
+        String referenceId, Collection<String> referenceTypes);
 }
