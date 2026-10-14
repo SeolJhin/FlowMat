@@ -3,9 +3,12 @@ package org.myweb.flowmat.domain.catalog.application;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.api.dto.request.HolidayRequest;
 import org.myweb.flowmat.domain.catalog.api.dto.response.HolidayResponse;
+import org.myweb.flowmat.domain.catalog.application.publicapi.ProjectHolidayQuery;
 import org.myweb.flowmat.domain.catalog.domain.entity.ProjectHoliday;
 import org.myweb.flowmat.domain.catalog.repository.ProjectHolidayRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
@@ -22,7 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
-public class HolidayService {
+public class HolidayService implements ProjectHolidayQuery {
 
     private static final String NOT_DELETED = "N";
     private static final int NAME_LENGTH = 100;
@@ -30,6 +33,13 @@ public class HolidayService {
     private final ProjectHolidayRepository holidayRepository;
     private final ProjectAccessService projectAccessService;
     private final IdGenerator idGenerator;
+
+    @Override
+    public Set<LocalDate> holidays(String projectId, LocalDate first, LocalDate last) {
+        return holidayRepository.findAllByProjectIdAndHolidayDateBetweenAndDeletedYn(projectId, first, last, NOT_DELETED).stream()
+            .map(ProjectHoliday::getHolidayDate)
+            .collect(Collectors.toUnmodifiableSet());
+    }
 
     public List<HolidayResponse> list(String projectId) {
         String project = requireProject(projectId);

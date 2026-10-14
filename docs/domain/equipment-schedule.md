@@ -121,6 +121,12 @@ DB 제약: 요일 형식 CHECK, 정지 종류 CHECK, `ends_at > starts_at`, 삭�
 | P10 | 놓을 수 없는 작업지시(설비 없음·산출 없음·목표 수량 없음·다 만듦·완료/취소·366일 안 시간 없음)는 그 줄에 `problem`(P1·P6의 409 문구)을 쓰고 나머지는 계속한다 | |
 | P11 | 응답 `{from, lines: [{workOrderId, workOrderNumber, workOrderStatus, suggestion(P1–P7 응답과 같음)|null, problem|null}]}`. 아무것도 저장하지 않는다 | |
 | P12 | 화면: 작업지시 표 아래 접힌 **Plan several orders**: 설비가 붙은 초안·승인 작업지시를 **누른 순서**로 체크(`1. WO-0002 …`), **Plan from**, **Suggest dates for N orders** → 줄마다 P–요약(`Mon 2030-01-07 09:00 → Mon 2030-01-07 14:00 · needs 5 h`, `· after WO-…`) 또는 문제. **Use these dates for N drafts**는 제안이 있는 **초안만** 그 순서대로 하나씩 저장(작업지시 수정 API, 편집 필드는 그대로), 하나가 거절되면 멈추고 앞에서 몇 개 저장했는지 알린다. 승인 작업지시는 `keeps its dates until the project owner reschedules it`(일정 변경은 owner reschedule, DECISIONS §2 C). 고른 것이 바뀌면 제안을 지운다 | |
+| P13 | **순서 제안**(2026-10-12 사용자 결정 "전환 최소", 2dq): `POST /work-orders/plan-order` `{projectId, workOrderIds, from?}`(P8과 같은 검사·권한). 고른 작업지시를 설비별로 묶고(설비는 처음 나온 순서), 설비 없는 작업지시는 준 순서대로 맨 뒤 | P8과 같음 |
+| P14 | 한 설비 안에서 **전환 시간 합이 가장 작은 순서**. 첫 작업지시는 `from`(없으면 지금) 전에 그 설비에 계획된 요청 밖 작업지시(P5와 같은 앞 작업지시)의 품목에서 전환한다. 전환 규칙이 없거나 품목이 없으면 0분 | |
+| P15 | 합이 같으면 우선순위(urgent > high > normal > low), 계획 끝이 이른 것, 준 순서. 한 설비에 12개까지는 정확히(부분집합 동적 계획), 더 많으면 가장 가까운 것부터 고른다(근사) | |
+| P16 | 응답 `{workOrderIds, changeoverMinutes, givenChangeoverMinutes, groups: [{equipmentId, after, workOrderIds, changeoverMinutes, givenChangeoverMinutes}]}`. 아무것도 저장하지 않는다. 화면 **Suggest order**(2개 이상 고르면): 체크 순서를 바꾸고 `Reordered for fewer changeovers: 20 min instead of 120 min.` 또는 `The ticked order already has the fewest changeovers: N min.`, 체크를 바꾸면 안내가 사라진다. 날짜는 그다음 **Suggest dates**(P8). 납기·부하 균형은 보지 않는다 | |
+| P17 | **승인 작업지시 함께 일정 변경**(2026-10-13, 2ds, 정책 C): **Plan several orders**의 답에 승인 작업지시가 있고 보는 사람이 프로젝트 소유자면 **Reason** 한 칸과 **Reschedule N approved orders**. 답의 순서대로 하나씩 기존 owner reschedule(`POST /work-orders/{id}/reschedules`, 지금 기간을 `expected…`로 보내 그 사이 바뀌었으면 409, 같은 내용 재시도는 같은 `requestId`)로 제안 기간에 옮긴다. 하나가 거절되면 멈추고 `… N rescheduled before it.`, 다시 누르면 남은 것만 보낸다. 끝나면 `Rescheduled N approved orders.` 소유자가 아니면 `Only the project owner can reschedule the approved orders.` 서버 변경 없음 | 정책 C의 거절 그대로 |
+| P18 | **인력**(2026-10-14, 2dx): 작업지시에 인력이 있으면 그 사람들이 모두 일하는 시간에만 생산 시간을 세고, 인력을 이미 잡은 다른 승인·진행 중 작업지시를 비킨다. 응답 `waitedForCrew`·`crewMovedPast`. [작업자 달력](worker-calendar.md) WC24–WC28 | 409 `… and the crew do not have N h available together …` |
 
 예: 09:00–17:00 월–금, 시간당 10, 100개 → 10시간. 2030-01-07(월) 0시부터 → 월 09:00 → 화 11:00. 화 09–10시 정비 → 화 12:00. 월 13–15시에 승인된 작업지시가 있으면 15:00부터 → 수 10:00.
 
@@ -142,6 +148,7 @@ DB 제약: 요일 형식 CHECK, 정지 종류 CHECK, `ends_at > starts_at`, 삭�
 | `PUT /work-orders/{id}/equipment` | 쓰기 | 위 E1~E4. 응답은 작업지시(`equipmentId` 포함) |
 | `GET /work-orders/{id}/plan-suggestion?from=` | 읽기 | 위 P1~P7. `{workOrderId, equipmentId, from, plannedStartAt, plannedEndAt, remainingQuantity, capacityPerHour, productionHours, changeoverHours, neededHours, changeoverFrom, movedPast}`. 시각은 계획 시간대 |
 | `POST /work-orders/plan-suggestions` | 읽기 | 위 P8~P11. 본문 `{projectId, workOrderIds, from?}`, 응답 `{from, lines: [{workOrderId, workOrderNumber, workOrderStatus, suggestion, problem}]}`. 형식이 틀린 본문 400 `Send projectId, workOrderIds as a list of work order ids and from as text.` |
+| `POST /work-orders/plan-order` | 읽기 | 위 P13~P16. 본문은 P8과 같고 응답 `{workOrderIds, changeoverMinutes, givenChangeoverMinutes, groups}` |
 | `GET /holidays?projectId=` | 읽기 | 휴일 목록(날짜순) `[{holidayId, date, name, createdBy}]` |
 | `POST /holidays` | 쓰기 | `{projectId, date: "2032-03-03", name?}`. 같은 날짜 409, 날짜 형식·누락 400, 이름 100자 초과 400. 응답은 전체 목록 |
 | `DELETE /holidays/{holidayId}` | 쓰기 | 소프트 삭제, 없거나 이미 지운 휴일 404. 응답은 전체 목록 |
@@ -166,6 +173,8 @@ DB 제약: 요일 형식 CHECK, 정지 종류 CHECK, `ends_at > starts_at`, 삭�
 - 작업지시 행의 계획 날짜 아래에 `on 설비코드`.
 - 설비가 붙은 작업지시는 **Plan from**(기본: 계획 시작이 아직 앞이면 그 시각, 아니면 다음 분)과 **Suggest dates** → `Mon 2030-01-07 09:00 → Tue 2030-01-08 11:00 · needs 10 h`(전환 시간이 있으면 `(with 1.5 h changeover after WO-…)`, 비켜 간 작업지시는 `· after WO-…`). 초안이면 **Use these dates**(작업지시 수정 API로 편집 필드를 모두 그대로 보내고 날짜만 바꿈, 저장 뒤 준비 점검을 다시 불러옴), 아니면 `Only a draft's planned dates can change.` 거절은 서버 메시지를 그대로 보여 줌. 설비를 바꾸면 제안을 다시 불러옴
 - 작업지시 표 아래 **Plan several orders**(2do, P12): 체크한 순서대로 제안하고, 초안만 **Use these dates for N drafts**로 함께 저장한다.
+- 같은 곳의 **Suggest order**(2dq, P16): 고른 작업지시를 설비별 전환 시간이 가장 적은 순서로 바꾼다.
+- 같은 곳에서 소유자는 승인 작업지시를 사유 하나로 함께 일정 변경한다(2ds, P17).
 
 ## 검증
 
@@ -190,6 +199,8 @@ DB 제약: 요일 형식 CHECK, 정지 종류 CHECK, `ends_at > starts_at`, 삭�
 - `workOrderPlanModel.test.ts` 4건: 현지 시각 표시(`Mon 2030-01-07 09:00`), 기본 시작(앞에 있는 계획 시작, 아니면 다음 분), 요약(전환 시간·비켜 간 작업지시), 초안 저장 본문(편집 필드 유지)
 - 실 화면 `e2e/work-order-plan.spec.ts`(REAL_API_E2E, `timezoneId: Asia/Seoul`, CI browser-e2e에 추가): API로 설비(시간당 10, 09:00–17:00 월–금)와 초안(100, 월 09–10시)을 만들고 설비를 붙임 → Readiness `needs 10 h for 100 but has only 1 h` → **Plan from** 기본값 `2030-01-07T09:00`을 00:00으로 바꿔 **Suggest dates** → `Mon 2030-01-07 09:00 → Tue 2030-01-08 11:00 · needs 10 h` → **Use these dates** → Readiness `needs 10 h of the 10 h`. 끝나면 설비 떼기, 작업지시 취소, 설비 삭제
 - 여러 작업지시(2026-10-12, 2do) `WorkOrderBatchPlanIntegrationTest`: 09:00–17:00 월–금·시간당 10 설비, 빨강 → 파랑 60분 전환. [빨강 100, 설비 없음, 파랑 50] → 빨강 월 09:00–화 11:00, 설비 없음은 `problem`, 파랑은 빨강 뒤 화 11:00–17:00(전환 1 h, `changeoverFrom`·`movedPast` 빨강). [파랑, 빨강] → 파랑 월 09–14, 빨강 월 14:00–화 16:00(전환 규칙 없음). 빨강 승인 뒤 파랑만 → 승인된 빨강을 비켜 화 11:00, [파랑, 빨강] → 빨강 자기 기간은 세지 않아 파랑 월 09:00. `from` 없음 → 응답 `from` null, 저장 안 됨. 중복·빈 목록·51개·`from` 형식·`projectId` 없음·형식 틀린 본문 400, 없는 작업지시 404, 외부인 403. 계획 제안·준비 점검·부하표·모듈 경계 관련 13건 실패 0. `workOrderPlanModel.test.ts` +2(고를 수 있는 작업지시, 초안만 적용). 모의 E2E `e2e/work-order-batch-plan.spec.ts`(설비 없는 작업지시는 안 보임, 누른 순서·요청 본문, 줄 문장·문제·승인 안내, 초안 2개만 순서대로 저장).
+- 순서 제안(2026-10-12, 2dq) `WorkOrderBatchPlanIntegrationTest` 둘째: A→B·B→C 10분, 나머지 60분인 설비. [C, 설비 없음, B, A] → A, B, C(20분, 준 순서 120분), 설비 없는 것은 맨 뒤, `after` 없음. 10:00 전에 승인된 C 작업지시가 있으면 C, A, B(70분, 준 순서 A, B, C는 80분), `after`가 그 번호. 07:00부터면 앞 작업지시가 없어 A, B, C. 중복 400, 외부인 403. `WorkOrderSequenceServiceTest`(정확한 순서·같은 합의 순위 유지·싼 첫걸음 함정·13개 근사). 배치·순서·단일 제안·모듈 경계 관련 7건 실패 0. `workOrderPlanModel.test.ts` +1(안내 문장). 모의 E2E `e2e/work-order-batch-plan.spec.ts` 둘째(하나만 고르면 꺼짐, 요청 본문, 새 순번, 체크를 바꾸면 안내 사라짐).
+- 승인 함께 일정 변경(2026-10-13, 2ds, 프런트만): `workOrderPlanModel.test.ts` +2(승인만 고르기, 지금 기간을 기대값으로 한 변경 본문). 모의 E2E `e2e/work-order-batch-plan.spec.ts` 셋째 — 소유자, 승인 2건 제안 → 사유 없으면 버튼 꺼짐 → 둘째가 409로 거절되면 `… 1 rescheduled before it.` → 다시 누르면 둘째만 보내 `Rescheduled 2 approved orders.`, 첫 본문의 `expectedPlannedStartAt`·`plannedStartAt`·사유·`requestId`. 타입·lint 통과.
 
 ## 2026-10-05 확정: 승인 작업지시 일정
 

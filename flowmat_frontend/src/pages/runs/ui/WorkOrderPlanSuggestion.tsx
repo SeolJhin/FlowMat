@@ -8,7 +8,8 @@ import { defaultPlanFrom, planInput, planSummary } from '../model/workOrderPlanM
 
 /**
  * Suggests planned dates from the assigned equipment's shifts, downtime, changeover and the orders already planned on it
- * (docs/domain/equipment-schedule.md "계획 기간 제안"). A draft can take them; other orders only show them.
+ * (docs/domain/equipment-schedule.md "계획 기간 제안"), and from the crew's shifts and other orders
+ * (docs/domain/worker-calendar.md WC24-WC26). A draft can take them; other orders only show them.
  */
 export function WorkOrderPlanSuggestion({ order, projectId }: { order: WorkOrderDto; projectId: string }) {
   const queryClient = useQueryClient()

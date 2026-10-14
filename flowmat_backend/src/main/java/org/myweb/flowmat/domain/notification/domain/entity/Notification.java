@@ -34,4 +34,6 @@ public class Notification {
 
     private OffsetDateTime readAt;
     private OffsetDateTime createdAt;
+    /** A reminder's key (V79, NS5): the same key reaches the same person once. Null for everything else. */
+    private String dedupeKey;
 }

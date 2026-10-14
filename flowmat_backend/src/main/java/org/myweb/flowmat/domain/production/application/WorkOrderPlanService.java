@@ -2,14 +2,20 @@ package org.myweb.flowmat.domain.production.application;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -23,10 +29,16 @@ import org.myweb.flowmat.domain.production.api.dto.response.WorkOrderBatchPlanRe
 import org.myweb.flowmat.domain.production.api.dto.response.WorkOrderPlanSuggestionResponse;
 import org.myweb.flowmat.domain.production.domain.entity.ProductionRun;
 import org.myweb.flowmat.domain.production.domain.entity.WorkOrder;
+import org.myweb.flowmat.domain.production.domain.entity.WorkOrderCrew;
+import org.myweb.flowmat.domain.production.repository.WorkOrderCrewRepository;
+import org.myweb.flowmat.domain.workforce.application.publicapi.WorkerCalendarQuery;
+import org.myweb.flowmat.domain.workforce.application.publicapi.WorkerHours;
+import org.myweb.flowmat.domain.workforce.application.publicapi.WorkerTime;
 import org.myweb.flowmat.domain.production.domain.enums.WorkOrderStatus;
 import org.myweb.flowmat.domain.production.repository.ProductionRunRepository;
 import org.myweb.flowmat.domain.production.repository.WorkOrderRepository;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.springframework.stereotype.Service;
@@ -46,11 +58,15 @@ public class WorkOrderPlanService {
     private static final BigDecimal SECONDS_PER_HOUR = BigDecimal.valueOf(3600);
     private static final BigDecimal MINUTES_PER_HOUR = BigDecimal.valueOf(60);
     private static final int MAX_BATCH = 50;
+    private static final Duration SEARCH_WINDOW = Duration.ofDays(366);
 
     private final WorkOrderRepository workOrderRepository;
     private final ProductionRunRepository productionRunRepository;
     private final CatalogQuery catalogQuery;
     private final ProjectAccessService projectAccessService;
+    private final WorkOrderCrewRepository crewRepository;
+    private final WorkerCalendarQuery workerCalendars;
+    private final ProjectCalendarQuery projectCalendar;
 
     public WorkOrderPlanSuggestionResponse suggest(String workOrderId, String from) {
         WorkOrder order = workOrderRepository.findByWorkOrderIdAndDeletedYn(workOrderId, NOT_DELETED)
@@ -159,16 +175,29 @@ public class WorkOrderPlanService {
             .filter(other -> other.getPlannedStartAt() != null && other.getPlannedEndAt() != null
                 && other.getPlannedEndAt().isAfter(other.getPlannedStartAt()))
             .toList();
+        CrewPlan crewPlan = crewPlan(order, excluded, placed);
         List<String> movedPast = new ArrayList<>();
+        List<WorkOrderPlanSuggestionResponse.CrewBooking> crewMovedPast = new ArrayList<>();
         OffsetDateTime cursor = start;
-        // Every round moves past at least one planned order or settles the changeover, so this many rounds are enough.
-        for (int round = 0; round <= 2 * planned.size() + 2; round++) {
+        // Every round moves past at least one planned order, one booking of the crew or settles the changeover.
+        for (int round = 0; round <= 2 * (planned.size() + crewPlan.bookings().size()) + 2; round++) {
             BigDecimal changeoverHours = changeoverHours(order, equipment, EquipmentSequence.previous(cursor, others));
             BigDecimal needed = productionHours.add(changeoverHours);
             OffsetDateTime searchFrom = cursor;
-            EquipmentSlot slot = catalogQuery.earliestSlot(equipment.equipmentId(), searchFrom, seconds(needed))
-                .orElseThrow(() -> conflict(name + " does not have " + plain(needed) + " h available in the 366 days from "
-                    + searchFrom + "."));
+            Map<String, WorkerTime> crewTime = crewPlan.userIds().isEmpty() ? Map.of()
+                : workerCalendars.workingTime(order.getProjectId(), crewPlan.userIds(), searchFrom, searchFrom.plus(SEARCH_WINDOW));
+            // Only people needed for all of their time fix when the order runs (WC39).
+            List<String> shiftCrew = crewPlan.userIds().stream()
+                .filter(userId -> crewTime.containsKey(userId) && crewTime.get(userId).calendarSet()
+                    && crewPlan.shares().get(userId) == WorkOrderCrewService.FULL_SHARE)
+                .toList();
+            EquipmentSlot slot = (shiftCrew.isEmpty()
+                    ? catalogQuery.earliestSlot(equipment.equipmentId(), searchFrom, seconds(needed))
+                    : slotWithCrew(order.getProjectId(), equipment.equipmentId(), searchFrom, seconds(needed), shiftCrew, crewTime))
+                .orElseThrow(() -> conflict(shiftCrew.isEmpty()
+                    ? name + " does not have " + plain(needed) + " h available in the 366 days from " + searchFrom + "."
+                    : name + " and the crew do not have " + plain(needed) + " h available together in the 366 days from "
+                        + searchFrom + "."));
             // The order before the slot can differ from the one before the search start; its changeover then decides.
             WorkOrder before = EquipmentSequence.previous(slot.start(), others);
             if (changeoverHours(order, equipment, before).compareTo(changeoverHours) != 0) {
@@ -180,16 +209,29 @@ public class WorkOrderPlanService {
                 .filter(other -> other.getPlannedStartAt().isBefore(end) && other.getPlannedEndAt().isAfter(slot.start()))
                 .sorted(Comparator.comparing(WorkOrder::getPlannedStartAt))
                 .toList();
-            if (clashes.isEmpty()) {
+            Map<CrewBookingOf, List<String>> crewClashes = crewClashes(crewPlan, slot.start(), end, crewTime);
+            if (clashes.isEmpty() && crewClashes.isEmpty()) {
+                List<String> waitedFor = shiftCrew.isEmpty() ? List.of()
+                    : waitedFor(equipment.equipmentId(), searchFrom, seconds(needed), slot, shiftCrew, crewTime);
                 return new WorkOrderPlanSuggestionResponse(order.getWorkOrderId(), equipment.equipmentId(), start, slot.start(),
                     end, remaining, rate, productionHours, changeoverHours, needed,
-                    changeoverHours.signum() > 0 ? before.getWorkOrderNumber() : null, List.copyOf(movedPast));
+                    changeoverHours.signum() > 0 ? before.getWorkOrderNumber() : null, List.copyOf(movedPast),
+                    crewHours(order.getProjectId(), crewPlan, slot.start(), end), waitedFor, List.copyOf(crewMovedPast));
             }
             clashes.stream()
                 .map(WorkOrder::getWorkOrderNumber)
                 .filter(number -> !movedPast.contains(number))
                 .forEach(movedPast::add);
-            cursor = clashes.stream().map(WorkOrder::getPlannedEndAt).max(Comparator.naturalOrder()).orElseThrow();
+            for (Map.Entry<CrewBookingOf, List<String>> clash : crewClashes.entrySet()) {
+                String number = clash.getKey().order().getWorkOrderNumber();
+                if (crewMovedPast.stream().noneMatch(one -> one.workOrderNumber().equals(number))) {
+                    crewMovedPast.add(new WorkOrderPlanSuggestionResponse.CrewBooking(number, clash.getValue()));
+                }
+            }
+            cursor = Stream.concat(clashes.stream().map(WorkOrder::getPlannedEndAt),
+                    crewClashes.keySet().stream().map(booking -> booking.order().getPlannedEndAt()))
+                .max(Comparator.naturalOrder())
+                .orElseThrow();
         }
         throw conflict("No free time found on " + name + " around the orders already planned on it.");
     }
@@ -212,6 +254,181 @@ public class WorkOrderPlanService {
         OffsetDateTime now = wholeMinute(OffsetDateTime.now(ZoneOffset.UTC));
         OffsetDateTime planned = order.getPlannedStartAt();
         return planned != null && planned.isAfter(now) ? planned : now;
+    }
+
+    /**
+     * The order's crew, each person's shift hours in the suggested window and their share (docs/domain/worker-calendar.md
+     * WC14, WC36).
+     */
+    private List<WorkOrderPlanSuggestionResponse.Crew> crewHours(String projectId, CrewPlan crewPlan, OffsetDateTime start,
+                                                                 OffsetDateTime end) {
+        if (crewPlan.userIds().isEmpty()) {
+            return List.of();
+        }
+        Map<String, WorkerHours> hours = workerCalendars.workingHours(projectId, crewPlan.userIds(), start, end);
+        return crewPlan.userIds().stream()
+            .map(userId -> {
+                WorkerHours one = hours.get(userId);
+                int share = crewPlan.shares().get(userId);
+                return one == null ? new WorkOrderPlanSuggestionResponse.Crew(userId, false, BigDecimal.ZERO, share)
+                    : new WorkOrderPlanSuggestionResponse.Crew(userId, one.calendarSet(), one.hours(), share);
+            })
+            .toList();
+    }
+
+    /** The crew of the order being placed, their shares, and the approved or running orders that hold some of them (WC25). */
+    private record CrewPlan(List<String> userIds, Map<String, Integer> shares, List<CrewBookingOf> bookings) {
+    }
+
+    /** Another order that names some of the crew, in the dates it holds them; each person's share of it, in crew order. */
+    private record CrewBookingOf(WorkOrder order, Map<String, Integer> shares) {
+    }
+
+    private record Stretch(Instant start, Instant end) {
+    }
+
+    /**
+     * The order's crew and the orders that hold them (WC25): saved approved or running orders of the project with planned
+     * dates, except the ones being planned again, plus the ones a batch has already placed, in their suggested dates.
+     */
+    private CrewPlan crewPlan(WorkOrder order, Set<String> excluded, List<WorkOrder> placed) {
+        Map<String, Integer> shares = new LinkedHashMap<>();
+        crewRepository.findAllByWorkOrderIdOrderByAddedAtAscCrewIdAsc(order.getWorkOrderId())
+            .forEach(member -> shares.put(member.getUserId(), WorkOrderCrewService.shareOf(member)));
+        if (shares.isEmpty()) {
+            return new CrewPlan(List.of(), Map.of(), List.of());
+        }
+        List<String> crew = List.copyOf(shares.keySet());
+        Map<String, Map<String, Integer>> sharesByOrder = new LinkedHashMap<>();
+        for (WorkOrderCrew member : crewRepository.findAllByUserIdIn(crew)) {
+            sharesByOrder.computeIfAbsent(member.getWorkOrderId(), id -> new LinkedHashMap<>())
+                .put(member.getUserId(), WorkOrderCrewService.shareOf(member));
+        }
+        sharesByOrder.remove(order.getWorkOrderId());
+        List<CrewBookingOf> bookings = new ArrayList<>();
+        List<String> saved = sharesByOrder.keySet().stream().filter(id -> !excluded.contains(id)).toList();
+        if (!saved.isEmpty()) {
+            workOrderRepository.findAllById(saved).stream()
+                .filter(other -> order.getProjectId().equals(other.getProjectId()) && NOT_DELETED.equals(other.getDeletedYn()))
+                .filter(other -> WorkOrderServiceImpl.status(other).acceptsRuns())
+                .filter(WorkOrderPlanService::hasDates)
+                .forEach(other -> bookings.add(new CrewBookingOf(other, inCrewOrder(sharesByOrder.get(other.getWorkOrderId()), crew))));
+        }
+        for (WorkOrder other : placed) {
+            Map<String, Integer> shared = sharesByOrder.get(other.getWorkOrderId());
+            if (shared != null && hasDates(other)) {
+                bookings.add(new CrewBookingOf(other, inCrewOrder(shared, crew)));
+            }
+        }
+        return new CrewPlan(crew, Map.copyOf(shares), List.copyOf(bookings));
+    }
+
+    private static Map<String, Integer> inCrewOrder(Map<String, Integer> shares, List<String> crew) {
+        Map<String, Integer> ordered = new LinkedHashMap<>();
+        crew.stream().filter(shares::containsKey).forEach(userId -> ordered.put(userId, shares.get(userId)));
+        return ordered;
+    }
+
+    private static boolean hasDates(WorkOrder order) {
+        return order.getPlannedStartAt() != null && order.getPlannedEndAt() != null
+            && order.getPlannedEndAt().isAfter(order.getPlannedStartAt());
+    }
+
+    /**
+     * The orders that, with this order's shares, want more than all of some crew member's time in [start, end), each with the
+     * people it holds too much (WC25, WC39): working time of theirs falls there, or their time is not known because they have
+     * no shifts. Earliest first.
+     */
+    private static Map<CrewBookingOf, List<String>> crewClashes(CrewPlan crewPlan, OffsetDateTime start, OffsetDateTime end,
+                                                                Map<String, WorkerTime> crewTime) {
+        List<CrewBookingOf> sorted = crewPlan.bookings().stream()
+            .sorted(Comparator.comparing(booking -> booking.order().getPlannedStartAt()))
+            .toList();
+        Map<CrewBookingOf, List<String>> found = new LinkedHashMap<>();
+        for (String userId : crewPlan.userIds()) {
+            List<CrewLoad.Held> held = sorted.stream()
+                .filter(booking -> booking.shares().containsKey(userId))
+                .map(booking -> new CrewLoad.Held(booking.order(), booking.shares().get(userId)))
+                .toList();
+            if (held.isEmpty()) {
+                continue;
+            }
+            Set<WorkOrder> over = CrewLoad.overBooked(crewPlan.shares().get(userId), held, start, end, crewTime.get(userId)).keySet();
+            sorted.stream()
+                .filter(booking -> over.contains(booking.order()))
+                .forEach(booking -> found.computeIfAbsent(booking, key -> new ArrayList<>()).add(userId));
+        }
+        Map<CrewBookingOf, List<String>> ordered = new LinkedHashMap<>();
+        sorted.stream().filter(found::containsKey).forEach(booking -> ordered.put(booking, List.copyOf(found.get(booking))));
+        return ordered;
+    }
+
+    /**
+     * The earliest stretch from {@code from} that holds {@code seconds} of time when the equipment is available and everyone
+     * on the crew with shifts is working (WC24), counted like {@link CatalogQuery#earliestSlot}. Empty when the 366 days from
+     * {@code from} do not hold that much.
+     */
+    private Optional<EquipmentSlot> slotWithCrew(String projectId, String equipmentId, OffsetDateTime from, long seconds,
+                                                 List<String> shiftCrew, Map<String, WorkerTime> crewTime) {
+        List<Stretch> together = catalogQuery.availableSlots(equipmentId, from, from.plus(SEARCH_WINDOW)).orElse(List.of()).stream()
+            .map(slot -> new Stretch(slot.start().toInstant(), slot.end().toInstant()))
+            .toList();
+        for (String userId : shiftCrew) {
+            together = intersect(together, crewTime.get(userId).spans());
+        }
+        ZoneId zone = projectCalendar.zone(projectId);
+        Instant first = null;
+        long left = seconds;
+        for (Stretch stretch : together) {
+            if (first == null) {
+                first = stretch.start();
+            }
+            long length = Duration.between(stretch.start(), stretch.end()).getSeconds();
+            if (length >= left) {
+                return Optional.of(new EquipmentSlot(first.atZone(zone).toOffsetDateTime(),
+                    stretch.start().plusSeconds(left).atZone(zone).toOffsetDateTime()));
+            }
+            left -= length;
+        }
+        return Optional.empty();
+    }
+
+    /** Both lists earliest first and none overlapping within each. */
+    private static List<Stretch> intersect(List<Stretch> stretches, List<WorkerTime.Span> spans) {
+        List<Stretch> result = new ArrayList<>();
+        int one = 0;
+        int other = 0;
+        while (one < stretches.size() && other < spans.size()) {
+            Stretch stretch = stretches.get(one);
+            WorkerTime.Span span = spans.get(other);
+            Instant start = stretch.start().isAfter(span.start()) ? stretch.start() : span.start();
+            Instant end = stretch.end().isBefore(span.end()) ? stretch.end() : span.end();
+            if (end.isAfter(start)) {
+                result.add(new Stretch(start, end));
+            }
+            if (stretch.end().isBefore(span.end())) {
+                one++;
+            } else {
+                other++;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Crew members with shifts who were not working when the equipment alone could have started: the people the suggestion
+     * waited for (WC25). None when the crew did not move the start.
+     */
+    private List<String> waitedFor(String equipmentId, OffsetDateTime from, long seconds, EquipmentSlot slot,
+                                   List<String> shiftCrew, Map<String, WorkerTime> crewTime) {
+        Optional<EquipmentSlot> alone = catalogQuery.earliestSlot(equipmentId, from, seconds);
+        if (alone.isEmpty() || !slot.start().isAfter(alone.get().start())) {
+            return List.of();
+        }
+        Instant at = alone.get().start().toInstant();
+        return shiftCrew.stream()
+            .filter(userId -> crewTime.get(userId).secondsBetween(at, at.plusSeconds(1)) == 0)
+            .toList();
     }
 
     /** An order placed in a batch, as approved work in its suggested dates for the orders placed after it (P9). Not saved. */

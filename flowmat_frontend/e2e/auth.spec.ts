@@ -117,6 +117,11 @@ async function mockAuthApi(page: Page) {
 }
 
 async function mockWorkspaceApi(page: Page) {
+  await page.route('**/api/workflows/wf-e2e/revisions', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify({ success: true, data: [], message: null }) })
+  })
+
   await page.route('**/api/workflows/wf-e2e/canvas', async (route) => {
     await route.fulfill({
       status: 200,
@@ -311,6 +316,13 @@ test('authenticated home keeps notification queries inside the mocked API', asyn
 
 test('simultaneous tabs serialize rotating refresh cookies', async ({ browser }) => {
   const context = await browser.newContext()
+  const unmockedApiPaths: string[] = []
+  // Reject API calls that escape the fixtures, as the real backend rejects the fake access token.
+  await context.route((url) => url.pathname.startsWith('/api/'), async (route) => {
+    unmockedApiPaths.push(new URL(route.request().url()).pathname)
+    await route.fulfill({ status: 401, contentType: 'application/json',
+      body: JSON.stringify({ success: false, data: null, message: 'Unmocked API request' }) })
+  })
   try {
     const first = await context.newPage()
     const second = await context.newPage()
@@ -356,6 +368,7 @@ test('simultaneous tabs serialize rotating refresh cookies', async ({ browser })
     ])
     await expect(first.getByText('E2E Workflow')).toBeVisible()
     await expect(second.getByText('E2E Workflow')).toBeVisible()
+    expect(unmockedApiPaths, 'Auth fixtures must cover every workspace API request').toEqual([])
     expect(rejectedRefreshes).toBe(0)
     expect(usedTokens.size).toBe(2)
   } finally {

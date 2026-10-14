@@ -1,5 +1,7 @@
 package org.myweb.flowmat.domain.project.application;
 
+import java.util.ArrayList;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.project.application.publicapi.ProjectMemberQuery;
 import org.myweb.flowmat.domain.project.repository.ProjectMemberRepository;
@@ -36,5 +38,19 @@ public class ProjectMemberQueryImpl implements ProjectMemberQuery {
     public String ownerOf(String projectId) {
         return projectId == null ? null
             : projectRepository.findByProjectIdAndDeletedYn(projectId, "N").map(project -> project.getOwnerId()).orElse(null);
+    }
+
+    @Override
+    public List<String> readers(String projectId) {
+        String owner = ownerOf(projectId);
+        if (owner == null) {
+            return List.of();
+        }
+        List<String> readers = new ArrayList<>(List.of(owner));
+        projectMemberRepository.findAllByProjectIdAndMemberStatusOrderByCreatedAtAsc(projectId, ACTIVE).stream()
+            .map(member -> member.getUserId())
+            .filter(userId -> !readers.contains(userId))
+            .forEach(readers::add);
+        return List.copyOf(readers);
     }
 }

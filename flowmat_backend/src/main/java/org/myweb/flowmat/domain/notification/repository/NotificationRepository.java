@@ -12,4 +12,6 @@ public interface NotificationRepository extends JpaRepository<Notification, Stri
     List<Notification> findAllByUserIdAndRead(String userId, boolean read);
 
     Optional<Notification> findByNfcIdAndUserId(String nfcId, String userId);
+
+    boolean existsByUserIdAndDedupeKey(String userId, String dedupeKey);
 }

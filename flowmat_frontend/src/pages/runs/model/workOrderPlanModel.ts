@@ -2,7 +2,9 @@ import type {
   WorkOrderBatchPlanDto, WorkOrderPlanOrderDto, WorkOrderPlanSuggestionDto,
 } from '../../../entities/production/api/useWorkOrderPlan'
 import type { WorkOrderInput } from '../../../entities/production/api/useWorkOrders'
+import type { WorkOrderRescheduleInput } from '../../../entities/production/api/useWorkOrderReschedule'
 import type { WorkOrderDto } from '../../../shared/types/api'
+import { crewDelayNote, crewNote } from './crewModel'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -42,6 +44,7 @@ export function planSummary(plan: WorkOrderPlanSuggestionDto): string {
     : ''
   const after = plan.movedPast.length > 0 ? ` · after ${plan.movedPast.join(', ')}` : ''
   return `${planStamp(plan.plannedStartAt)} → ${planStamp(plan.plannedEndAt)} · needs ${hours(plan.neededHours)}${changeover}${after}`
+    + crewDelayNote(plan.waitedForCrew, plan.crewMovedPast) + crewNote(plan.crew)
 }
 
 /** Orders a batch can plan: drafts and approved orders with equipment (docs/domain/equipment-schedule.md P8, P12). */
@@ -50,15 +53,40 @@ export function batchPlannable(orders: WorkOrderDto[]): WorkOrderDto[] {
     && (order.workOrderStatus === 'draft' || order.workOrderStatus === 'approved'))
 }
 
-/** The drafts of a batch answer that take their dates now; an approved order waits for the owner's reschedule (P12). */
-export function batchDrafts(
+function batchOfStatus(
   lines: WorkOrderBatchPlanDto['lines'],
   orders: WorkOrderDto[],
+  status: WorkOrderDto['workOrderStatus'],
 ): { order: WorkOrderDto; plan: WorkOrderPlanSuggestionDto }[] {
   return lines.flatMap((line) => {
     const order = orders.find((one) => one.workOrderId === line.workOrderId)
-    return order && order.workOrderStatus === 'draft' && line.suggestion ? [{ order, plan: line.suggestion }] : []
+    return order && order.workOrderStatus === status && line.suggestion ? [{ order, plan: line.suggestion }] : []
   })
+}
+
+/** The drafts of a batch answer that take their dates now; an approved order waits for the owner's reschedule (P12). */
+export function batchDrafts(lines: WorkOrderBatchPlanDto['lines'], orders: WorkOrderDto[]) {
+  return batchOfStatus(lines, orders, 'draft')
+}
+
+/** The approved orders of a batch answer that the project owner can reschedule to their suggestion (P17). */
+export function batchApproved(lines: WorkOrderBatchPlanDto['lines'], orders: WorkOrderDto[]) {
+  return batchOfStatus(lines, orders, 'approved')
+}
+
+/** A reschedule of an approved order to its suggestion, checked against the dates it has now (P17, policy C). */
+export function rescheduleInput(
+  order: Pick<WorkOrderDto, 'plannedStartAt' | 'plannedEndAt'>,
+  plan: Pick<WorkOrderPlanSuggestionDto, 'plannedStartAt' | 'plannedEndAt'>,
+  reason: string,
+): WorkOrderRescheduleInput {
+  return {
+    expectedPlannedStartAt: order.plannedStartAt,
+    expectedPlannedEndAt: order.plannedEndAt,
+    plannedStartAt: plan.plannedStartAt,
+    plannedEndAt: plan.plannedEndAt,
+    reason,
+  }
 }
 
 /** What a suggested order saves, e.g. "Reordered for fewer changeovers: 20 min instead of 120 min." (P16). */

@@ -39,6 +39,9 @@ public class BomHeader extends CreatedUpdatedAuditEntity {
 
     private String approvedBy;
     private OffsetDateTime approvedAt;
+    /** Who submitted this revision for approval and when (V78); the owner's decision tells them (notification NT8). */
+    private String submittedBy;
+    private OffsetDateTime submittedAt;
     private String note;
 
     /** Inclusive dates; a missing boundary is unbounded. Managed through the explicit effectivity command. */

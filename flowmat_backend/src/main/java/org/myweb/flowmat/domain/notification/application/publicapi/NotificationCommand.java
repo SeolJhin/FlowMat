@@ -1,5 +1,7 @@
 package org.myweb.flowmat.domain.notification.application.publicapi;
 
+import java.util.Set;
+
 /**
  * Tells people in the app about work given to them (docs/domain/notification.md NT2), for other bounded contexts, which
  * use this instead of the notification repositories (docs/architecture/adr/ADR-002-module-dependency.md).
@@ -21,4 +23,18 @@ public interface NotificationCommand {
      * caller's transaction. Unlike {@link #notifyAssignee} it tells them even when they caused it.
      */
     void tell(String userId, String projectId, String type, String title, String body, String refType, String refId);
+
+    /**
+     * Tells everyone who chose {@code topic} in the project and can still read it (NS3), except {@code alreadyTold}, in the
+     * caller's transaction.
+     */
+    void tellSubscribers(String projectId, String topic, Set<String> alreadyTold, String type, String title, String body,
+                         String refType, String refId);
+
+    /**
+     * Tells {@code userId} once per {@code dedupeKey}, and only while they can read the project (NS5): a reminder the sweep
+     * finds again is not repeated. Whether it was sent.
+     */
+    boolean tellOnce(String userId, String projectId, String type, String title, String body, String refType, String refId,
+                     String dedupeKey);
 }

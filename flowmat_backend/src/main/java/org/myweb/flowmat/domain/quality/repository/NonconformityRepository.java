@@ -1,6 +1,7 @@
 package org.myweb.flowmat.domain.quality.repository;
 
 import jakarta.persistence.LockModeType;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.myweb.flowmat.domain.quality.domain.entity.Nonconformity;
@@ -14,6 +15,9 @@ public interface NonconformityRepository extends JpaRepository<Nonconformity, St
     List<Nonconformity> findAllByProjectIdOrderByRaisedAtDesc(String projectId);
 
     long countByProjectId(String projectId);
+
+    List<Nonconformity> findAllByProjectIdInAndStatusAndVerifiedAtIsNullAndVerificationDueDateIsNotNull(
+        Collection<String> projectIds, String status);
 
     /** Locks the nonconformity so its actions are numbered and changed one at a time. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)

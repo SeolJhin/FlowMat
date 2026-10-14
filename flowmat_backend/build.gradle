@@ -75,6 +75,9 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	// The integration suite retains several JPA/Redis contexts in one test JVM.
+	maxHeapSize = '2g'
+	systemProperty 'spring.test.context.cache.maxSize', '4'
 	finalizedBy tasks.named('jacocoTestReport')
 }
 
@@ -97,8 +100,8 @@ tasks.named('jacocoTestCoverageVerification') {
 		rule {
 			element = 'PACKAGE'
 			includes = [
-				'org/myweb/flowmat/global/security/*.class',
-				'org/myweb/flowmat/domain/project/application/*.class'
+				'org.myweb.flowmat.global.security',
+				'org.myweb.flowmat.domain.project.application'
 			]
 			limit {
 				counter = 'LINE'

@@ -518,6 +518,14 @@ public class EquipmentScheduleService {
         return Optional.empty();
     }
 
+    /** {@link #available} in the planning time zone, for planning that also follows people (worker-calendar.md WC24). */
+    public List<EquipmentSlot> availableSlots(Equipment equipment, OffsetDateTime from, OffsetDateTime to) {
+        ZoneId zone = zone(equipment.getProjectId());
+        return available(equipment, from, to).stream()
+            .map(span -> new EquipmentSlot(span.start().atZone(zone).toOffsetDateTime(), span.end().atZone(zone).toOffsetDateTime()))
+            .toList();
+    }
+
     /** The shifts in [from, to) (all of it without a calendar) less downtime: earliest first, none overlapping. */
     private List<Span> available(Equipment equipment, OffsetDateTime from, OffsetDateTime to) {
         Instant start = from.toInstant();

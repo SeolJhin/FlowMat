@@ -33,6 +33,36 @@ export function useWorkOrderReschedulesQuery(workOrderId: string) {
     )),
   })
 }
+/**
+ * Reschedules several orders one call at a time (docs/domain/equipment-schedule.md P17, owner only). As for one order, the
+ * same order with the same contents keeps its key until acknowledged, so a retry after a lost reply is not applied twice.
+ */
+export function useRescheduleWorkOrdersMutation(projectId: string) {
+  const client = useQueryClient()
+  const [send] = useState(() => {
+    const pending = new Map<string, string>()
+    return async ({ workOrderId, input }: { workOrderId: string; input: WorkOrderRescheduleInput }) => {
+      const signature = JSON.stringify([workOrderId, input])
+      const requestId = pending.get(signature) ?? crypto.randomUUID()
+      pending.set(signature, requestId)
+      const result = unwrapApiResponse(await httpClient.post<ApiEnvelope<Result>>(
+        `/work-orders/${encodeURIComponent(workOrderId)}/reschedules`, { ...input, requestId },
+      ))
+      pending.delete(signature)
+      return result
+    }
+  })
+  return useMutation({
+    mutationFn: send,
+    onSettled: (_result, _error, { workOrderId }) => {
+      for (const key of [ ['work-orders', projectId], ['work-order-reschedules', workOrderId],
+        ['work-order-readiness', workOrderId], ['work-order-plan'], ['equipment-load', projectId] ]) {
+        void client.invalidateQueries({ queryKey: key })
+      }
+    },
+  })
+}
+
 export function useRescheduleWorkOrderMutation(projectId: string, workOrderId: string) {
   const client = useQueryClient()
   // A response can be lost after commit. Identical contents reuse their key until acknowledged.

@@ -83,5 +83,6 @@
 |---|---|
 | [equipment.md](equipment.md) | 설비 정보(제조사·모델·위치·시간당 산출 등) |
 | [equipment-schedule.md](equipment-schedule.md) | 설비 달력·정지 시간·프로젝트 휴일과 작업지시 설비 점검 |
+| [worker-calendar.md](worker-calendar.md) | 작업자(프로젝트 구성원) 주간 교대·쉬는 날·휴일과 일하는 시간, 작업지시에 필요한 사람(crew), 작업자 부하·겹침 |
 | [equipment-changeover.md](equipment-changeover.md) | 설비 전환 시간(Setup/Changeover) |
 | [equipment-load.md](equipment-load.md) | 설비 부하표(주 단위) |

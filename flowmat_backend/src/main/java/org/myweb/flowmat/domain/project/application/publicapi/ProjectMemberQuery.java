@@ -1,5 +1,7 @@
 package org.myweb.flowmat.domain.project.application.publicapi;
 
+import java.util.List;
+
 /**
  * Project membership reads for other bounded contexts, which use this instead of the project repositories
  * (docs/architecture/adr/ADR-002-module-dependency.md). It answers and never refuses, so a caller inside a transaction
@@ -15,4 +17,7 @@ public interface ProjectMemberQuery {
 
     /** The owner of a project that is not deleted; null otherwise. */
     String ownerOf(String projectId);
+
+    /** Who can read the project: its owner first, then its active members in the order they joined; empty when deleted. */
+    List<String> readers(String projectId);
 }

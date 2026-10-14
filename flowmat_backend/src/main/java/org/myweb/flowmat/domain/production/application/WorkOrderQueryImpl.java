@@ -1,12 +1,15 @@
 package org.myweb.flowmat.domain.production.application;
 
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.production.application.publicapi.WorkOrderDueView;
 import org.myweb.flowmat.domain.production.application.publicapi.WorkOrderQuery;
 import org.myweb.flowmat.domain.production.application.publicapi.WorkOrderView;
 import org.myweb.flowmat.domain.production.domain.entity.WorkOrder;
@@ -39,6 +42,19 @@ public class WorkOrderQueryImpl implements WorkOrderQuery {
         }
         return workOrderRepository.findAllById(workOrderIds).stream()
             .collect(Collectors.toMap(WorkOrder::getWorkOrderId, WorkOrderQueryImpl::view));
+    }
+
+    @Override
+    public List<WorkOrderDueView> findDueBy(Collection<String> projectIds, OffsetDateTime until) {
+        if (projectIds.isEmpty()) {
+            return List.of();
+        }
+        return workOrderRepository.findAllByProjectIdInAndDeletedYnAndPlannedEndAtLessThanEqual(projectIds, NOT_DELETED, until)
+            .stream()
+            .filter(order -> WorkOrderStatus.fromCode(order.getWorkOrderStatus()).acceptsRuns())
+            .map(order -> new WorkOrderDueView(order.getWorkOrderId(), order.getProjectId(), order.getWorkOrderNumber(),
+                order.getWorkOrderTitle(), order.getPlannedEndAt()))
+            .toList();
     }
 
     private static WorkOrderView view(WorkOrder order) {

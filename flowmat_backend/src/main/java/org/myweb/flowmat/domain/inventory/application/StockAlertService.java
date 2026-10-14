@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -194,19 +195,17 @@ public class StockAlertService {
         alert.setAlertMessage(message);
         stockAlertRepository.save(alert);
         if (opening) {
-            tellOwner(inventory, alert);
+            announce(inventory, alert);
         }
     }
 
     /**
      * An alert that opens tells the project's owner (docs/domain/notification.md NT7), whoever moved the stock and also from
-     * the sweep; one that only changes severity, or stays open, tells no one again.
+     * the sweep, and the members who chose stock alerts (NS4), the owner once; one that only changes severity, or stays
+     * open, tells no one again.
      */
-    private void tellOwner(Inventory inventory, StockAlert alert) {
+    private void announce(Inventory inventory, StockAlert alert) {
         String owner = projectMemberQuery.ownerOf(inventory.getProjectId());
-        if (owner == null) {
-            return;
-        }
         String what = switch (alert.getAlertType()) {
             case StockAlert.LOW -> "Low stock";
             case StockAlert.OVER -> "Over the maximum";
@@ -214,8 +213,13 @@ public class StockAlertService {
         };
         String item = catalogReferences.item(inventory.getItemId()).map(Item::getItemCode).orElse(inventory.getItemId());
         String place = inventory.getLocation() == null || inventory.getLocation().isBlank() ? "" : " at " + inventory.getLocation();
-        notifications.tell(owner, inventory.getProjectId(), "stock_alert", what + ": " + item + place, alert.getAlertMessage(),
-            "stock_alert", alert.getStockAlertId());
+        String title = what + ": " + item + place;
+        if (owner != null) {
+            notifications.tell(owner, inventory.getProjectId(), "stock_alert", title, alert.getAlertMessage(), "stock_alert",
+                alert.getStockAlertId());
+        }
+        notifications.tellSubscribers(inventory.getProjectId(), "stock_alert", owner == null ? Set.of() : Set.of(owner),
+            "stock_alert", title, alert.getAlertMessage(), "stock_alert", alert.getStockAlertId());
     }
 
     private void close(StockAlert alert) {

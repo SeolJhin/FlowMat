@@ -9,9 +9,12 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.bom.api.dto.response.BomRequirementResponse;
 import org.myweb.flowmat.domain.bom.application.BomService;
@@ -27,6 +30,10 @@ import org.myweb.flowmat.domain.production.api.dto.response.WorkOrderReadinessRe
 import org.myweb.flowmat.domain.production.api.dto.response.WorkOrderReadinessResponse.Material;
 import org.myweb.flowmat.domain.production.domain.entity.ProductionRun;
 import org.myweb.flowmat.domain.production.domain.entity.WorkOrder;
+import org.myweb.flowmat.domain.production.domain.entity.WorkOrderCrew;
+import org.myweb.flowmat.domain.production.repository.WorkOrderCrewRepository;
+import org.myweb.flowmat.domain.workforce.application.publicapi.WorkerCalendarQuery;
+import org.myweb.flowmat.domain.workforce.application.publicapi.WorkerTime;
 import org.myweb.flowmat.domain.production.domain.enums.WorkOrderStatus;
 import org.myweb.flowmat.domain.production.repository.ProductionRunRepository;
 import org.myweb.flowmat.domain.production.repository.StockAllocationRepository;
@@ -64,6 +71,8 @@ public class WorkOrderReadinessService {
     @Value("${app.stock-alert.expiry-warning-days:7}")
     private int expiryWarningDays;
     private final ProjectAccessService projectAccessService;
+    private final WorkOrderCrewRepository crewRepository;
+    private final WorkerCalendarQuery workerCalendars;
 
     public WorkOrderReadinessResponse check(String workOrderId) {
         WorkOrder order = workOrderRepository.findByWorkOrderIdAndDeletedYn(workOrderId, NOT_DELETED)
@@ -122,6 +131,7 @@ public class WorkOrderReadinessService {
         if (order.getEquipmentId() != null) {
             equipmentChecks(order, remaining, checks);
         }
+        crewChecks(order, checks);
 
         boolean ready = checks.stream().noneMatch(check -> FAIL.equals(check.status()));
         return new WorkOrderReadinessResponse(order.getWorkOrderId(), ready, remaining, checks, materials);
@@ -204,6 +214,100 @@ public class WorkOrderReadinessService {
                 + (clashes.size() > 3 ? " and " + (clashes.size() - 3) + " more" : "");
             checks.add(new Check("schedule", WARN, name + " is also planned for " + listed + " in this window."));
         }
+    }
+
+    /**
+     * Only for an order that names its crew (docs/domain/worker-calendar.md WC13): each person's shift hours in the planned
+     * window, less days off and holidays, with their share when it is less than all (WC40). A warning when someone has no
+     * shifts or does not work then, never a refusal, like the equipment's time.
+     */
+    private void crewChecks(WorkOrder order, List<Check> checks) {
+        Map<String, Integer> shares = new LinkedHashMap<>();
+        crewRepository.findAllByWorkOrderIdOrderByAddedAtAscCrewIdAsc(order.getWorkOrderId())
+            .forEach(member -> shares.put(member.getUserId(), WorkOrderCrewService.shareOf(member)));
+        if (shares.isEmpty()) {
+            return;
+        }
+        List<String> crew = List.copyOf(shares.keySet());
+        OffsetDateTime start = order.getPlannedStartAt();
+        OffsetDateTime end = order.getPlannedEndAt();
+        if (start == null || end == null || !end.isAfter(start)) {
+            checks.add(new Check("crew", WARN, "The crew is named; set the planned start and end to check their time."));
+            return;
+        }
+        if (Duration.between(start, end).compareTo(WorkOrderCrewService.LONGEST_WINDOW) > 0) {
+            checks.add(new Check("crew", WARN, "The planned window is longer than 366 days, so the crew's time is not checked."));
+            return;
+        }
+        Map<String, WorkerTime> times = workerCalendars.workingTime(order.getProjectId(), crew, start, end);
+        List<String> parts = new ArrayList<>();
+        boolean missing = false;
+        for (String userId : crew) {
+            WorkerTime one = times.get(userId);
+            int share = shares.get(userId);
+            String name = share < WorkOrderCrewService.FULL_SHARE ? userId + " " + share + "%" : userId;
+            if (one == null || !one.calendarSet()) {
+                parts.add(name + " has no shifts set");
+                missing = true;
+            } else if (one.seconds() == 0) {
+                parts.add(name + " does not work in the planned window");
+                missing = true;
+            } else {
+                parts.add(name + (share < WorkOrderCrewService.FULL_SHARE ? " of " : " ") + plain(crewHours(one.seconds())) + " h");
+            }
+        }
+        checks.add(new Check("crew", missing ? WARN : OK, "Crew in the planned window: " + String.join(", ", parts) + "."));
+        crewBookings(order, shares, times, start, end, checks);
+    }
+
+    /**
+     * Crew members whose shares of this and other approved or running orders pass 100% at the same time (WC21, WC38): a
+     * warning with their working hours then, or just the order for someone without shifts, whose time is not known.
+     */
+    private void crewBookings(WorkOrder order, Map<String, Integer> shares, Map<String, WorkerTime> times, OffsetDateTime start,
+                              OffsetDateTime end, List<Check> checks) {
+        List<WorkOrderCrew> elsewhere = crewRepository.findAllByUserIdIn(shares.keySet()).stream()
+            .filter(member -> !member.getWorkOrderId().equals(order.getWorkOrderId()))
+            .toList();
+        if (elsewhere.isEmpty()) {
+            return;
+        }
+        Map<String, WorkOrder> others = new HashMap<>();
+        workOrderRepository.findAllById(elsewhere.stream().map(WorkOrderCrew::getWorkOrderId).collect(Collectors.toSet())).stream()
+            .filter(other -> order.getProjectId().equals(other.getProjectId()) && NOT_DELETED.equals(other.getDeletedYn()))
+            .filter(other -> {
+                WorkOrderStatus status = WorkOrderServiceImpl.status(other);
+                return status == WorkOrderStatus.APPROVED || status == WorkOrderStatus.IN_PROGRESS;
+            })
+            .filter(other -> other.getPlannedStartAt() != null && other.getPlannedEndAt() != null
+                && other.getPlannedStartAt().isBefore(end) && other.getPlannedEndAt().isAfter(start))
+            .forEach(other -> others.put(other.getWorkOrderId(), other));
+        List<String> parts = new ArrayList<>();
+        for (Map.Entry<String, Integer> person : shares.entrySet()) {
+            String userId = person.getKey();
+            List<CrewLoad.Held> held = elsewhere.stream()
+                .filter(member -> member.getUserId().equals(userId))
+                .map(member -> {
+                    WorkOrder other = others.get(member.getWorkOrderId());
+                    return other == null ? null : new CrewLoad.Held(other, WorkOrderCrewService.shareOf(member));
+                })
+                .filter(Objects::nonNull)
+                .sorted(Comparator.comparing((CrewLoad.Held one) -> one.order().getPlannedStartAt())
+                    .thenComparing(one -> one.order().getWorkOrderNumber()))
+                .toList();
+            WorkerTime time = times.get(userId);
+            boolean known = time != null && time.calendarSet();
+            CrewLoad.overBooked(person.getValue(), held, start, end, time).forEach((other, seconds) ->
+                parts.add(known ? userId + " on " + other.getWorkOrderNumber() + " for " + plain(crewHours(seconds)) + " h"
+                    : userId + " on " + other.getWorkOrderNumber()));
+        }
+        if (!parts.isEmpty()) {
+            checks.add(new Check("crew_schedule", WARN, "Also booked at the same time: " + String.join(", ", parts) + "."));
+        }
+    }
+
+    private static BigDecimal crewHours(long seconds) {
+        return BigDecimal.valueOf(seconds).divide(BigDecimal.valueOf(3600), 2, RoundingMode.HALF_UP);
     }
 
     /** The order planned just before this one on the equipment, and the changeover from what it makes. */

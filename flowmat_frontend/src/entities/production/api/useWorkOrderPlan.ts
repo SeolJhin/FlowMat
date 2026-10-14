@@ -21,6 +21,12 @@ export interface WorkOrderPlanSuggestionDto {
   changeoverFrom: string | null
   /** Approved or running orders on the same equipment the suggestion was moved after, earliest first. */
   movedPast: string[]
+  /** The order's crew and their shift hours in the suggested window (docs/domain/worker-calendar.md WC14). */
+  crew?: { userId: string; calendarSet: boolean; hours: number; sharePercent?: number }[]
+  /** Crew members with shifts who were not working when the equipment alone could start (worker-calendar.md WC25). */
+  waitedForCrew?: string[]
+  /** Approved or running orders holding some of the crew that the suggestion was moved after (WC25). */
+  crewMovedPast?: { workOrderNumber: string; userIds: string[] }[]
 }
 
 /** Suggestions for several orders, in the order asked (docs/domain/equipment-schedule.md P8-P11). Nothing is saved. */

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { WorkOrderPlanSuggestionDto } from '../../../entities/production/api/useWorkOrderPlan'
 import type { WorkOrderDto } from '../../../shared/types/api'
 import {
-  batchDrafts, batchPlannable, defaultPlanFrom, localInput, orderSummary, planInput, planStamp, planSummary,
+  batchApproved, batchDrafts, batchPlannable, defaultPlanFrom, localInput, orderSummary, planInput, planStamp, planSummary,
+  rescheduleInput,
 } from './workOrderPlanModel'
 
 function local(year: number, month: number, day: number, hour: number, minute: number): string {
@@ -27,6 +28,17 @@ function order(overrides: Partial<WorkOrderDto> = {}): WorkOrderDto {
     instructionUrl: 'https://example.com/sop', equipmentId: 'eq-1', ...overrides,
   }
 }
+
+describe('crew in a suggestion', () => {
+  it('adds only the crew\'s problems to the summary', () => {
+    expect(planSummary(plan({ crew: [{ userId: 'kim', calendarSet: true, hours: 10 }] })))
+      .toBe('Mon 2030-01-07 09:00 → Tue 2030-01-08 11:00 · needs 10 h')
+    expect(planSummary(plan({ crew: [{ userId: 'lee', calendarSet: true, hours: 0 }] })))
+      .toBe('Mon 2030-01-07 09:00 → Tue 2030-01-08 11:00 · needs 10 h · lee does not work then')
+    expect(planSummary(plan({ waitedForCrew: ['lee'], crewMovedPast: [{ workOrderNumber: 'WO-7', userIds: ['lee'] }] })))
+      .toBe('Mon 2030-01-07 09:00 → Tue 2030-01-08 11:00 · needs 10 h · waits for lee to be on shift · after WO-7 (lee)')
+  })
+})
 
 describe('several orders', () => {
   it('offers drafts and approved orders that have equipment', () => {
@@ -54,6 +66,16 @@ describe('several orders', () => {
       line('missing', 'draft', plan())], orders)
     expect(drafts.map((one) => one.order.workOrderId)).toEqual(['d'])
     expect(drafts[0].plan.plannedStartAt).toBe(local(2030, 1, 7, 9, 0))
+    expect(batchApproved([line('a', 'approved', plan()), line('d', 'draft', plan())], orders).map((one) => one.order.workOrderId))
+      .toEqual(['a'])
+  })
+
+  it('reschedules an approved order to its suggestion against the dates it has now', () => {
+    const now = order({ workOrderStatus: 'approved', plannedStartAt: local(2030, 1, 6, 9, 0), plannedEndAt: local(2030, 1, 6, 17, 0) })
+    expect(rescheduleInput(now, plan(), 'Planned together')).toEqual({
+      expectedPlannedStartAt: local(2030, 1, 6, 9, 0), expectedPlannedEndAt: local(2030, 1, 6, 17, 0),
+      plannedStartAt: local(2030, 1, 7, 9, 0), plannedEndAt: local(2030, 1, 8, 11, 0), reason: 'Planned together',
+    })
   })
 })
 

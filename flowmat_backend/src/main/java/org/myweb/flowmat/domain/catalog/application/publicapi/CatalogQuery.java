@@ -50,6 +50,12 @@ public interface CatalogQuery {
      */
     Optional<EquipmentSlot> earliestSlot(String equipmentId, OffsetDateTime from, long seconds);
 
+    /**
+     * The equipment's available time in [from, to) as stretches, earliest first and none overlapping: what
+     * {@link #earliestSlot} counts. Empty when the equipment is gone. The caller keeps the window at most 366 days long.
+     */
+    Optional<List<EquipmentSlot>> availableSlots(String equipmentId, OffsetDateTime from, OffsetDateTime to);
+
     /** Minutes to change the equipment over from one item to the next, when a changeover rule applies. */
     OptionalInt changeoverMinutes(String equipmentId, String fromItemId, String toItemId);
 }

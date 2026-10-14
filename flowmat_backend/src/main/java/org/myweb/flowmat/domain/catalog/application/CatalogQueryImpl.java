@@ -106,6 +106,12 @@ public class CatalogQueryImpl implements CatalogQuery {
     }
 
     @Override
+    public Optional<List<EquipmentSlot>> availableSlots(String equipmentId, OffsetDateTime from, OffsetDateTime to) {
+        return equipmentRepository.findByEquipmentIdAndDeletedYn(equipmentId, NOT_DELETED)
+            .map(equipment -> equipmentScheduleService.availableSlots(equipment, from, to));
+    }
+
+    @Override
     public OptionalInt changeoverMinutes(String equipmentId, String fromItemId, String toItemId) {
         return equipmentChangeoverService.changeover(equipmentId, fromItemId, toItemId)
             .map(match -> OptionalInt.of(match.minutes()))

@@ -23,6 +23,7 @@ import { WorkOrderSetupComparison } from './WorkOrderSetupComparison'
 import { WorkOrderRunningComparison } from './WorkOrderRunningComparison'
 import { plannedSupply } from '../model/readinessModel'
 import { WorkOrderEquipmentPicker } from './WorkOrderEquipmentPicker'
+import { WorkOrderCrewPicker } from './WorkOrderCrewPicker'
 import { WorkOrderPlanSuggestion } from './WorkOrderPlanSuggestion'
 import { WorkOrderBatchPlan } from './WorkOrderBatchPlan'
 import { WorkOrderAllocations } from './WorkOrderAllocations'
@@ -402,6 +403,7 @@ export function WorkOrdersPanel({
                     <tr style={{ borderBottom: '1px solid var(--border)' }}>
                       <td colSpan={6} style={{ ...cell, background: 'var(--accent-bg)' }}>
                         <WorkOrderEquipmentPicker order={order} projectId={projectId} />
+                        <WorkOrderCrewPicker order={order} projectId={projectId} />
                         {order.equipmentId && <WorkOrderPlanSuggestion order={order} projectId={projectId} />}
                         <WorkOrderReadiness workOrderId={order.workOrderId} makeable={makeable}
                           planned={plannedSupply(orders, order.workOrderId)}

@@ -20,7 +20,9 @@ import org.myweb.flowmat.domain.catalog.application.ItemStatusRule;
 import org.myweb.flowmat.domain.catalog.application.UnitConverter;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogItemView;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
+import org.myweb.flowmat.domain.notification.application.publicapi.NotificationCommand;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.project.application.publicapi.ProjectMemberQuery;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.springframework.stereotype.Service;
@@ -40,6 +42,8 @@ public class BomApprovalServiceImpl implements BomApprovalService {
     private final UnitConverter unitConverter;
     private final ProjectAccessService projectAccessService;
     private final BomEffectivityService effectivityService;
+    private final ProjectMemberQuery projectMembers;
+    private final NotificationCommand notifications;
 
     @Override
     public BomResponse submit(String bomId) {
@@ -54,9 +58,16 @@ public class BomApprovalServiceImpl implements BomApprovalService {
                 throw new BusinessException(ErrorCode.CONFLICT, "Revision " + revision.getBomVersion() + " is already pending approval for this item.");
         }
         transition(header, BomStatus.PENDING_APPROVAL);
+        String actor = projectAccessService.requireCurrentUserId();
         header.setApprovalStatus("pending");
-        header.setUpdatedBy(projectAccessService.requireCurrentUserId());
-        return BomServiceImpl.toResponse(bomHeaderRepository.save(header), lines);
+        header.setSubmittedBy(actor);
+        header.setSubmittedAt(OffsetDateTime.now());
+        header.setUpdatedBy(actor);
+        BomHeader saved = bomHeaderRepository.save(header);
+        // The project owner approves, so they are told; an owner submitting a revision themselves is not (NT8).
+        notifications.notifyAssignee(projectMembers.ownerOf(saved.getProjectId()), actor, saved.getProjectId(), "bom_approval",
+            label(saved) + " waits for your approval", "Submitted by " + actor + ".", "bom", saved.getBomId());
+        return BomServiceImpl.toResponse(saved, lines);
     }
 
     @Override
@@ -79,7 +90,9 @@ public class BomApprovalServiceImpl implements BomApprovalService {
         header.setApprovedAt(OffsetDateTime.now());
         header.setUpdatedBy(actor);
         appendNote(header, note);
-        return BomServiceImpl.toResponse(bomHeaderRepository.save(header), lines);
+        BomHeader saved = bomHeaderRepository.save(header);
+        tellSubmitter(saved, actor, "approved", note == null || note.isBlank() ? "Approved." : note.trim());
+        return BomServiceImpl.toResponse(saved, lines);
     }
 
     @Override
@@ -90,10 +103,23 @@ public class BomApprovalServiceImpl implements BomApprovalService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Give a reason when rejecting a BOM.");
         }
         transition(header, BomStatus.DRAFT);
+        String actor = projectAccessService.requireCurrentUserId();
         header.setApprovalStatus("rejected");
-        header.setUpdatedBy(projectAccessService.requireCurrentUserId());
+        header.setUpdatedBy(actor);
         appendNote(header, "Rejected: " + note.trim());
-        return BomServiceImpl.toResponse(bomHeaderRepository.save(header), lines(header));
+        BomHeader saved = bomHeaderRepository.save(header);
+        tellSubmitter(saved, actor, "rejected", note.trim());
+        return BomServiceImpl.toResponse(saved, lines(saved));
+    }
+
+    /** The person who submitted the revision hears the owner's decision (NT8); nobody when it was never submitted. */
+    private void tellSubmitter(BomHeader header, String actor, String decision, String body) {
+        notifications.notifyAssignee(header.getSubmittedBy(), actor, header.getProjectId(), "bom_decision",
+            label(header) + " was " + decision, body, "bom", header.getBomId());
+    }
+
+    private static String label(BomHeader header) {
+        return "BOM " + (header.getBomName() == null ? header.getTargetItemId() : header.getBomName()) + " v" + header.getBomVersion();
     }
 
     @Override

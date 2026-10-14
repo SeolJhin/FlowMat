@@ -1,6 +1,8 @@
 package org.myweb.flowmat.domain.production.repository;
 
 import jakarta.persistence.LockModeType;
+import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.myweb.flowmat.domain.production.domain.entity.WorkOrder;
@@ -23,4 +25,7 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, String> {
     boolean existsByWorkOrderNumber(String workOrderNumber);
 
     List<WorkOrder> findAllByEquipmentIdAndDeletedYn(String equipmentId, String deletedYn);
+
+    List<WorkOrder> findAllByProjectIdInAndDeletedYnAndPlannedEndAtLessThanEqual(Collection<String> projectIds, String deletedYn,
+                                                                                OffsetDateTime until);
 }

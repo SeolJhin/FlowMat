@@ -27,7 +27,9 @@ import org.myweb.flowmat.domain.production.repository.ProductionRunCorrectionLin
 import org.myweb.flowmat.domain.production.repository.ProductionRunCorrectionRepository;
 import org.myweb.flowmat.domain.production.repository.ProductionRunItemRepository;
 import org.myweb.flowmat.domain.production.repository.ProductionRunRepository;
+import org.myweb.flowmat.domain.notification.application.publicapi.NotificationCommand;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
+import org.myweb.flowmat.domain.project.application.publicapi.ProjectMemberQuery;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
 import org.myweb.flowmat.global.id.IdGenerator;
@@ -36,7 +38,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Corrections of finished runs (docs/domain/production-run-correction.md): requested with a reason, approved by the
- * project owner, and applied in the approving transaction. Recordings are voided and added, never edited.
+ * project owner, and applied in the approving transaction. Recordings are voided and added, never edited. The owner hears of
+ * each request and the requester of the decision (docs/domain/notification.md NT8).
  */
 @Service
 @RequiredArgsConstructor
@@ -58,6 +61,8 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
     private final IdGenerator idGenerator;
     private final RunSetupService runSetupService;
     private final RunEquipmentTimeService runEquipmentTimeService;
+    private final ProjectMemberQuery projectMembers;
+    private final NotificationCommand notifications;
 
     @Override
     public List<RunCorrectionResponse> listCorrections(String productionRunId) {
@@ -111,7 +116,12 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
         for (ProductionRunCorrectionLine line : lines) {
             line.setProductionRunCorrectionId(saved.getProductionRunCorrectionId());
         }
-        return toResponse(saved, correctionLineRepository.saveAll(lines));
+        List<ProductionRunCorrectionLine> savedLines = correctionLineRepository.saveAll(lines);
+        // The project owner approves, so they are told; an owner asking for a correction themselves is not (NT8).
+        notifications.notifyAssignee(projectMembers.ownerOf(run.getProjectId()), saved.getRequestedBy(), run.getProjectId(),
+            "correction_approval", label(saved, run) + " waits for your approval", normalizedReason, "production_run",
+            run.getProductionRunId());
+        return toResponse(saved, savedLines);
     }
 
     @Override
@@ -183,7 +193,9 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
         correction.setDecidedBy(actor);
         correction.setDecidedAt(now);
         correction.setAppliedAt(now);
-        return toResponse(correctionRepository.save(correction), correctionLineRepository.saveAll(lines));
+        ProductionRunCorrection decided = correctionRepository.save(correction);
+        tellRequester(decided, run, actor, "approved", "Its changes are applied.");
+        return toResponse(decided, correctionLineRepository.saveAll(lines));
     }
 
     @Override
@@ -200,8 +212,19 @@ public class ProductionRunCorrectionServiceImpl implements ProductionRunCorrecti
         correction.setDecidedBy(projectAccessService.requireCurrentUserId());
         correction.setDecidedAt(OffsetDateTime.now());
         correction.setDecisionNote(normalizedNote);
-        return toResponse(correctionRepository.save(correction),
-            correctionLineRepository.findAllByProductionRunCorrectionIdOrderByLineNoAsc(correctionId));
+        ProductionRunCorrection decided = correctionRepository.save(correction);
+        tellRequester(decided, run, decided.getDecidedBy(), "rejected", normalizedNote);
+        return toResponse(decided, correctionLineRepository.findAllByProductionRunCorrectionIdOrderByLineNoAsc(correctionId));
+    }
+
+    /** The person who asked for the correction hears the owner's decision (NT8); not when they decided it themselves. */
+    private void tellRequester(ProductionRunCorrection correction, ProductionRun run, String actor, String decision, String body) {
+        notifications.notifyAssignee(correction.getRequestedBy(), actor, run.getProjectId(), "correction_decision",
+            label(correction, run) + " was " + decision, body, "production_run", run.getProductionRunId());
+    }
+
+    private static String label(ProductionRunCorrection correction, ProductionRun run) {
+        return "Correction #" + correction.getCorrectionNo() + " of " + run.getRunNumber();
     }
 
     private List<ProductionRunCorrectionLine> validateLines(ProductionRun run, List<RunCorrectionLineRequest> requested) {

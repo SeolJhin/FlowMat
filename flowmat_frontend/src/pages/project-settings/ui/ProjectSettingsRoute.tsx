@@ -9,6 +9,8 @@ import { useRemoveMemberMutation } from '../../../entities/project/api/useRemove
 import type { ProjectMemberDto, ProjectInviteDto } from '../../../shared/types/api'
 
 import { ProjectTimeZonePanel } from './ProjectTimeZonePanel'
+import { NotificationSubscriptionsPanel } from './NotificationSubscriptionsPanel'
+import { WorkerCalendarsPanel } from './WorkerCalendarsPanel'
 
 const ROLES = ['viewer', 'editor'] as const
 
@@ -295,6 +297,8 @@ export function ProjectSettingsRoute() {
       </header>
 
       <ProjectTimeZonePanel key={projectId} projectId={projectId} />
+      <NotificationSubscriptionsPanel key={`notifications-${projectId}`} projectId={projectId} />
+      <WorkerCalendarsPanel key={`workers-${projectId}`} projectId={projectId} />
       <MembersPanel projectId={projectId} />
       <InvitesPanel projectId={projectId} />
     </div>

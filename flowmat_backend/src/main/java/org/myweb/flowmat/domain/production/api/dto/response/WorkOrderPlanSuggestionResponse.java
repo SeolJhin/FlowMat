@@ -25,6 +25,19 @@ public record WorkOrderPlanSuggestionResponse(
     /** The order whose item this one changes over from; null without a changeover. */
     String changeoverFrom,
     /** Approved or running orders on the same equipment the suggestion was moved after, earliest first. */
-    List<String> movedPast
+    List<String> movedPast,
+    /** The order's crew and each person's shift hours in the suggested window (docs/domain/worker-calendar.md WC14). */
+    List<Crew> crew,
+    /** Crew members with shifts who were not working when the equipment alone could have started (WC25). */
+    List<String> waitedForCrew,
+    /** Approved or running orders that already hold some of the crew, which the suggestion was moved after (WC25). */
+    List<CrewBooking> crewMovedPast
 ) {
+
+    public record CrewBooking(String workOrderNumber, List<String> userIds) {
+    }
+
+    /** @param calendarSet false when the person has no shifts, so their hours are not known */
+    public record Crew(String userId, boolean calendarSet, BigDecimal hours, int sharePercent) {
+    }
 }
