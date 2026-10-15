@@ -6,4 +6,9 @@ public record PasswordResetConfirmRequest(
     @NotBlank String token,
     @NotBlank String newPassword
 ) {
+
+    @Override
+    public String toString() {
+        return "PasswordResetConfirmRequest[credentials=REDACTED]";
+    }
 }

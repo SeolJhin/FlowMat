@@ -36,20 +36,20 @@ public class MailService {
             send(toEmail, subject, body);
             log.debug("Invite email sent to {}", toEmail);
         } catch (Exception e) {
-            log.warn("Failed to send invite email to {}: {}", toEmail, e.getMessage());
+            log.warn("Failed to send invite email to {}: {}", toEmail, e.getClass().getSimpleName());
         }
     }
 
     @Async
     public void sendEmailVerificationCode(String toEmail, String code) {
         if (fromAddress == null || fromAddress.isBlank()) {
-            log.info("Mail not configured; verification code for {} is {}", toEmail, code);
+            log.info("Mail not configured; skipping verification email to {}", toEmail);
             return;
         }
         try {
             send(toEmail, "[FlowMat] Email verification code", buildVerificationHtml(code));
         } catch (Exception e) {
-            log.warn("Failed to send verification email to {}: {}", toEmail, e.getMessage());
+            log.warn("Failed to send verification email to {}: {}", toEmail, e.getClass().getSimpleName());
         }
     }
 
@@ -57,13 +57,13 @@ public class MailService {
     public void sendPasswordResetMail(String toEmail, String token) {
         String resetUrl = frontendUrl + "/reset-password?token=" + token;
         if (fromAddress == null || fromAddress.isBlank()) {
-            log.info("Mail not configured; password reset URL for {} is {}", toEmail, resetUrl);
+            log.info("Mail not configured; skipping password reset email to {}", toEmail);
             return;
         }
         try {
             send(toEmail, "[FlowMat] Password reset", buildPasswordResetHtml(resetUrl));
         } catch (Exception e) {
-            log.warn("Failed to send password reset email to {}: {}", toEmail, e.getMessage());
+            log.warn("Failed to send password reset email to {}: {}", toEmail, e.getClass().getSimpleName());
         }
     }
 
@@ -71,13 +71,13 @@ public class MailService {
     public void sendDormantReactivationMail(String toEmail, String token) {
         String reactivateUrl = frontendUrl + "/reactivate-account?token=" + token;
         if (fromAddress == null || fromAddress.isBlank()) {
-            log.info("Mail not configured; dormant reactivation URL for {} is {}", toEmail, reactivateUrl);
+            log.info("Mail not configured; skipping dormant reactivation email to {}", toEmail);
             return;
         }
         try {
             send(toEmail, "[FlowMat] Reactivate your account", buildDormantReactivationHtml(reactivateUrl));
         } catch (Exception e) {
-            log.warn("Failed to send dormant reactivation email to {}: {}", toEmail, e.getMessage());
+            log.warn("Failed to send dormant reactivation email to {}: {}", toEmail, e.getClass().getSimpleName());
         }
     }
 

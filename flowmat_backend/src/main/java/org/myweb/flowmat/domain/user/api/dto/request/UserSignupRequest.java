@@ -14,4 +14,9 @@ public record UserSignupRequest(
     @NotNull LocalDate userBirth,
     @NotBlank String password
 ) {
+
+    @Override
+    public String toString() {
+        return "UserSignupRequest[credentials=REDACTED]";
+    }
 }

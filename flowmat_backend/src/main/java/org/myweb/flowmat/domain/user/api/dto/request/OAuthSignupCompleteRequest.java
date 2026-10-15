@@ -13,4 +13,9 @@ public record OAuthSignupCompleteRequest(
     @NotNull LocalDate userBirth,
     @NotBlank String password
 ) {
+
+    @Override
+    public String toString() {
+        return "OAuthSignupCompleteRequest[credentials=REDACTED]";
+    }
 }

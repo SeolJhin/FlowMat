@@ -6,4 +6,9 @@ public record UserTokenResponse(
     String deviceId,
     boolean additionalInfoRequired
 ) {
+
+    @Override
+    public String toString() {
+        return "UserTokenResponse[credentials=REDACTED]";
+    }
 }

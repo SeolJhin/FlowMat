@@ -1,12 +1,12 @@
-# FlowMat 문서 센터
+# FlowMat 문서
 
-> **현행 문서** · 최종 갱신 2026-10-02 · `docs/`는 지금 작업의 기준(지휘소)이면서 지난 기록의 보관소다. 처음이면 이 문서부터 읽는다.
+> 현행 문서 · 최종 갱신 2026-10-02. `docs/`에는 현재 작업 기준과 이전 기록을 나누어 보관한다.
 
 ## 1. 문서 등급 세 가지
 
-문서의 등급은 **폴더가 정한다.** 같은 내용이 서로 다르면 위 등급이 이긴다.
+폴더에 따라 문서의 용도가 다르다. 내용이 충돌하면 §5의 우선순위를 따른다.
 
-| 등급 | 어디에 | 믿어도 되나 | 갱신 | 표시 |
+| 구분 | 위치 | 용도 | 갱신 | 표시 |
 |---|---|---|---|---|
 | **현행** | `status/`, `architecture/`, `domain/`, `editor/`, `local-development.md`, 이 문서 | 작업 기준. 코드와 다르면 문서가 틀린 것이니 같은 변경에서 고친다 | 코드·결정과 함께 갱신 | `domain/`은 맨 위 `상태:` 줄, 나머지는 `현행 문서` 표시나 확인일 |
 | **참고** | `reference/` | 쓴 날 기준의 근거·조사. 틀렸다고 판정된 것은 아니지만 갱신하지 않는다 | 동결 | 맨 위 `참고 문서(동결)` |
@@ -14,10 +14,10 @@
 
 ## 2. 지금 읽을 것
 
-새로 합류했거나 다음 작업을 이어받는다면 이 순서로 읽는다. 세션 1 구역(재고·BOM·LOT·생산·품질·설비)을 이어받는 Agent는 [status/AGENT_HANDOFF.md](status/AGENT_HANDOFF.md)(맡는 구역, 할 일 순서, 지킬 것, 검증, 멈추는 조건)를 먼저 읽는다.
+작업을 시작할 때는 아래 순서로 읽는다. 세션 1 구역(재고·BOM·LOT·생산·품질·설비)은 [인계 문서](status/AGENT_HANDOFF.md)에서 담당 범위와 작업 규칙을 먼저 확인한다.
 
 1. [status/WORKBOARD.md](status/WORKBOARD.md) — 지금 하는 일, 다음 일, 결정 대기.
-2. [status/CURRENT_CAPABILITIES.md](status/CURRENT_CAPABILITIES.md) — 무엇이 구현됐고 무엇이 남았는가. 기능 상태의 기준.
+2. [status/CURRENT_CAPABILITIES.md](status/CURRENT_CAPABILITIES.md) — 구현된 기능과 남은 작업.
 3. [architecture/decision-handoff.md](architecture/decision-handoff.md) — 확정된 아키텍처 결정, 아직 정하면 안 되는 것, 다음 아키텍처 작업.
 4. [local-development.md](local-development.md) — 로컬 실행(`dev` 프로필을 반드시 지정), DB·Redis, 테스트.
 5. 맡은 영역의 문서(아래 §3).
@@ -53,7 +53,7 @@
 - 새 기능의 설계는 `domain/<주제>.md`에 쓴다. 맨 위에 `상태: **구현(날짜).** 출처: …` 줄을 두고 구현과 같은 변경에서 갱신한다. [domain/README.md](domain/README.md) 목록에 한 줄을 더한다.
 - 기능 상태가 바뀌면 `status/CURRENT_CAPABILITIES.md`의 해당 행을, 작업을 시작·끝내거나 결정이 나면 `status/WORKBOARD.md`를 고친다.
 - 아키텍처 결정은 ADR(`architecture/adr/`)로 남기고 `decision-handoff.md`에 반영한다. Accepted ADR은 고치지 않고 새 ADR로 대체한다. Proposed ADR은 수용 기준이 닫혀야 Accepted가 되며, 그 결정에 기대는 구현은 그 전에 시작하지 않는다.
-- **결정 상태와 구현 상태는 따로 적는다.** 코드가 이미 그렇게 동작한다고 결정이 승인된 것은 아니고, 승인됐다고 구현된 것도 아니다. 문서를 정리하려고 대기 중인 결정을 승인으로 올리지 않는다.
+- 결정 상태와 구현 상태를 구분한다. 구현 여부만으로 결정을 승인 처리하지 않고, 결정 승인만으로 구현 완료를 표시하지 않는다.
 - **현행 문서가 레거시가 되면**(구현으로 끝난 계획, 리팩토링으로 대체된 설계, 끝난 인계):
   1. `archive/<YYYY-MM-주제>/`로 옮긴다. git이 추적하는 파일은 `git mv`를 쓴다.
   2. 맨 위에 `보관 문서(레거시)` 표시를 넣는다.

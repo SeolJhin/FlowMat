@@ -7,4 +7,9 @@ public record SocialLinkStartRequest(
     @NotBlank String currentPassword,
     String returnTo
 ) {
+
+    @Override
+    public String toString() {
+        return "SocialLinkStartRequest[credentials=REDACTED]";
+    }
 }

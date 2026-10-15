@@ -6,4 +6,9 @@ public record SocialLinkUnlinkRequest(
     @NotBlank String provider,
     @NotBlank String currentPassword
 ) {
+
+    @Override
+    public String toString() {
+        return "SocialLinkUnlinkRequest[credentials=REDACTED]";
+    }
 }

@@ -8,4 +8,9 @@ public record OAuthExchangeResponse(
     String deviceId,
     boolean additionalInfoRequired
 ) {
+
+    @Override
+    public String toString() {
+        return "OAuthExchangeResponse[credentials=REDACTED]";
+    }
 }

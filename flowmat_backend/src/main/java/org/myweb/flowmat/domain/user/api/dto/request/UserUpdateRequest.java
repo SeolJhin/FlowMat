@@ -13,4 +13,9 @@ public record UserUpdateRequest(
     String currentPassword,
     String newPassword
 ) {
+
+    @Override
+    public String toString() {
+        return "UserUpdateRequest[credentials=REDACTED]";
+    }
 }

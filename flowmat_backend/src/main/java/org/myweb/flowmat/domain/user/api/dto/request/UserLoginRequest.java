@@ -7,4 +7,9 @@ public record UserLoginRequest(
     @NotBlank String password,
     String deviceId
 ) {
+
+    @Override
+    public String toString() {
+        return "UserLoginRequest[credentials=REDACTED]";
+    }
 }

@@ -7,4 +7,9 @@ public record EmailCodeVerifyRequest(
     @NotBlank @Email String userEmail,
     @NotBlank String code
 ) {
+
+    @Override
+    public String toString() {
+        return "EmailCodeVerifyRequest[credentials=REDACTED]";
+    }
 }
