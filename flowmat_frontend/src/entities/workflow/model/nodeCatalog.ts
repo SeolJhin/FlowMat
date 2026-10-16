@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 
-export type WorkflowNodePaletteTool = 'process' | 'equipment' | 'storage' | 'input' | 'output'
+export type WorkflowNodePaletteTool = 'process' | 'equipment' | 'storage' | 'input' | 'output' | 'exclusive'
 
 export type WorkflowAnnotationTool = 'annotation-shape' | 'annotation-text' | 'annotation-freehand'
 
@@ -110,6 +110,19 @@ const WORKFLOW_NODE_DEFINITIONS: WorkflowNodeDefinition[] = [
     aliases: ['decision'],
     defaultConnectionType: 'material_flow',
     isTerminal: true,
+  },
+  {
+    tool: 'exclusive',
+    nodeType: 'exclusive',
+    processType: 'gateway',
+    colorScheme: 'rose',
+    label: 'Exclusive',
+    description: 'Gateway: sends what arrives down the first connection whose condition holds, by priority; else its default.',
+    width: 150,
+    height: 72,
+    shapeKind: 'dashed',
+    defaultConnectionType: 'control_flow',
+    isTerminal: false,
   },
 ]
 

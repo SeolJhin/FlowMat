@@ -23,6 +23,8 @@ public record ProcessConnectionResponse(
     String conditionExpr,
     BigDecimal capacity,
     String failurePolicy,
+    /** An Exclusive gateway's default connection (ADR-006). */
+    boolean defaultRoute,
     int version,
     int versionNonce
 ) {

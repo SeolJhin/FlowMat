@@ -127,6 +127,7 @@ public class WorkflowCanvasServiceImpl implements WorkflowCanvasService {
             connection.getConditionExpr(),
             connection.getCapacity(),
             connection.getFailurePolicy(),
+            connection.isDefaultRoute(),
             connection.getVersion(),
             connection.getVersionNonce()
         );

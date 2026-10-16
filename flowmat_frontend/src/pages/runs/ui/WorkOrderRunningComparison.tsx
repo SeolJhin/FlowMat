@@ -12,7 +12,8 @@ export function WorkOrderRunningComparison({ workOrderId }: { workOrderId: strin
   if (query.isError) return <p role="alert" style={{ fontSize: 12 }}>{errorMessage(query.error, 'Could not compare the running time.')}</p>
   if (!value || (value.plannedMinutes == null && value.actualMinutes === 0)) return null
   const planned = value.plannedMinutes == null ? 'no planned time'
-    : `${value.plannedMinutes} min${value.capacityPerHour != null ? ` at ${formatQty(value.capacityPerHour)}/h` : ''}`
+    : `${value.plannedMinutes} min${value.capacityPerHour != null ? ` at ${formatQty(value.capacityPerHour)}/h` : ''}${
+      value.efficiencyPercent != null && value.efficiencyPercent !== 100 ? ` × ${formatQty(value.efficiencyPercent)}%` : ''}`
       + (value.plannedCost == null ? ' · cost unknown' : ` · ${formatQty(value.plannedCost)} at today's rate`)
   const actual = value.runs === 0 ? 'no run yet'
     : `${value.actualMinutes} min · ${formatQty(value.actualCost)}${value.actualCostComplete ? '' : ' known so far'} over ${value.runs} run${value.runs === 1 ? '' : 's'}`

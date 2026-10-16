@@ -15,6 +15,7 @@
 | `process_connection.condition_expr` | 연결을 통과할 조건식이다. 발행된 revision의 식을 출발 단계의 `outputSnapshot`에 대해 평가한다. 거짓이면 후속 단계를 만들지 않는다. |
 | `process_connection.capacity` | 한 번의 연결 흐름에서 허용할 최대 자원 수량이다. 단위는 연결의 `unit`이 있으면 그것을, 없으면 출발 포트의 `unit`을 사용한다. `null`은 제한 없음이다. 저장 시 0 이상 및 `numeric(19,4)` 범위를 검증하고 그래프 실행에서 `outputSnapshot.quantity`와 비교한다. |
 | `process_connection.failure_policy` | 해당 연결로 생성된 단계 실패 시 `stop`은 실행 전체 실패, `skip`은 단계를 건너뜀, `retry`는 즉시 최대 3회 재시도를 뜻한다. 기본값은 `stop`이다. |
+| `process_connection.default_route_yn` | V85. `Y`면 Exclusive 게이트웨이의 기본 연결이다: 조건을 만족하는 다른 연결이 없을 때 간다(GR-15). 게이트웨이가 아닌 노드의 연결에서는 검사 오류다(GR-19). API는 `defaultRoute`(boolean). 기본값 `N`. |
 
 ## 저장 계약
 
@@ -38,7 +39,7 @@
 
 ## 워크플로 검증과 발행
 
-`GET /workflows/{workflowId}/validation`은 읽기 권한을 요구한다. 결과는 `errors`, `warnings`, `issues[]`이며 각 문제에 `severity`, `code`, `processId`, `ioId`, `connectionId`, `message`가 있다. 오류 코드: `CONNECTION_ORPHAN`, `CONNECTION_INCOMPATIBLE`, `EXPRESSION_INVALID`, `PORT_SCHEMA_INVALID`, `REQUIRED_INPUT_UNCONNECTED`. 경고 코드: `PROCESS_ISOLATED`, `CYCLE`, `SCHEMA_UNVERIFIED`, `UNIT_UNKNOWN`, `RESOURCE_TYPE_UNKNOWN`. 오류를 먼저 표시한다.
+`GET /workflows/{workflowId}/validation`은 읽기 권한을 요구한다. 결과는 `errors`, `warnings`, `issues[]`이며 각 문제에 `severity`, `code`, `processId`, `ioId`, `connectionId`, `message`가 있다. 오류 코드: `CONNECTION_ORPHAN`, `CONNECTION_INCOMPATIBLE`, `EXPRESSION_INVALID`, `PORT_SCHEMA_INVALID`, `REQUIRED_INPUT_UNCONNECTED`. 경고 코드: `PROCESS_ISOLATED`, `CYCLE`, `SCHEMA_UNVERIFIED`, `UNIT_UNKNOWN`, `RESOURCE_TYPE_UNKNOWN`. Exclusive 게이트웨이의 오류·경고는 GR-19. 오류를 먼저 표시한다.
 
 `RESOURCE_TYPE_UNKNOWN`(2026-10-02)은 포트의 `resourceType`이 registry에 없을 때 나온다. Registry(Experimental)는 `material, product, energy, water, waste, file, data, api, parameter, signal, generic`이다([ADR-003](../architecture/adr/ADR-003-resource-port-contract.md) "Resource Type Registry"). `labor`는 실행 요건이지 포트로 흐르는 대상이 아니어서 넣지 않았다. 포트 편집 화면의 I/O Type에 `labor`가 있어 그 포트는 이 경고를 받는다. 저장과 발행은 막지 않는다. 목록 밖 값도 그대로 저장되며, 연결의 PC-04(양쪽 `resourceType` 일치)는 그대로 적용된다.
 
@@ -114,3 +115,20 @@ PC-21은 포트·연결 서비스와 revision 발행이 함께 쓰는 워크플�
 조건·용량·정책·포트 검증식과 스키마는 시작할 때 고정된 발행 revision에서 읽는다. 이후 draft를 고쳐도 진행 중인 run에 반영되지 않는다. 연결 단위는 `outputSnapshot.unit`이 제공되면 비교하며 자동 단위 변환은 하지 않는다. 연결되지 않은 포트의 실행 값 검증, 여러 진입 연결의 합류, 수량 분할, 일정·지연 시간, 자동 작업 실행은 후속 범위다.
 
 `GET /flow-runs/{flowRunId}/steps/{stepId}/lineage`는 프로젝트 읽기 권한을 확인한 뒤 선택 단계와 정확한 원본 단계 체인(`ancestors`, 시작 단계부터 순서대로), 모든 하위 실행 단계(`descendants`, 단계 순번 순서대로)를 반환한다. 수렴 그래프에서도 각 단계의 `sourceStepId`를 따라가므로 같은 공정 노드의 다른 실행 경로가 섞이지 않는다. 다른 run에 속한 `stepId`는 404다. 화면의 단계 상세에는 이 경로와 저장된 입력·출력 snapshot, 오류 메시지를 표시한다.
+
+## 2026-10-17 Exclusive 게이트웨이 (ADR-006, V85)
+
+[ADR-006](../architecture/adr/ADR-006-operation-types.md)(Accepted 2026-10-17, 사용자 결정 "Accept as recommended")의 1단계. 일을 하지 않는 게이트웨이 노드 중 Exclusive만 구현했다(2eb, 로컬 검증, V85 개발 DB 미적용). Join·Parallel 노드·Subflow·수량 분할은 없다. 병렬 분기는 지금처럼 조건 없는 여러 연결로 한다.
+
+| 규칙 | 동작 | 위반 응답 |
+|---|---|---|
+| GR-13 | 노드 종류 `exclusive`(편집기 팔레트 **Exclusive**, `processType` `gateway`)는 게이트웨이다. 발행 snapshot의 `processes[].nodeType`으로 알아보고 실행 중에는 바뀌지 않는다. 게이트웨이가 없는 이전 revision은 GR-02~GR-04대로 돈다 | |
+| GR-14 | 게이트웨이에서 나가는 연결은 `priority`가 작은 것부터, 같으면 발행 snapshot에 그려진 순서로 시도한다. 기본 연결이 아니면서 조건이 없거나 참인 **첫** 연결 하나만 단계를 만들고 게이트웨이 단계에 `gateway_routed`(reason `first_match`)를 남긴다 | |
+| GR-15 | 그런 연결이 없으면 기본 연결(`defaultRoute`, 게이트웨이마다 최대 하나)로 간다(`gateway_routed` reason `default`). 기본 연결의 조건식은 쓰지 않는다. 기본 연결도 없으면 게이트웨이 단계가 `failed`(errorCode `NO_ROUTE`)가 되고 실행이 실패한다(`run_failed` errorCode `NO_ROUTE`, 남은 planned 단계는 cancelled). 연결 실패 정책(GR-05)은 쓰지 않는다 | 앞 단계 완료는 200, 실행은 failed |
+| GR-16 | 고르지 않은 연결마다 게이트웨이 단계에 `connection_filtered`를 남긴다. reason은 `condition_false`, `exclusive_not_chosen`(조건은 참이지만 앞 순서 연결이 골라짐), `default_not_needed`. 일반 노드의 연결은 지금처럼 `condition_false`만 | |
+| GR-17 | 게이트웨이 단계는 서버가 바로 지나간다(ADR-006 결정 4, ADR-004 결정 3의 좁은 예외). 앞 단계 완료와 같은 트랜잭션에서 시도 1을 만들고 `step_started`·`step_completed`를 행위자 system으로 기록하며, 출력 = 입력이다. 사람이 시작·완료·실패·재시도할 단계가 아니다. 재고·생산 기록은 움직이지 않는다 | 끝난 게이트웨이 단계를 시작하면 409 |
+| GR-18 | 고른 연결에도 용량·단위·포트 검증식·스키마(GR-03·GR-07·GR-08)를 그대로 적용한다. 통과하지 못하면 앞 단계 완료 전체를 거절하고 아무것도 남기지 않는다. 게이트웨이가 이어지면 같은 트랜잭션에서 차례로 지나간다 | GR-03·GR-07·GR-08과 같은 409 |
+| GR-19 | 워크플로 검사·발행: 오류 `DEFAULT_ROUTE_OUTSIDE_GATEWAY`(게이트웨이가 아닌 노드의 연결이 기본 연결), `GATEWAY_DEFAULTS`(기본 연결 둘 이상), `GATEWAY_WITHOUT_INPUT`(들어오는 연결이 없는 게이트웨이: 넘겨줄 값이 없다). 경고 `GATEWAY_SINGLE_ROUTE`(나가는 연결 둘 미만), `GATEWAY_PRIORITY_TIE`(기본이 아닌 연결끼리 priority가 같음), `DEFAULT_ROUTE_CONDITION_IGNORED`(기본 연결의 조건식) | 오류가 있으면 발행 409 |
+| GR-20 | API: 연결 생성·수정의 `defaultRoute`는 JSON `true`·`false`만 받는다. 생성에서 빠지면 false, 수정에서 빠지면 그대로다. 응답과 캔버스에 `defaultRoute`가 있다. 편집기: 게이트웨이에서 나가는 연결의 인스펙터에만 **Default route** 체크와 설명이 있고, 그 밖의 연결은 이 값을 보내지 않는다. 실행 취소가 기본 연결 여부도 되돌린다 | 다른 값이면 400 |
+
+검증(2026-10-17, 격리 복사본): `ExclusiveGatewayIntegrationTest` — Measure → Choose(Exclusive) → Big(priority 1, `quantity > 10`)·Medium(2, `quantity > 5`)·Rest(9, 기본). 12는 Big만(Medium은 `exclusive_not_chosen`, Rest는 `default_not_needed`, 게이트웨이 완료 행위자 system, 끝난 게이트웨이 단계 시작 409), 7은 Medium, 3은 Rest(`default`). 기본 연결을 끄고 다시 발행하면 3에서 게이트웨이 단계 `NO_ROUTE` 실패·실행 실패이고, 앞 revision으로 시작한 실행은 여전히 Rest로 간다. 기본 연결 둘·게이트웨이 밖 기본 연결·입력 없는 게이트웨이 발행 409, 나가는 연결 하나면 경고, `"defaultRoute":"yes"` 400. Exclusive·그래프 실행·실행 정책·데이터 흐름·포트 측정·연결 계약·워크플로 검사·모듈 경계·마이그레이션 91건, 워크플로·캔버스·협업·revision·공정·그래프·편집기 249건 실패 0. 프런트 `nodeCatalog.test.ts`(팔레트), `connectionUndo.test.ts`(기본 연결 되돌리기) 각 1건, 모의 API e2e `exclusive-gateway-editor.spec.ts`(게이트웨이 연결만 Default route를 보이고 보냄) 4회 반복 통과.

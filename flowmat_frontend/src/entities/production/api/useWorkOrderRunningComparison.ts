@@ -8,6 +8,8 @@ export interface WorkOrderRunningComparisonDto {
   workOrderId: string
   equipmentId: string | null
   capacityPerHour: number | null
+  /** Null for 100 (docs/domain/equipment.md E8); plannedMinutes is at capacity times this. */
+  efficiencyPercent?: number | null
   plannedMinutes: number | null
   plannedCost: number | null
   runs: number

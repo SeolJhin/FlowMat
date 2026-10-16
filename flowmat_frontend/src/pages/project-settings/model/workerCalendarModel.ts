@@ -1,9 +1,12 @@
 import type {
-  WorkerCalendarDto, WorkerDayDto, WorkerDayOffDto, WorkerShiftDto,
+  WorkerCalendarDto, WorkerDayDto, WorkerDayOffDto, WorkerRotaDto, WorkerShiftDto,
 } from '../../../entities/workforce/api/useWorkerCalendars'
 import { dayLabel } from '../../inventory/model/equipmentScheduleModel'
 
 export const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+/** How many weeks a rota can repeat over; 1 is no rota (docs/domain/worker-calendar.md WC44). */
+export const ROTA_WEEKS = [1, 2, 3, 4, 5, 6, 7, 8]
 
 /** ISO days as text: a run of three or more reads "Mon–Fri", others are listed ("Mon, Wed, Fri"). */
 export function daysText(days: number[]): string {
@@ -27,9 +30,32 @@ export function shiftText(shift: Pick<WorkerShiftDto, 'shiftStart' | 'shiftEnd' 
   return `${daysText(shift.workDays)} ${shift.shiftStart}–${shift.shiftEnd}`
 }
 
-/** "40 h a week", or "No shifts set" when the worker's time is not known. */
-export function weeklyText(worker: Pick<WorkerCalendarDto, 'calendarSet' | 'weeklyHours'>): string {
-  return worker.calendarSet ? `${Number(worker.weeklyHours.toFixed(2))} h a week` : 'No shifts set'
+/** "40 h a week" ("on average" with a rota, WC47), or "No shifts set" when the worker's time is not known. */
+export function weeklyText(worker: Pick<WorkerCalendarDto, 'calendarSet' | 'weeklyHours' | 'rota'>): string {
+  if (!worker.calendarSet) return 'No shifts set'
+  return `${Number(worker.weeklyHours.toFixed(2))} h a week${worker.rota ? ' on average' : ''}`
+}
+
+/** "2-week rota from 2041-09-02 · week 1 now" (WC47). */
+export function rotaText(rota: WorkerRotaDto): string {
+  return `${rota.weeks}-week rota from ${rota.startsOn} · week ${rota.currentWeek} now`
+}
+
+/** "Week 2: Mon–Thu 22:00–06:00" in a rota; the shift alone otherwise. */
+export function rotaShiftText(shift: Pick<WorkerShiftDto, 'shiftStart' | 'shiftEnd' | 'workDays' | 'rotaWeek'>,
+                              rota: WorkerRotaDto | null | undefined): string {
+  return rota ? `Week ${shift.rotaWeek ?? 1}: ${shiftText(shift)}` : shiftText(shift)
+}
+
+/**
+ * Checks a rota before it is sent (WC48): it needs the week it starts in, and each shift a week within it. Without a rota
+ * (one week) the shifts' weeks are not sent, so there is nothing to check. Null when fine.
+ */
+export function rotaProblem(weeks: number, startsOn: string, shiftWeeks: number[]): string | null {
+  if (weeks < 2) return null
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startsOn)) return 'Choose the week the rota starts.'
+  const beyond = shiftWeeks.findIndex((week) => week > weeks)
+  return beyond >= 0 ? `Shift ${beyond + 1} is in week ${shiftWeeks[beyond]}, but the rota has ${weeks} weeks.` : null
 }
 
 /**

@@ -27,6 +27,8 @@ public class WorkerShift {
     private LocalTime shiftEnd;
     /** ISO days of the week it starts on, such as "1,2,3,4,5". */
     private String workDays;
+    /** The week of the worker's rota it runs in; 1 without a rota (V87, WC44). */
+    private int rotaWeek = 1;
     private String updatedBy;
     private OffsetDateTime updatedAt;
 }

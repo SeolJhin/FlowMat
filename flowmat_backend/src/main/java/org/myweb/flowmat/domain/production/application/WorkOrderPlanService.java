@@ -47,7 +47,7 @@ import org.springframework.stereotype.Service;
  * Suggests a work order's planned start and end from its equipment's calendar (docs/domain/equipment-schedule.md
  * "계획 기간 제안"): the earliest stretch from a given time that holds what is still to produce at the equipment's
  * capacity per hour, plus the changeover from the order before it, and does not overlap an approved or running order
- * planned on the same equipment. Read only, like readiness; the order is not changed. Several orders can be planned in
+ * planned on the same equipment, unless the equipment runs work orders side by side (docs/domain/equipment.md E12). Read only, like readiness; the order is not changed. Several orders can be planned in
  * one go, each after the ones before it (P8-P12).
  */
 @Service
@@ -162,15 +162,17 @@ public class WorkOrderPlanService {
         if (remaining.signum() <= 0) {
             throw conflict("The target quantity has already been produced.");
         }
-        BigDecimal productionHours = remaining.divide(rate, 2, RoundingMode.UP);
+        // At the output it really reaches (E9); the changeover added below is not scaled.
+        BigDecimal productionHours = remaining.divide(equipment.effectiveCapacityPerHour(), 2, RoundingMode.UP);
 
         List<WorkOrder> others = Stream.concat(
                 workOrderRepository.findAllByEquipmentIdAndDeletedYn(equipment.equipmentId(), NOT_DELETED).stream()
                     .filter(other -> !excluded.contains(other.getWorkOrderId())),
                 placed.stream().filter(other -> equipment.equipmentId().equals(other.getEquipmentId())))
             .toList();
-        // Drafts are not planned work yet, as in readiness's "schedule" check.
-        List<WorkOrder> planned = others.stream()
+        // Drafts are not planned work yet, as in readiness's "schedule" check. Equipment that runs work orders side by side
+        // does not keep this one apart from them (E12); its crew still does.
+        List<WorkOrder> planned = equipment.concurrentWorkOrders() ? List.of() : others.stream()
             .filter(other -> WorkOrderServiceImpl.status(other).acceptsRuns())
             .filter(other -> other.getPlannedStartAt() != null && other.getPlannedEndAt() != null
                 && other.getPlannedEndAt().isAfter(other.getPlannedStartAt()))
@@ -216,7 +218,8 @@ public class WorkOrderPlanService {
                 return new WorkOrderPlanSuggestionResponse(order.getWorkOrderId(), equipment.equipmentId(), start, slot.start(),
                     end, remaining, rate, productionHours, changeoverHours, needed,
                     changeoverHours.signum() > 0 ? before.getWorkOrderNumber() : null, List.copyOf(movedPast),
-                    crewHours(order.getProjectId(), crewPlan, slot.start(), end), waitedFor, List.copyOf(crewMovedPast));
+                    crewHours(order.getProjectId(), crewPlan, slot.start(), end), waitedFor, List.copyOf(crewMovedPast),
+                    equipment.efficiencyPercent());
             }
             clashes.stream()
                 .map(WorkOrder::getWorkOrderNumber)

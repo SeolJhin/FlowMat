@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { dayOffText, daysText, shiftText, weeklyText, workerDayText } from './workerCalendarModel'
+import { dayOffText, daysText, rotaProblem, rotaShiftText, rotaText, shiftText, weeklyText, workerDayText } from './workerCalendarModel'
+
+describe('rota', () => {
+  const rota = { weeks: 2, startsOn: '2041-09-02', currentWeek: 1 }
+
+  it('reads the rota, its weeks and the average week (WC47)', () => {
+    expect(rotaText(rota)).toBe('2-week rota from 2041-09-02 · week 1 now')
+    expect(rotaShiftText({ shiftStart: '22:00', shiftEnd: '06:00', workDays: [1, 2, 3, 4], rotaWeek: 2 }, rota))
+      .toBe('Week 2: Mon–Thu 22:00–06:00')
+    expect(rotaShiftText({ shiftStart: '09:00', shiftEnd: '17:00', workDays: [1, 2, 3, 4, 5] }, null)).toBe('Mon–Fri 09:00–17:00')
+    expect(weeklyText({ calendarSet: true, weeklyHours: 40, rota })).toBe('40 h a week on average')
+  })
+
+  it('checks the start week and each shift\'s week before sending (WC48)', () => {
+    expect(rotaProblem(1, '', [1, 3])).toBeNull()
+    expect(rotaProblem(2, '', [1, 2])).toBe('Choose the week the rota starts.')
+    expect(rotaProblem(2, '2041-09-02', [1, 3])).toBe('Shift 2 is in week 3, but the rota has 2 weeks.')
+    expect(rotaProblem(3, '2041-09-02', [1, 3])).toBeNull()
+  })
+})
 
 describe('a date\'s own shifts', () => {
   it('reads as off or as its shifts and hours', () => {

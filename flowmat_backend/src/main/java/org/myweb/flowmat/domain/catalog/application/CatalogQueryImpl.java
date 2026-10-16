@@ -96,7 +96,8 @@ public class CatalogQueryImpl implements CatalogQuery {
 
     private static CatalogEquipmentView equipmentView(Equipment equipment) {
         return new CatalogEquipmentView(equipment.getEquipmentId(), equipment.getProjectId(), equipment.getEquipmentCode(),
-            equipment.getEquipmentName(), equipment.getEquipmentStatus(), equipment.getCapacityPerHour());
+            equipment.getEquipmentName(), equipment.getEquipmentStatus(), equipment.getCapacityPerHour(), equipment.getEfficiencyPercent(),
+            "Y".equals(equipment.getConcurrentWorkOrdersYn()));
     }
 
     @Override

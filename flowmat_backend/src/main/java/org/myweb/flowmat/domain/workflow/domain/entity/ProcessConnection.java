@@ -7,6 +7,8 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
 
 @Getter
@@ -37,6 +39,13 @@ public class ProcessConnection extends CreatedUpdatedAuditEntity {
     private BigDecimal delayTimeSec;
     private BigDecimal lossRate;
     private Integer priority;
+    /** Y on an Exclusive gateway's default connection (ADR-006 decision 3, V85). */
+    @JdbcTypeCode(SqlTypes.CHAR)
+    private String defaultRouteYn = "N";
+
+    public boolean isDefaultRoute() {
+        return "Y".equals(defaultRouteYn);
+    }
 
     @Column(name = "version")
     private int version = 1;

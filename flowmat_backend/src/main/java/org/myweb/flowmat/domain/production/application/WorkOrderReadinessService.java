@@ -140,7 +140,7 @@ public class WorkOrderReadinessService {
     /**
      * Only for an order with equipment assigned (docs/domain/equipment-schedule.md): whether the equipment can work,
      * whether its available time in the planned window covers what is still to produce, and which other approved or
-     * running orders are planned on it at the same time.
+     * running orders are planned on it at the same time (none for equipment that runs work orders side by side, E12).
      */
     private void equipmentChecks(WorkOrder order, BigDecimal remaining, List<Check> checks) {
         CatalogEquipmentView equipment = catalog.findProjectEquipment(order.getProjectId(), order.getEquipmentId()).orElse(null);
@@ -189,12 +189,16 @@ public class WorkOrderReadinessService {
         } else if (remaining == null || remaining.signum() <= 0) {
             checks.add(new Check("equipment", availability.availableHours().signum() > 0 ? OK : WARN, name + " has " + has + "."));
         } else {
-            BigDecimal needed = remaining.divide(rate, 2, RoundingMode.UP).add(changeoverHours);
+            // At the output it really reaches (docs/domain/equipment.md E9); the changeover is not scaled.
+            BigDecimal needed = remaining.divide(equipment.effectiveCapacityPerHour(), 2, RoundingMode.UP).add(changeoverHours);
             String with = changeoverHours.signum() > 0 ? " (with " + plain(changeoverHours) + " h changeover)" : "";
+            BigDecimal efficiency = equipment.efficiencyPercent();
+            String pace = efficiency == null || efficiency.compareTo(BigDecimal.valueOf(100)) == 0 ? ""
+                : " at " + plain(efficiency) + "% efficiency";
             checks.add(needed.compareTo(availability.availableHours()) > 0
                 ? new Check("equipment", WARN,
-                    name + " needs " + plain(needed) + " h" + with + " for " + plain(remaining) + " but has only " + has + ".")
-                : new Check("equipment", OK, name + " needs " + plain(needed) + " h" + with + " of the " + has + "."));
+                    name + " needs " + plain(needed) + " h" + pace + with + " for " + plain(remaining) + " but has only " + has + ".")
+                : new Check("equipment", OK, name + " needs " + plain(needed) + " h" + pace + with + " of the " + has + "."));
         }
         if (changeover != null) {
             checks.add(new Check("changeover", OK, "Follows " + changeover.previous().getWorkOrderNumber() + " on " + name + ": "
@@ -202,7 +206,7 @@ public class WorkOrderReadinessService {
                 + itemCode(order.getTargetItemId()) + "."));
         }
 
-        List<String> clashes = sameEquipment.stream()
+        List<String> clashes = equipment.concurrentWorkOrders() ? List.of() : sameEquipment.stream()
             .filter(other -> WorkOrderServiceImpl.status(other).acceptsRuns())
             .filter(other -> other.getPlannedStartAt() != null && other.getPlannedEndAt() != null
                 && other.getPlannedStartAt().isBefore(end) && other.getPlannedEndAt().isAfter(start))

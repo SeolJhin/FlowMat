@@ -14,6 +14,8 @@ interface Props {
   onDelete(connectionId: string): Promise<void>
   onOpenRuleBuilder(target: RuleTargetInput): void
   focusLabel?: boolean
+  /** The connection leaves an Exclusive gateway, so it can be the gateway's default (ADR-006). */
+  sourceIsExclusive?: boolean
 }
 
 const CONNECTION_TYPE_OPTIONS = [
@@ -28,7 +30,7 @@ const CONNECTION_TYPE_OPTIONS = [
   'equipment_flow',
 ]
 
-export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Props) {
+export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel, sourceIsExclusive = false }: Props) {
   const labelRef = useRef<HTMLInputElement>(null)
   const [label, setLabel] = useState('')
   const [connectionType, setConnectionType] = useState('material')
@@ -40,6 +42,7 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
   const [conditionExpr, setConditionExpr] = useState('')
   const [capacity, setCapacity] = useState('')
   const [failurePolicy, setFailurePolicy] = useState<'stop' | 'skip' | 'retry'>('stop')
+  const [defaultRoute, setDefaultRoute] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -59,6 +62,7 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
     setConditionExpr(edge.conditionExpr ?? '')
     setCapacity(edge.capacity !== null ? String(edge.capacity) : '')
     setFailurePolicy(edge.failurePolicy)
+    setDefaultRoute(edge.defaultRoute ?? false)
   }, [edge])
 
   if (!edge) return null
@@ -81,6 +85,7 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
       capacity: capacity !== '' ? Number(capacity) : null,
       clearCapacity: capacity === '',
       failurePolicy,
+      ...(sourceIsExclusive ? { defaultRoute } : {}),
       })
     } catch (error) {
       setSaveError(errorMessage(error, 'Could not save connection.'))
@@ -194,6 +199,18 @@ export function ConnectionInspector({ edge, onSubmit, onDelete, focusLabel }: Pr
             </select>
           </label>
         </div>
+
+        {sourceIsExclusive && (
+          <div style={{ display: 'grid', gap: '4px' }}>
+            <label>
+              <input type="checkbox" checked={defaultRoute} onChange={(e) => setDefaultRoute(e.target.checked)} /> Default route
+            </label>
+            <span className="inspector-hint">
+              This gateway tries its connections by priority, lowest first, and takes the first whose condition holds; the
+              default route is taken when none holds. Keep one default at most.
+            </span>
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           {saveError && <p role="alert" style={{ color: '#991b1b' }}>{saveError}</p>}

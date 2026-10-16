@@ -14,4 +14,7 @@ public interface WorkerDayShiftRepository extends JpaRepository<WorkerDayShift, 
 
     List<WorkerDayShift> findAllByProjectIdAndUserIdAndWorkDateGreaterThanEqualOrderByWorkDateAsc(String projectId, String userId,
         LocalDate from);
+
+    /** All of the worker's own dates, earliest first. */
+    List<WorkerDayShift> findAllByProjectIdAndUserIdOrderByWorkDateAsc(String projectId, String userId);
 }

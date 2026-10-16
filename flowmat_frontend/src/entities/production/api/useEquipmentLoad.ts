@@ -29,6 +29,10 @@ export interface EquipmentLoadRowDto {
   equipmentName: string
   equipmentStatus: string
   capacityPerHour: number | null
+  /** Null for 100 (docs/domain/equipment.md E8); needed hours are at capacity times this. */
+  efficiencyPercent?: number | null
+  /** Runs several work orders at once (docs/domain/equipment.md E12): never overloaded, and overlaps do not clash. */
+  concurrentWorkOrders?: boolean
   calendarSet: boolean
   availableHours: number
   downtimeHours: number

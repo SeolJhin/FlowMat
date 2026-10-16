@@ -9,7 +9,10 @@ import org.myweb.flowmat.domain.catalog.api.dto.response.EquipmentResponse;
 import org.myweb.flowmat.domain.catalog.api.dto.response.EquipmentStatusChangeResponse;
 import org.myweb.flowmat.domain.catalog.application.EquipmentService;
 import org.myweb.flowmat.global.response.ApiResponse;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -56,5 +59,12 @@ public class EquipmentController {
     public ApiResponse<Void> delete(@PathVariable String equipmentId) {
         equipmentService.deleteEquipment(equipmentId);
         return ApiResponse.ok(null);
+    }
+
+    /** A body that is not JSON, or a value of the wrong kind such as concurrentWorkOrders "yes" (E12). */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> unreadable() {
+        return ResponseEntity.badRequest().body(ApiResponse.error(
+            "Send the equipment as JSON, with numbers as numbers and concurrentWorkOrders as true or false."));
     }
 }

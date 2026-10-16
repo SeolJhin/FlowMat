@@ -19,6 +19,10 @@ public record EquipmentLoadResponse(
         String equipmentName,
         String equipmentStatus,
         BigDecimal capacityPerHour,
+        /** Null for 100 (docs/domain/equipment.md E8); needed hours are at capacity times this. */
+        BigDecimal efficiencyPercent,
+        /** Runs several work orders at once (docs/domain/equipment.md E12): never overloaded, and overlaps do not clash. */
+        boolean concurrentWorkOrders,
         boolean calendarSet,
         BigDecimal availableHours,
         BigDecimal downtimeHours,
@@ -28,6 +32,7 @@ public record EquipmentLoadResponse(
         BigDecimal draftHours,
         /** Planned over available, one decimal; null when nothing is available. */
         BigDecimal loadPercent,
+        /** Planned above available; never for equipment that runs work orders side by side. */
         boolean overloaded,
         /** Open orders on the equipment without a planned start and end. */
         int unplannedOrders,

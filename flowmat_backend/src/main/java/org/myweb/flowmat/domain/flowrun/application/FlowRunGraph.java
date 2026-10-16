@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.math.BigDecimal;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +21,16 @@ final class FlowRunGraph {
     private static final Set<String> POLICIES = Set.of("stop", "skip", "retry");
 
     record Route(String connectionId, String targetNodeId) {}
-    record Decision(String connectionId, String targetNodeId, boolean willRoute) {}
+    /**
+     * What a finished step's output does on one outgoing connection. {@code reason} is set for an Exclusive gateway's
+     * connections (ADR-006): {@code first_match}, {@code default}, {@code condition_false}, {@code exclusive_not_chosen} or
+     * {@code default_not_needed}. It is null for an ordinary connection, which is filtered only by its condition.
+     */
+    record Decision(String connectionId, String targetNodeId, boolean willRoute, String reason) {
+        Decision(String connectionId, String targetNodeId, boolean willRoute) {
+            this(connectionId, targetNodeId, willRoute, null);
+        }
+    }
 
     /**
      * A node's execution policy from its published revision; nodes without one run as before: no time limit, 3 retries
@@ -41,8 +52,10 @@ final class FlowRunGraph {
 
     private record PortRef(String processId, String direction) {}
 
+    /** {@code priority} and {@code order} (as drawn) rank an Exclusive gateway's connections; {@code defaultRoute} is its fallback. */
     private record Edge(String id, String target, String fromIoId, String toIoId,
-        ConditionExpression condition, BigDecimal capacity, String unit, String failurePolicy) {}
+        ConditionExpression condition, BigDecimal capacity, String unit, String failurePolicy, int priority,
+        boolean defaultRoute, int order) {}
 
     private final List<String> roots;
     private final Map<String, List<Edge>> outgoing;
@@ -50,15 +63,18 @@ final class FlowRunGraph {
     private final Map<String, ConditionExpression> portRules;
     private final Map<String, PortSchema> portSchemas;
     private final Map<String, NodePolicy> policies;
+    private final Set<String> exclusiveNodes;
 
     private FlowRunGraph(List<String> roots, Map<String, List<Edge>> outgoing, Map<String, Edge> byId,
-        Map<String, ConditionExpression> portRules, Map<String, PortSchema> portSchemas, Map<String, NodePolicy> policies) {
+        Map<String, ConditionExpression> portRules, Map<String, PortSchema> portSchemas, Map<String, NodePolicy> policies,
+        Set<String> exclusiveNodes) {
         this.roots = List.copyOf(roots);
         this.outgoing = outgoing;
         this.byId = byId;
         this.portRules = portRules;
         this.portSchemas = portSchemas;
         this.policies = policies;
+        this.exclusiveNodes = Set.copyOf(exclusiveNodes);
     }
 
     static FlowRunGraph from(JsonNode snapshot) {
@@ -68,11 +84,14 @@ final class FlowRunGraph {
             throw conflict("Published revision has no executable graph.");
         }
         Map<String, Integer> indegree = new LinkedHashMap<>();
+        Set<String> exclusiveNodes = new HashSet<>();
         for (JsonNode process : processes) {
             String id = requiredText(process, "processId");
             if (indegree.putIfAbsent(id, 0) != null) {
                 throw conflict("Published revision has duplicate process IDs.");
             }
+            // Revisions published before ADR-006 have no gateways and route as before.
+            if ("exclusive".equalsIgnoreCase(textOrNull(process.path("nodeType")))) exclusiveNodes.add(id);
         }
         Map<String, NodePolicy> policies = new HashMap<>();
         JsonNode nodePolicies = snapshot.path("nodePolicies");
@@ -149,7 +168,11 @@ final class FlowRunGraph {
             requirePortReference(portRefs, toIoId, target, "input", id);
             String unit = textOrNull(connection.path("unit"));
             if (unit == null) unit = portUnits.get(fromIoId);
-            Edge edge = new Edge(id, target, fromIoId, toIoId, condition, capacity, unit, policy);
+            JsonNode priorityNode = connection.path("priority");
+            int priority = priorityNode.isIntegralNumber() && priorityNode.canConvertToInt() ? priorityNode.intValue() : 0;
+            boolean defaultRoute = connection.path("defaultRoute").asBoolean(false);
+            Edge edge = new Edge(id, target, fromIoId, toIoId, condition, capacity, unit, policy, priority, defaultRoute,
+                byId.size());
             if (byId.putIfAbsent(id, edge) != null) {
                 throw conflict("Published revision has duplicate connection IDs.");
             }
@@ -172,11 +195,16 @@ final class FlowRunGraph {
         if (visited != indegree.size()) {
             throw conflict("Graph revisions with cycles cannot execute.");
         }
-        return new FlowRunGraph(roots, outgoing, byId, portRules, portSchemas, policies);
+        return new FlowRunGraph(roots, outgoing, byId, portRules, portSchemas, policies, exclusiveNodes);
     }
 
     List<String> roots() {
         return roots;
+    }
+
+    /** Whether the node is an Exclusive gateway, which the server passes at once (ADR-006 decision 4). */
+    boolean exclusive(String nodeId) {
+        return exclusiveNodes.contains(nodeId);
     }
 
     NodePolicy policy(String nodeId) {
@@ -200,32 +228,79 @@ final class FlowRunGraph {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Graph step outputSnapshot must be an object.");
         }
         Map<String, Object> values = values(output);
+        if (exclusiveNodes.contains(nodeId)) {
+            return exclusivePreview(nodeId, output, values);
+        }
         List<Decision> decisions = new ArrayList<>();
         for (Edge edge : outgoing.getOrDefault(nodeId, List.of())) {
             if (edge.condition() != null && !edge.condition().evaluate(values)) {
                 decisions.add(new Decision(edge.id(), edge.target(), false));
                 continue;
             }
-            if (edge.capacity() != null) {
-                Object quantity = values.get("quantity");
-                if (!(quantity instanceof BigDecimal amount)) {
-                    throw conflict("Connection " + edge.id() + " requires outputSnapshot.quantity for capacity.");
-                }
-                if (amount.compareTo(edge.capacity()) > 0) {
-                    throw conflict("Connection " + edge.id() + " capacity exceeded.");
-                }
-            }
-            Object actualUnit = values.get("unit");
-            if (edge.unit() != null && actualUnit != null && !edge.unit().equals(actualUnit)) {
-                throw conflict("Connection " + edge.id() + " unit does not match outputSnapshot.unit.");
-            }
-            requirePortSchema(edge.fromIoId(), output);
-            requirePortSchema(edge.toIoId(), output);
-            requirePortRule(edge.fromIoId(), values);
-            requirePortRule(edge.toIoId(), values);
+            requireTransfer(edge, output, values);
             decisions.add(new Decision(edge.id(), edge.target(), true));
         }
         return decisions;
+    }
+
+    /**
+     * An Exclusive gateway's routes (ADR-006 decisions 2-3): its connections by priority, lowest first and then in the order
+     * they were drawn. The first one whose condition holds goes on; else its default connection; else none.
+     */
+    private List<Decision> exclusivePreview(String nodeId, JsonNode output, Map<String, Object> values) {
+        List<Edge> edges = outgoing.getOrDefault(nodeId, List.of()).stream()
+            .sorted(Comparator.comparingInt(Edge::priority).thenComparingInt(Edge::order))
+            .toList();
+        Edge chosen = null;
+        String reason = null;
+        for (Edge edge : edges) {
+            if (!edge.defaultRoute() && (edge.condition() == null || edge.condition().evaluate(values))) {
+                chosen = edge;
+                reason = "first_match";
+                break;
+            }
+        }
+        if (chosen == null) {
+            chosen = edges.stream().filter(Edge::defaultRoute).findFirst().orElse(null);
+            reason = "default";
+        }
+        if (chosen != null) {
+            requireTransfer(chosen, output, values);
+        }
+        List<Decision> decisions = new ArrayList<>();
+        for (Edge edge : edges) {
+            if (edge == chosen) {
+                decisions.add(new Decision(edge.id(), edge.target(), true, reason));
+            } else if (edge.defaultRoute()) {
+                decisions.add(new Decision(edge.id(), edge.target(), false, "default_not_needed"));
+            } else if (edge.condition() != null && !edge.condition().evaluate(values)) {
+                decisions.add(new Decision(edge.id(), edge.target(), false, "condition_false"));
+            } else {
+                decisions.add(new Decision(edge.id(), edge.target(), false, "exclusive_not_chosen"));
+            }
+        }
+        return decisions;
+    }
+
+    /** What a connection's transfer must pass: its capacity and unit, and both ports' schema and rule (GR-04). */
+    private void requireTransfer(Edge edge, JsonNode output, Map<String, Object> values) {
+        if (edge.capacity() != null) {
+            Object quantity = values.get("quantity");
+            if (!(quantity instanceof BigDecimal amount)) {
+                throw conflict("Connection " + edge.id() + " requires outputSnapshot.quantity for capacity.");
+            }
+            if (amount.compareTo(edge.capacity()) > 0) {
+                throw conflict("Connection " + edge.id() + " capacity exceeded.");
+            }
+        }
+        Object actualUnit = values.get("unit");
+        if (edge.unit() != null && actualUnit != null && !edge.unit().equals(actualUnit)) {
+            throw conflict("Connection " + edge.id() + " unit does not match outputSnapshot.unit.");
+        }
+        requirePortSchema(edge.fromIoId(), output);
+        requirePortSchema(edge.toIoId(), output);
+        requirePortRule(edge.fromIoId(), values);
+        requirePortRule(edge.toIoId(), values);
     }
 
     private void requirePortRule(String portId, Map<String, Object> values) {

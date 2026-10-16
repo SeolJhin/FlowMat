@@ -1,6 +1,6 @@
 # Flow Run (범용 실행 기록)
 
-상태: **구현(V23 2026-09-24 실행, V26 단계·시도·이벤트, V27 단계 취소, V39 그래프 실행, V40 출처 단계).** 2026-10-02에 코드에서 다시 정리한 현행 문서다. 설계 검토 근거는 [보고서 I](../archive/2026-09-handoff/reports/I-reference-architecture.md)(보관).
+상태: **구현(V23 2026-09-24 실행, V26 단계·시도·이벤트, V27 단계 취소, V39 그래프 실행, V40 출처 단계, V85 Exclusive 게이트웨이).** 2026-10-02에 코드에서 다시 정리한 현행 문서다. 설계 검토 근거는 [보고서 I](../archive/2026-09-handoff/reports/I-reference-architecture.md)(보관).
 
 FlowRun을 장기적으로 도메인 독립적인 실행 Core로 쓴다. 지금 구조는 이를 지원할 기반을 갖췄지만, 비제조 흐름으로 검증될 때까지 범용 실행 능력은 목표로 취급한다([ADR-003](../architecture/adr/ADR-003-resource-port-contract.md) 결정 8·9).
 
@@ -30,9 +30,9 @@ FlowRun을 장기적으로 도메인 독립적인 실행 Core로 쓴다. 지금 
 | F1 | 시작에는 발행(published) revision이 필요하다([워크플로 발행 revision](workflow-revision.md) V5·V7) | 404 / 409 |
 | F2 | 실행 종류는 넷 중 하나다. 종류에 따른 재고 영향은 생산 실행 쪽이 정한다([실행 모델](../architecture/execution-model.md) §7) | 400 `Unknown flow run type.` |
 | F3 | 그래프 실행은 입력이 JSON 객체여야 하고, 진입 연결이 없는 노드마다 planned 단계를 만든다. 순환·잘못된 참조가 있는 revision은 거절한다 | 400 / 409 |
-| F4 | 단계 결과는 외부가 보고한다. 단계를 스스로 실행하지 않는다 | |
+| F4 | 단계 결과는 외부가 보고한다. 단계를 스스로 실행하지 않는다. 예외: Exclusive 게이트웨이 단계는 서버가 바로 지나간다(GR-17, [ADR-006](../architecture/adr/ADR-006-operation-types.md) 결정 4) | |
 | F5 | planned 단계만 예정 시각을 바꿀 수 있고, 예정 시각 전에는 시작하지 않는다 | 409 |
-| F6 | 그래프 단계 완료의 라우팅(조건·용량·포트 검증식·스키마·실패 정책)은 [그래프 실행 계약](process-port-connection-contract.md#2026-09-30-그래프-실행-계약-v39) GR-01~GR-12를 따른다 | |
+| F6 | 그래프 단계 완료의 라우팅(조건·용량·포트 검증식·스키마·실패 정책)은 [그래프 실행 계약](process-port-connection-contract.md#2026-09-30-그래프-실행-계약-v39) GR-01~GR-12, Exclusive 게이트웨이는 [GR-13~GR-20](process-port-connection-contract.md#2026-10-17-exclusive-게이트웨이-adr-006-v85)을 따른다 | |
 | F7 | 실행 마감은 모든 단계가 completed나 skipped일 때만 된다 | 409 `Every recorded step must complete or be skipped before the flow run can finish.` |
 | F8 | 생산 실행과 연결된 Flow Run은 이 API로 마감·취소·실패 처리할 수 없다. 생산 실행 API가 `FlowRunCommand`로 다룬다([실행 모델](../architecture/execution-model.md) §6) | 409 `Linked production runs must be managed through the production run API.` |
 | F9 | 끝난 실행은 다시 바꾸지 않는다 | 409 `Flow run has already ended.` |
@@ -56,7 +56,7 @@ FlowRun을 장기적으로 도메인 독립적인 실행 Core로 쓴다. 지금 
 
 - 실행: `run_started`, `run_finished`, `run_cancelled`, `run_failed`
 - 단계: `step_created`, `step_scheduled`, `step_started`, `step_completed`, `step_failed`, `step_skipped`, `step_retried`, `step_cancelled`
-- 연결: `connection_filtered`(조건이 거짓이라 지나가지 않은 연결)
+- 연결: `connection_filtered`(지나가지 않은 연결, reason `condition_false`·게이트웨이의 `exclusive_not_chosen`·`default_not_needed`), `gateway_routed`(게이트웨이가 고른 연결, reason `first_match`·`default`)
 
 ## 화면
 
@@ -64,7 +64,7 @@ Runs 화면의 Flow Runs 탭(`FlowRunsPanel`)
 
 ## 검증
 
-- 통합 테스트: `FlowRunIntegrationTest`(생산 실행 연결 포함), `FlowRunStepIntegrationTest`, `FlowRunGraphIntegrationTest`, `FlowRunExecutionPolicyIntegrationTest`(2cp)
+- 통합 테스트: `FlowRunIntegrationTest`(생산 실행 연결 포함), `FlowRunStepIntegrationTest`, `FlowRunGraphIntegrationTest`, `FlowRunExecutionPolicyIntegrationTest`(2cp), `ExclusiveGatewayIntegrationTest`(2eb)
 - 단위 테스트: `FlowRunServiceTest`, `FlowRunGraphTest`, `FlowRunGraphPolicyTest`(2cp), `LinkedFlowRunServiceTest`
 - 비제조 흐름: `DataFlowRunIntegrationTest`(2026-10-03). 새 프로젝트에서 Item 없는 포트로 File → Transform → Data를 `actual`로 끝까지 돌리고, 제조 행(품목·재고·LOT·BOM·작업지시·생산 실행)이 생기지 않음을 확인한다
 
@@ -74,5 +74,5 @@ Runs 화면의 Flow Runs 탭(`FlowRunsPanel`)
 
 - 노드 자동 실행기(서버는 단계를 시작하지 않는다)
 - 정책 편집 화면, 수동 실행·생산 연결 실행의 정책, 제한 초과 대기열
-- 여러 진입 연결의 합류
+- 여러 진입 연결의 합류(Join, ADR-006에서 승인하지 않음)
 - 수량 분할

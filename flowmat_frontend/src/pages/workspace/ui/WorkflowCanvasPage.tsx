@@ -1772,6 +1772,7 @@ export function WorkflowCanvasPage({ canvas, projectId: _projectId }: Props) {
                 rules={[]}
                 onSubmit={async (input) => { stopInlineEditEdge(); await updateConnection(input) }}
                 focusLabel={inlineEditingEdgeId === selectedEdge?.id}
+                sourceIsExclusive={selectedEdge ? canvas.nodeMap[selectedEdge.fromProcessId]?.nodeType === 'exclusive' : false}
                 onDelete={(connectionId) => deleteApiRef.current.deleteEdge(connectionId)}
                 onOpenRuleBuilder={() => {}}
               />

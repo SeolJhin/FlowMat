@@ -1040,6 +1040,10 @@ export interface EquipmentDetailsDto {
   /** Water per hour of running. */
   waterLiter: number | null
   location: string | null
+  /** The share of capacityPerHour it really reaches, above 0 to 100; null for 100 (docs/domain/equipment.md E8). */
+  efficiencyPercent?: number | null
+  /** Several work orders may run on it at once (docs/domain/equipment.md E12); older answers leave it out. */
+  concurrentWorkOrders?: boolean
 }
 
 export interface EquipmentDto {
@@ -1125,6 +1129,8 @@ export interface ProcessConnectionDto {
   conditionExpr: string | null
   capacity: number | null
   failurePolicy: 'stop' | 'skip' | 'retry'
+  /** An Exclusive gateway's default connection (ADR-006); older answers leave it out. */
+  defaultRoute?: boolean
   version: number
   versionNonce: number
 }

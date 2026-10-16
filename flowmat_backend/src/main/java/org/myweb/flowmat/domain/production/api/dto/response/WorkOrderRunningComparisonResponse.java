@@ -12,7 +12,9 @@ import java.math.BigDecimal;
  * @param plannedCost        plannedMinutes at the equipment's current rate; null when either is unknown
  * @param runs               physical runs of the order
  * @param actualCostComplete every counted record has a known rate
+ * @param efficiencyPercent  the equipment's efficiency, null for 100; plannedMinutes is at capacity times this (equipment.md E9)
  */
 public record WorkOrderRunningComparisonResponse(String workOrderId, String equipmentId, BigDecimal capacityPerHour,
-    Integer plannedMinutes, BigDecimal plannedCost, int runs, int actualMinutes, BigDecimal actualCost, boolean actualCostComplete) {
+    Integer plannedMinutes, BigDecimal plannedCost, int runs, int actualMinutes, BigDecimal actualCost, boolean actualCostComplete,
+    BigDecimal efficiencyPercent) {
 }

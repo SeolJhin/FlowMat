@@ -76,6 +76,8 @@ export interface CanvasEdgeViewModel {
   conditionExpr: string | null
   capacity: number | null
   failurePolicy: 'stop' | 'skip' | 'retry'
+  /** An Exclusive gateway's default connection (ADR-006). */
+  defaultRoute?: boolean
   version: number
   versionNonce: number
 }
@@ -176,6 +178,7 @@ export interface UpdateProcessConnectionInput {
   capacity?: number | null
   clearCapacity?: boolean
   failurePolicy?: 'stop' | 'skip' | 'retry'
+  defaultRoute?: boolean
 }
 
 export type CanvasMode = 'select' | 'connect'

@@ -28,6 +28,7 @@ export function connectionUndoInput(
     }
   }
   if (input.failurePolicy !== undefined) previous.failurePolicy = edge.failurePolicy
+  if (input.defaultRoute !== undefined) previous.defaultRoute = edge.defaultRoute ?? false
 
   return previous
 }

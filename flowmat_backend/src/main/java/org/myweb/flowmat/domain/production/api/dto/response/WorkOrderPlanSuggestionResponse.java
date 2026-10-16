@@ -31,7 +31,9 @@ public record WorkOrderPlanSuggestionResponse(
     /** Crew members with shifts who were not working when the equipment alone could have started (WC25). */
     List<String> waitedForCrew,
     /** Approved or running orders that already hold some of the crew, which the suggestion was moved after (WC25). */
-    List<CrewBooking> crewMovedPast
+    List<CrewBooking> crewMovedPast,
+    /** The equipment's efficiency (docs/domain/equipment.md E8); null for 100. productionHours is at capacity times this. */
+    BigDecimal efficiencyPercent
 ) {
 
     public record CrewBooking(String workOrderNumber, List<String> userIds) {

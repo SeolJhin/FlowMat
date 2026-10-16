@@ -1,7 +1,7 @@
 import type { EquipmentDetailsDto, EquipmentDto } from '../../../shared/types/api'
 import { csvCell } from './ledgerModel'
 
-/** The details as typed in the form: every field is text, empty when not recorded. */
+/** The details as typed in the form: every field is text, empty when not recorded, but the side-by-side switch. */
 export interface EquipmentDetailsForm {
   manufacturer: string
   modelName: string
@@ -10,10 +10,14 @@ export interface EquipmentDetailsForm {
   powerKwh: string
   waterLiter: string
   location: string
+  efficiencyPercent: string
+  /** Several work orders at once (docs/domain/equipment.md E12). */
+  concurrentWorkOrders: boolean
 }
 
 export const EMPTY_DETAILS_FORM: EquipmentDetailsForm = {
-  manufacturer: '', modelName: '', serialNo: '', capacityPerHour: '', powerKwh: '', waterLiter: '', location: '',
+  manufacturer: '', modelName: '', serialNo: '', capacityPerHour: '', powerKwh: '', waterLiter: '', location: '', efficiencyPercent: '',
+  concurrentWorkOrders: false,
 }
 
 const NUMBERS = [
@@ -29,7 +33,8 @@ export function detailsForm(details: EquipmentDetailsDto | null | undefined): Eq
   return {
     manufacturer: text(details.manufacturer), modelName: text(details.modelName), serialNo: text(details.serialNo),
     capacityPerHour: num(details.capacityPerHour), powerKwh: num(details.powerKwh), waterLiter: num(details.waterLiter),
-    location: text(details.location),
+    location: text(details.location), efficiencyPercent: num(details.efficiencyPercent ?? null),
+    concurrentWorkOrders: details.concurrentWorkOrders ?? false,
   }
 }
 
@@ -49,12 +54,18 @@ export function detailsPayload(form: EquipmentDetailsForm): { details: Equipment
     if (!Number.isFinite(value) || value < 0) return { details: null, error: `${label} must be a number of 0 or more.` }
     numbers[key] = value
   }
+  // Above 0 to 100 (E8); empty is 100, the rated output.
+  const efficiencyRaw = form.efficiencyPercent.trim()
+  const efficiency = efficiencyRaw === '' ? null : Number(efficiencyRaw)
+  if (efficiency !== null && (!Number.isFinite(efficiency) || efficiency <= 0 || efficiency > 100)) {
+    return { details: null, error: 'Efficiency % must be above 0 and at most 100.' }
+  }
   const text = (value: string) => (value.trim() === '' ? null : value.trim())
   return {
     details: {
       manufacturer: text(form.manufacturer), modelName: text(form.modelName), serialNo: text(form.serialNo),
       capacityPerHour: numbers.capacityPerHour ?? null, powerKwh: numbers.powerKwh ?? null, waterLiter: numbers.waterLiter ?? null,
-      location: text(form.location),
+      location: text(form.location), efficiencyPercent: efficiency, concurrentWorkOrders: form.concurrentWorkOrders,
     },
     error: null,
   }
@@ -67,6 +78,7 @@ export function perHour(details: EquipmentDetailsDto | null | undefined, format:
     details.capacityPerHour !== null ? `${format(details.capacityPerHour)} out` : null,
     details.powerKwh !== null ? `${format(details.powerKwh)} kWh` : null,
     details.waterLiter !== null ? `${format(details.waterLiter)} L` : null,
+    details.efficiencyPercent != null && details.efficiencyPercent !== 100 ? `${format(details.efficiencyPercent)}% efficient` : null,
   ].filter(Boolean).join(' · ')
 }
 

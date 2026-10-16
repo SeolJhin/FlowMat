@@ -15,7 +15,7 @@ public class BomPlanningQueryImpl implements BomPlanningQuery {
     private final ObjectMapper mapper;
     public Optional<Facts> findActive(String id) {
         return boms.findByBomIdAndDeletedYn(id,"N").map(row -> {
-            try { return new Facts(mapper.writeValueAsString(row)); }
+            try { return new Facts(mapper.writeValueAsString(org.hibernate.Hibernate.unproxy(row))); }
             catch(JsonProcessingException error) { throw new IllegalStateException("Invalid internal BOM facts.",error); }
         });
     }

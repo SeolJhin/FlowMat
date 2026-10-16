@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
+import org.myweb.flowmat.global.util.StrictBooleanDeserializer;
 
 public record ProcessConnectionUpdateRequest(
     String fromIoId,
@@ -22,6 +23,8 @@ public record ProcessConnectionUpdateRequest(
     @Size(max = 2000) String conditionExpr,
     @DecimalMin("0.0") BigDecimal capacity,
     String failurePolicy,
-    Boolean clearCapacity
+    Boolean clearCapacity,
+    /** An Exclusive gateway's default connection (ADR-006); unchanged when left out. */
+    @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using = StrictBooleanDeserializer.class) Boolean defaultRoute
 ) {
 }

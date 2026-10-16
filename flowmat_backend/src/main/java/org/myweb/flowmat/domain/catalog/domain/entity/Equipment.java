@@ -7,6 +7,8 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import org.myweb.flowmat.global.common.CreatedUpdatedAuditEntity;
 
 @Getter
@@ -36,6 +38,14 @@ public class Equipment extends CreatedUpdatedAuditEntity {
 
     @Column(precision = 14, scale = 4)
     private BigDecimal waterLiter;
+
+    /** The share of the rated output per hour it really reaches, above 0 to 100; null is 100 (V84). */
+    @Column(precision = 5, scale = 2)
+    private BigDecimal efficiencyPercent;
+
+    /** Y when several work orders may run on it at once, so plans do not keep them apart (V86, E12). */
+    @JdbcTypeCode(SqlTypes.CHAR)
+    private String concurrentWorkOrdersYn = "N";
 
     private String location;
 }

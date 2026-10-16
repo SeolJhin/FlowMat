@@ -76,6 +76,17 @@ describe('timeline', () => {
     expect(first.title).toBe('WO-1 · RED · 10 h · Mon 01-07 09:00 → Tue 01-08 17:00')
   })
 
+  it('marks no clash on equipment that runs work orders side by side (E12)', () => {
+    const overlapping = [
+      order({ workOrderId: 'a', workOrderNumber: 'WO-1', plannedStartAt: at(7, 9), plannedEndAt: at(8, 17) }),
+      order({ workOrderId: 'b', workOrderNumber: 'WO-2', plannedStartAt: at(7, 12), plannedEndAt: at(8, 9) }),
+    ]
+    expect(timelineBars(overlapping, week.from, week.to).bars.map((bar) => bar.clash)).toEqual([true, true])
+    const { bars, lanes } = timelineBars(overlapping, week.from, week.to, true)
+    expect(bars.map((bar) => bar.clash)).toEqual([false, false])
+    expect(lanes).toBe(2)
+  })
+
   it('keeps one lane when there is nothing to show', () => {
     expect(timelineBars([], week.from, week.to)).toEqual({ bars: [], lanes: 1 })
   })

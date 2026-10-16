@@ -140,6 +140,39 @@ test('real worker shifts and day changes drive crew, load and single or batch pl
     expect(load.draftHours).toBe(0.5)
     const halfPlan = await api<Plan>('GET', `/work-orders/${first.workOrderId}/plan-suggestion?from=${encodeURIComponent(from)}`)
     expect(new Date(halfPlan.plannedStartAt).toISOString()).toBe(`${monday}T00:00:00.000Z`)
+
+    // The owner can apply a batch proposal to approved orders through the schedule commands.
+    await api('PUT', `/work-orders/${first.workOrderId}/crew`, { members: [{ userId: workerId, sharePercent: 100 }] })
+    for (const id of orders) await api('POST', `/work-orders/${id}/approve`, {})
+    await page.reload()
+    const batchPanel = page.getByRole('region', { name: 'Plan several orders', exact: true })
+    await batchPanel.getByText('Plan several orders', { exact: true }).click()
+    await batchPanel.getByRole('checkbox', { name: new RegExp(title) }).check()
+    await batchPanel.getByRole('checkbox', { name: new RegExp(`Worker batch ${tag}`) }).check()
+    await batchPanel.getByLabel('Plan several from', { exact: true }).fill('2041-03-11T09:00')
+    const approvedPlan = page.waitForResponse(reply => reply.request().method() === 'POST'
+      && new URL(reply.url()).pathname === '/api/work-orders/plan-suggestions')
+    await batchPanel.getByRole('button', { name: 'Suggest dates for 2 orders', exact: true }).click()
+    expect((await approvedPlan).status()).toBe(200)
+    const reschedules = batchPanel.getByRole('group', { name: 'Reschedule approved orders', exact: true })
+    const rescheduleButton = reschedules.getByRole('button', { name: 'Reschedule 2 approved orders', exact: true })
+    await expect(rescheduleButton).toBeDisabled()
+    const reason = 'Plan the approved crew orders together'
+    await reschedules.getByLabel('Reschedule reason', { exact: true }).fill(reason)
+    const commands = Promise.all(orders.map(id => page.waitForResponse(reply => reply.request().method() === 'POST'
+      && new URL(reply.url()).pathname === `/api/work-orders/${id}/reschedules`)))
+    await rescheduleButton.click()
+    expect((await commands).map(reply => reply.status())).toEqual([200, 200])
+    await expect(batchPanel.getByRole('status', { name: 'Rescheduled', exact: true }))
+      .toHaveText('Rescheduled 2 approved orders.')
+    for (const [index, id] of orders.entries()) {
+      const scheduled = await api<Order>('GET', `/work-orders/${id}`)
+      expect(scheduled.bomId).toBeNull()
+      expect(new Date(scheduled.plannedStartAt!).toISOString()).toBe(`2041-03-11T0${index}:00:00.000Z`)
+      expect(new Date(scheduled.plannedEndAt!).toISOString()).toBe(`2041-03-11T0${index + 1}:00:00.000Z`)
+      const history = await api<{ reason: string; changedBy: string }[]>('GET', `/work-orders/${id}/reschedules`)
+      expect(history).toEqual([expect.objectContaining({ reason, changedBy: 'demo-owner' })])
+    }
   } finally {
     for (const id of orders) await api('POST', `/work-orders/${id}/cancel`, {})
     if (changedDay) await api('DELETE', `${workers}/${workerId}/days/${monday}`)

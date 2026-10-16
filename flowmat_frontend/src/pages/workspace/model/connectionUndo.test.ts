@@ -28,6 +28,13 @@ const edge: CanvasEdgeViewModel = {
 }
 
 describe('connectionUndoInput', () => {
+  it('puts back whether the connection was its gateway\'s default (ADR-006)', () => {
+    expect(connectionUndoInput({ ...edge, defaultRoute: true }, { connectionId: 'connection-1', defaultRoute: false }))
+      .toEqual({ connectionId: 'connection-1', defaultRoute: true })
+    expect(connectionUndoInput(edge, { connectionId: 'connection-1', defaultRoute: true }))
+      .toEqual({ connectionId: 'connection-1', defaultRoute: false })
+  })
+
   it('restores cleared fields and the default values represented by null', () => {
     expect(connectionUndoInput(edge, {
       connectionId: edge.id,

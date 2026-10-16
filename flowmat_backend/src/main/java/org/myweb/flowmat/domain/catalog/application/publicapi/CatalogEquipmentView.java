@@ -2,15 +2,34 @@ package org.myweb.flowmat.domain.catalog.application.publicapi;
 
 import java.math.BigDecimal;
 
-/** What another bounded context may read about a piece of equipment. {@code capacityPerHour} is null when unset. */
+/**
+ * What another bounded context may read about a piece of equipment. {@code capacityPerHour} is null when unset;
+ * {@code efficiencyPercent} is null for 100 (docs/domain/equipment.md E8). {@code concurrentWorkOrders}: several work
+ * orders may run on it at once, so plans do not keep them apart (E12).
+ */
 public record CatalogEquipmentView(
     String equipmentId,
     String projectId,
     String equipmentCode,
     String equipmentName,
     String equipmentStatus,
-    BigDecimal capacityPerHour
+    BigDecimal capacityPerHour,
+    BigDecimal efficiencyPercent,
+    boolean concurrentWorkOrders
 ) {
+
+    private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
+
+    /**
+     * The output per hour it really reaches: capacity per hour times its efficiency (E9). Null without a capacity. Plans
+     * reckon with this; changeover minutes are not scaled by it.
+     */
+    public BigDecimal effectiveCapacityPerHour() {
+        if (capacityPerHour == null || efficiencyPercent == null || efficiencyPercent.compareTo(HUNDRED) == 0) {
+            return capacityPerHour;
+        }
+        return capacityPerHour.multiply(efficiencyPercent).divide(HUNDRED);
+    }
 
     /** The code, or the name when there is no code. */
     public String label() {

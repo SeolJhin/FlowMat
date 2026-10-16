@@ -54,6 +54,9 @@ export function EquipmentLoadBoard({ projectId }: { projectId: string }) {
           return <tr key={row.equipmentId} style={{ borderTop: '1px solid var(--border)' }}>
             <td style={cell}>{row.equipmentCode ?? row.equipmentName}
               {row.equipmentStatus !== 'active' && <div className="inspector-hint">{row.equipmentStatus}</div>}
+              {row.efficiencyPercent != null && row.efficiencyPercent !== 100
+                && <div className="inspector-hint">{formatQty(row.efficiencyPercent)}% efficient</div>}
+              {row.concurrentWorkOrders && <div className="inspector-hint">runs orders side by side</div>}
               {!row.calendarSet && <div className="inspector-hint">no calendar</div>}</td>
             <td style={cell}>{formatHours(row.availableHours)}
               {row.downtimeHours > 0 && <div className="inspector-hint">{formatHours(row.downtimeHours)} down</div>}</td>

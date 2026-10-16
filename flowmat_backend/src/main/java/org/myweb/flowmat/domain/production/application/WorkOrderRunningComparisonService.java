@@ -40,15 +40,18 @@ public class WorkOrderRunningComparisonService {
         String projectId = order.getProjectId();
         access.requireProjectReadAccess(projectId);
 
-        // Planned: the whole target at the equipment's capacity, as the plan suggestion reckons hours, at today's rate.
+        // Planned: the whole target at the output the equipment really reaches (capacity times efficiency, equipment.md E9),
+        // as the plan suggestion reckons hours, at today's rate.
         String equipmentId = order.getEquipmentId();
-        BigDecimal capacity = equipmentId == null ? null
-            : catalogQuery.findProjectEquipment(projectId, equipmentId).map(CatalogEquipmentView::capacityPerHour).orElse(null);
+        CatalogEquipmentView equipment = equipmentId == null ? null
+            : catalogQuery.findProjectEquipment(projectId, equipmentId).orElse(null);
+        BigDecimal capacity = equipment == null ? null : equipment.capacityPerHour();
+        BigDecimal effective = equipment == null ? null : equipment.effectiveCapacityPerHour();
         Integer plannedMinutes = null;
         BigDecimal plannedCost = null;
         BigDecimal target = order.getTargetQuantity();
         if (capacity != null && capacity.signum() > 0 && target != null && target.signum() > 0) {
-            plannedMinutes = target.multiply(MINUTES_PER_HOUR).divide(capacity, 0, RoundingMode.CEILING).intValueExact();
+            plannedMinutes = target.multiply(MINUTES_PER_HOUR).divide(effective, 0, RoundingMode.CEILING).intValueExact();
             BigDecimal rate = equipmentCosts.findHourlyRate(projectId, equipmentId).map(EquipmentCostQuery.EquipmentRate::hourlyCost)
                 .orElse(null);
             plannedCost = rate == null ? null
@@ -69,6 +72,6 @@ public class WorkOrderRunningComparisonService {
             if (!times.costComplete()) complete = false;
         }
         return new WorkOrderRunningComparisonResponse(workOrderId, equipmentId, capacity, plannedMinutes, plannedCost, count, minutes,
-            cost.setScale(4, RoundingMode.HALF_UP), complete);
+            cost.setScale(4, RoundingMode.HALF_UP), complete, equipment == null ? null : equipment.efficiencyPercent());
     }
 }

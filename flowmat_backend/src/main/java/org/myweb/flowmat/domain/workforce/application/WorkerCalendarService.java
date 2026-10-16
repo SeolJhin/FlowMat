@@ -2,6 +2,7 @@ package org.myweb.flowmat.domain.workforce.application;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -12,6 +13,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -27,6 +29,7 @@ import org.myweb.flowmat.domain.catalog.application.publicapi.ProjectHolidayQuer
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
 import org.myweb.flowmat.domain.project.application.publicapi.ProjectCalendarQuery;
 import org.myweb.flowmat.domain.project.application.publicapi.ProjectMemberQuery;
+import org.myweb.flowmat.domain.workforce.api.dto.request.WorkerDayCopyRequest;
 import org.myweb.flowmat.domain.workforce.api.dto.request.WorkerDayOffRequest;
 import org.myweb.flowmat.domain.workforce.api.dto.request.WorkerDayRequest;
 import org.myweb.flowmat.domain.workforce.api.dto.request.WorkerShiftsRequest;
@@ -37,9 +40,11 @@ import org.myweb.flowmat.domain.workforce.application.publicapi.WorkerHours;
 import org.myweb.flowmat.domain.workforce.application.publicapi.WorkerTime;
 import org.myweb.flowmat.domain.workforce.domain.entity.WorkerDayOff;
 import org.myweb.flowmat.domain.workforce.domain.entity.WorkerDayShift;
+import org.myweb.flowmat.domain.workforce.domain.entity.WorkerRota;
 import org.myweb.flowmat.domain.workforce.domain.entity.WorkerShift;
 import org.myweb.flowmat.domain.workforce.repository.WorkerDayOffRepository;
 import org.myweb.flowmat.domain.workforce.repository.WorkerDayShiftRepository;
+import org.myweb.flowmat.domain.workforce.repository.WorkerRotaRepository;
 import org.myweb.flowmat.domain.workforce.repository.WorkerShiftRepository;
 import org.myweb.flowmat.global.exception.BusinessException;
 import org.myweb.flowmat.global.exception.ErrorCode;
@@ -57,6 +62,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class WorkerCalendarService implements WorkerCalendarQuery {
 
     private static final int MAX_SHIFTS = 6;
+    private static final int MAX_ROTA_WEEKS = 8;
     private static final int MAX_REASON = 200;
     private static final long LONGEST_DAYS_OFF = 366;
     private static final long MAX_RANGE_DAYS = 62;
@@ -70,6 +76,7 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
     private final WorkerShiftRepository shiftRepository;
     private final WorkerDayOffRepository dayOffRepository;
     private final WorkerDayShiftRepository dayShiftRepository;
+    private final WorkerRotaRepository rotaRepository;
     private final ProjectAccessService access;
     private final ProjectMemberQuery members;
     private final ProjectCalendarQuery calendars;
@@ -79,7 +86,15 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
     private record Span(Instant start, Instant end) {
     }
 
-    private record ShiftPlan(LocalTime start, LocalTime end, TreeSet<Integer> days) {
+    /** {@code week}: the rota week it runs in, 1 without a rota. */
+    private record ShiftPlan(LocalTime start, LocalTime end, TreeSet<Integer> days, int week) {
+    }
+
+    /** A rota of {@code weeks} weeks whose week 1 starts on the Monday {@code startsOn}; it repeats both ways (WC45). */
+    private record RotaWeeks(int weeks, LocalDate startsOn) {
+        int weekOf(LocalDate day) {
+            return (int) Math.floorMod(Math.floorDiv(ChronoUnit.DAYS.between(startsOn, day), 7L), (long) weeks) + 1;
+        }
     }
 
     /** One of a date's own shifts (WC29). */
@@ -100,21 +115,46 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
         return response(projectId, userId, members.ownerOf(projectId));
     }
 
+    /**
+     * A worker's weekly shifts, all at once (WC2); an empty list clears them. With {@code rota} they repeat every
+     * {@code weeks} weeks from the week of {@code startsOn}, each shift in its {@code rotaWeek}; without it, any rota the
+     * worker had goes (WC44-WC46).
+     */
     @Transactional
     public WorkerCalendarResponse setShifts(String projectId, String userId, WorkerShiftsRequest request) {
         requireEditor(projectId, userId);
         List<WorkerShiftsRequest.Shift> requested = request == null || request.shifts() == null ? List.of() : request.shifts();
-        if (requested.size() > MAX_SHIFTS) {
-            throw bad("A worker can have at most " + MAX_SHIFTS + " shifts.");
+        WorkerShiftsRequest.Rota askedRota = request == null ? null : request.rota();
+        int weeks = 1;
+        LocalDate startsOn = null;
+        if (askedRota != null) {
+            if (askedRota.weeks() == null || askedRota.weeks() < 2 || askedRota.weeks() > MAX_ROTA_WEEKS) {
+                throw bad("A rota runs 2 to " + MAX_ROTA_WEEKS + " weeks.");
+            }
+            weeks = askedRota.weeks();
+            // The week, Monday to Sunday, of the date given is week 1.
+            startsOn = day(askedRota.startsOn(), "startsOn").with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        }
+        if (requested.size() > MAX_SHIFTS * weeks) {
+            throw bad(weeks == 1 ? "A worker can have at most " + MAX_SHIFTS + " shifts."
+                : "A rota week can have at most " + MAX_SHIFTS + " shifts.");
         }
         List<ShiftPlan> plans = new ArrayList<>();
         for (int index = 0; index < requested.size(); index++) {
-            plans.add(plan(requested.get(index), requested.size() == 1 ? "" : "Shift " + (index + 1) + ": "));
+            plans.add(plan(requested.get(index), requested.size() == 1 ? "" : "Shift " + (index + 1) + ": ", weeks));
         }
-        requireNoOverlap(plans);
+        for (int week = 1; week <= weeks; week++) {
+            int number = week;
+            if (plans.stream().filter(plan -> plan.week() == number).count() > MAX_SHIFTS) {
+                throw bad("A rota week can have at most " + MAX_SHIFTS + " shifts.");
+            }
+        }
+        requireNoOverlap(plans, weeks);
         shiftRepository.lockKey("worker-shift:" + projectId + ":" + userId);
         shiftRepository.deleteAll(shiftRepository.findAllByProjectIdAndUserIdOrderByShiftStartAscWorkerShiftIdAsc(projectId, userId));
         shiftRepository.flush();
+        rotaRepository.findByProjectIdAndUserId(projectId, userId).ifPresent(rotaRepository::delete);
+        rotaRepository.flush();
         String actor = access.requireCurrentUserId();
         OffsetDateTime now = OffsetDateTime.now();
         for (ShiftPlan plan : plans) {
@@ -125,11 +165,24 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
             shift.setShiftStart(plan.start());
             shift.setShiftEnd(plan.end());
             shift.setWorkDays(plan.days().stream().map(String::valueOf).collect(Collectors.joining(",")));
+            shift.setRotaWeek(plan.week());
             shift.setUpdatedBy(actor);
             shift.setUpdatedAt(now);
             shiftRepository.save(shift);
         }
         shiftRepository.flush();
+        // A rota without shifts would repeat nothing.
+        if (weeks > 1 && !plans.isEmpty()) {
+            WorkerRota rota = new WorkerRota();
+            rota.setWorkerRotaId(ids.generate());
+            rota.setProjectId(projectId);
+            rota.setUserId(userId);
+            rota.setCycleWeeks(weeks);
+            rota.setStartsOn(startsOn);
+            rota.setUpdatedBy(actor);
+            rota.setUpdatedAt(now);
+            rotaRepository.saveAndFlush(rota);
+        }
         return response(projectId, userId, members.ownerOf(projectId));
     }
 
@@ -278,6 +331,68 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
         return response(projectId, userId, members.ownerOf(projectId));
     }
 
+    /**
+     * Copies a worker's own dates (from {@code fromDate} through {@code throughDate}, either side open) to another worker of
+     * the project, replacing what those dates had there; their other dates stay (WC41, like equipment D7). The one copied
+     * to needs weekly shifts, as for a date of their own, and must be someone the caller may change (WC7).
+     */
+    @Transactional
+    public WorkerCalendarResponse copyDays(String projectId, String userId, WorkerDayCopyRequest request) {
+        access.requireProjectReadAccess(projectId);
+        requireWorker(projectId, userId);
+        String target = request == null || request.toUserId() == null ? "" : request.toUserId().trim();
+        if (target.isEmpty() || target.equals(userId)) {
+            throw bad("Choose another person to copy to.");
+        }
+        if (!members.canRead(projectId, target)) {
+            throw bad("toUserId is not a worker of this project.");
+        }
+        requireEditor(projectId, target);
+        LocalDate from = request.fromDate() == null || request.fromDate().isBlank() ? null : day(request.fromDate(), "fromDate");
+        LocalDate through = request.throughDate() == null || request.throughDate().isBlank()
+            ? null : day(request.throughDate(), "throughDate");
+        if (from != null && through != null && through.isBefore(from)) {
+            throw bad("throughDate must not be before fromDate.");
+        }
+        shiftRepository.lockKey("worker-shift:" + projectId + ":" + target);
+        if (shiftRepository.findAllByProjectIdAndUserIdOrderByShiftStartAscWorkerShiftIdAsc(projectId, target).isEmpty()) {
+            throw new BusinessException(ErrorCode.CONFLICT,
+                "Set " + target + "'s weekly shifts first; a date's shifts take the place of them.");
+        }
+        List<WorkerDayShift> copied = dayShiftRepository.findAllByProjectIdAndUserIdOrderByWorkDateAsc(projectId, userId).stream()
+            .filter(row -> from == null || !row.getWorkDate().isBefore(from))
+            .filter(row -> through == null || !row.getWorkDate().isAfter(through))
+            .toList();
+        if (copied.isEmpty()) {
+            throw bad("There are no day changes to copy.");
+        }
+        Map<LocalDate, WorkerDayShift> existing = dayShiftRepository
+            .findAllByProjectIdAndUserIdInAndWorkDateBetween(projectId, List.of(target), copied.get(0).getWorkDate(),
+                copied.get(copied.size() - 1).getWorkDate()).stream()
+            .collect(Collectors.toMap(WorkerDayShift::getWorkDate, row -> row));
+        String actor = access.requireCurrentUserId();
+        OffsetDateTime now = OffsetDateTime.now();
+        List<WorkerDayShift> saved = new ArrayList<>();
+        for (WorkerDayShift source : copied) {
+            WorkerDayShift row = existing.get(source.getWorkDate());
+            if (row == null) {
+                row = new WorkerDayShift();
+                row.setDayShiftId(ids.generate());
+                row.setProjectId(projectId);
+                row.setUserId(target);
+                row.setWorkDate(source.getWorkDate());
+            }
+            row.setShifts(source.getShifts());
+            row.setReason(source.getReason());
+            row.setUpdatedBy(actor);
+            row.setUpdatedAt(now);
+            saved.add(row);
+        }
+        dayShiftRepository.saveAll(saved);
+        dayShiftRepository.flush();
+        return response(projectId, target, members.ownerOf(projectId));
+    }
+
     @Transactional(readOnly = true)
     public WorkerAvailabilityResponse availability(String projectId, String userId, String from, String to) {
         access.requireProjectReadAccess(projectId);
@@ -299,7 +414,8 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
         Set<LocalDate> holidayDays = holidays.holidays(projectId, firstDay.minusDays(1), lastDay);
         Map<LocalDate, String> ownDays = ownDays(dayShiftRepository.findAllByProjectIdAndUserIdInAndWorkDateBetween(projectId,
             List.of(userId), firstDay.minusDays(1), lastDay));
-        WorkerHours hours = hours(spans(shifts, offs, holidayDays, ownDays, zone, start.toInstant(), end.toInstant()));
+        RotaWeeks rota = rotaWeeks(rotaRepository.findByProjectIdAndUserId(projectId, userId).orElse(null));
+        WorkerHours hours = hours(spans(shifts, rota, offs, holidayDays, ownDays, zone, start.toInstant(), end.toInstant()));
         // A date with its own shifts is neither off nor a holiday for the worker (WC30).
         TreeSet<LocalDate> offDays = new TreeSet<>();
         for (WorkerDayOff off : offs) {
@@ -343,10 +459,13 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
         Map<String, List<WorkerDayShift>> days = dayShiftRepository
             .findAllByProjectIdAndUserIdInAndWorkDateBetween(projectId, userIds, firstDay, lastDay).stream()
             .collect(Collectors.groupingBy(WorkerDayShift::getUserId));
+        Map<String, WorkerRota> rotas = rotaRepository.findAllByProjectIdAndUserIdIn(projectId, userIds).stream()
+            .collect(Collectors.toMap(WorkerRota::getUserId, rota -> rota));
         Map<String, WorkerTime> result = new HashMap<>();
         for (String userId : new HashSet<>(userIds)) {
-            result.put(userId, spans(shifts.getOrDefault(userId, List.of()), offs.getOrDefault(userId, List.of()), holidayDays,
-                ownDays(days.getOrDefault(userId, List.of())), zone, from.toInstant(), to.toInstant()));
+            result.put(userId, spans(shifts.getOrDefault(userId, List.of()), rotaWeeks(rotas.get(userId)),
+                offs.getOrDefault(userId, List.of()), holidayDays, ownDays(days.getOrDefault(userId, List.of())), zone,
+                from.toInstant(), to.toInstant()));
         }
         return result;
     }
@@ -354,9 +473,10 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
     /**
      * Each shift on each of its work days, from the day before the window (a night shift runs into it), clipped to the
      * window and merged. No shift starts on a day off or a project holiday; a night shift that started the day before still
-     * runs into it, as for equipment. A date with its own shifts uses those instead, day off or holiday (WC30).
+     * runs into it, as for equipment. A date with its own shifts uses those instead, day off or holiday (WC30). With a rota
+     * each date takes the shifts of its rota week (WC45).
      */
-    private static WorkerTime spans(List<WorkerShift> shifts, List<WorkerDayOff> offs, Set<LocalDate> holidayDays,
+    private static WorkerTime spans(List<WorkerShift> shifts, RotaWeeks rota, List<WorkerDayOff> offs, Set<LocalDate> holidayDays,
                                     Map<LocalDate, String> ownDays, ZoneId zone, Instant start, Instant end) {
         if (shifts.isEmpty()) {
             return new WorkerTime(false, List.of());
@@ -383,8 +503,9 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
             if (off) {
                 continue;
             }
+            int week = rota == null ? 1 : rota.weekOf(day);
             for (WorkerShift shift : shifts) {
-                if (!workDays(shift.getWorkDays()).contains(day.getDayOfWeek().getValue())) {
+                if (shift.getRotaWeek() != week || !workDays(shift.getWorkDays()).contains(day.getDayOfWeek().getValue())) {
                     continue;
                 }
                 LocalDateTime shiftStart = day.atTime(shift.getShiftStart());
@@ -396,6 +517,10 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
             }
         }
         return new WorkerTime(true, merge(spans).stream().map(span -> new WorkerTime.Span(span.start(), span.end())).toList());
+    }
+
+    private static RotaWeeks rotaWeeks(WorkerRota rota) {
+        return rota == null ? null : new RotaWeeks(rota.getCycleWeeks(), rota.getStartsOn());
     }
 
     private static WorkerHours hours(WorkerTime time) {
@@ -448,7 +573,10 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
     }
 
     private WorkerCalendarResponse response(String projectId, String userId, String owner) {
-        List<WorkerShift> shifts = shiftRepository.findAllByProjectIdAndUserIdOrderByShiftStartAscWorkerShiftIdAsc(projectId, userId);
+        // In rota week order; each week's shifts by start, as stored.
+        List<WorkerShift> shifts = shiftRepository.findAllByProjectIdAndUserIdOrderByShiftStartAscWorkerShiftIdAsc(projectId, userId)
+            .stream().sorted(Comparator.comparingInt(WorkerShift::getRotaWeek)).toList();
+        WorkerRota rota = rotaRepository.findByProjectIdAndUserId(projectId, userId).orElse(null);
         long weekly = 0;
         List<WorkerCalendarResponse.Shift> shiftLines = new ArrayList<>();
         for (WorkerShift shift : shifts) {
@@ -456,9 +584,10 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
             TreeSet<Integer> days = workDays(shift.getWorkDays());
             weekly += length * days.size();
             shiftLines.add(new WorkerCalendarResponse.Shift(shift.getWorkerShiftId(), shift.getShiftStart().format(HOUR_MINUTE),
-                shift.getShiftEnd().format(HOUR_MINUTE), List.copyOf(days), hours(length)));
+                shift.getShiftEnd().format(HOUR_MINUTE), List.copyOf(days), hours(length), shift.getRotaWeek()));
         }
-        LocalDate recent = calendars.today(projectId).minusDays(31);
+        LocalDate today = calendars.today(projectId);
+        LocalDate recent = today.minusDays(31);
         List<WorkerCalendarResponse.DayOff> daysOff = dayOffRepository
             .findAllByProjectIdAndUserIdAndLastDayGreaterThanEqualOrderByFirstDayAscDayOffIdAsc(projectId, userId, recent).stream()
             .map(off -> new WorkerCalendarResponse.DayOff(off.getDayOffId(), off.getFirstDay(), off.getLastDay(), off.getReason(),
@@ -468,8 +597,14 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
             .findAllByProjectIdAndUserIdAndWorkDateGreaterThanEqualOrderByWorkDateAsc(projectId, userId, recent).stream()
             .map(WorkerCalendarService::dayLine)
             .toList();
-        return new WorkerCalendarResponse(projectId, userId, userId.equals(owner), !shifts.isEmpty(), hours(weekly),
-            List.copyOf(shiftLines), daysOff, days);
+        // With a rota, the average of its weeks (WC47).
+        int weeks = rota == null ? 1 : rota.getCycleWeeks();
+        BigDecimal weeklyHours = BigDecimal.valueOf(weekly)
+            .divide(SECONDS_PER_HOUR.multiply(BigDecimal.valueOf(weeks)), 2, RoundingMode.HALF_UP);
+        WorkerCalendarResponse.Rota rotaLine = rota == null ? null
+            : new WorkerCalendarResponse.Rota(rota.getCycleWeeks(), rota.getStartsOn(), rotaWeeks(rota).weekOf(today));
+        return new WorkerCalendarResponse(projectId, userId, userId.equals(owner), !shifts.isEmpty(), weeklyHours,
+            List.copyOf(shiftLines), daysOff, days, rotaLine);
     }
 
     /** The owner changes anyone's calendar; a member with write access changes their own (WC7). */
@@ -489,7 +624,7 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
         }
     }
 
-    private static ShiftPlan plan(WorkerShiftsRequest.Shift shift, String prefix) {
+    private static ShiftPlan plan(WorkerShiftsRequest.Shift shift, String prefix, int weeks) {
         if (shift == null) {
             throw bad(prefix + "shiftStart, shiftEnd and workDays are required.");
         }
@@ -506,28 +641,37 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
                 }
                 days.add(day);
             }
-            return new ShiftPlan(start, end, days);
+            int week = shift.rotaWeek() == null ? 1 : shift.rotaWeek();
+            if (week < 1 || week > weeks) {
+                throw bad(weeks == 1 ? "rotaWeek needs a rota; send rota with weeks and startsOn."
+                    : "rotaWeek is 1 to " + weeks + ".");
+            }
+            return new ShiftPlan(start, end, days, week);
         } catch (BusinessException exception) {
             throw prefix.isEmpty() ? exception : bad(prefix + exception.getMessage());
         }
     }
 
-    /** Two shifts that share any second of the week are refused (WC2); shifts that only touch are fine. */
-    private static void requireNoOverlap(List<ShiftPlan> plans) {
+    /**
+     * Two shifts that share any second of the week, or of the whole rota, are refused (WC2, WC45); shifts that only touch are
+     * fine. The last week's Sunday night runs into the first week's Monday.
+     */
+    private static void requireNoOverlap(List<ShiftPlan> plans, int weeks) {
         record Piece(int shift, long start, long end) {
         }
+        long cycle = weeks * SECONDS_PER_WEEK;
         List<Piece> pieces = new ArrayList<>();
         for (int index = 0; index < plans.size(); index++) {
             ShiftPlan plan = plans.get(index);
             long length = shiftLength(plan.start(), plan.end()).getSeconds();
             for (int day : plan.days()) {
-                long start = (day - 1) * SECONDS_PER_DAY + plan.start().toSecondOfDay();
+                long start = (plan.week() - 1) * SECONDS_PER_WEEK + (day - 1) * SECONDS_PER_DAY + plan.start().toSecondOfDay();
                 long end = start + length;
-                if (end <= SECONDS_PER_WEEK) {
+                if (end <= cycle) {
                     pieces.add(new Piece(index, start, end));
                 } else {
-                    pieces.add(new Piece(index, start, SECONDS_PER_WEEK));
-                    pieces.add(new Piece(index, 0, end - SECONDS_PER_WEEK));
+                    pieces.add(new Piece(index, start, cycle));
+                    pieces.add(new Piece(index, 0, end - cycle));
                 }
             }
         }
@@ -535,8 +679,9 @@ public class WorkerCalendarService implements WorkerCalendarQuery {
             for (Piece second : pieces) {
                 long overlapStart = Math.max(first.start(), second.start());
                 if (first.shift() < second.shift() && overlapStart < Math.min(first.end(), second.end())) {
-                    throw bad("Shifts " + (first.shift() + 1) + " and " + (second.shift() + 1) + " overlap on "
-                        + DAY_NAMES.get((int) (overlapStart / SECONDS_PER_DAY)) + ".");
+                    String day = DAY_NAMES.get((int) (overlapStart % SECONDS_PER_WEEK / SECONDS_PER_DAY));
+                    throw bad("Shifts " + (first.shift() + 1) + " and " + (second.shift() + 1) + " overlap "
+                        + (weeks == 1 ? "on " + day : "in week " + (overlapStart / SECONDS_PER_WEEK + 1) + " on " + day) + ".");
                 }
             }
         }

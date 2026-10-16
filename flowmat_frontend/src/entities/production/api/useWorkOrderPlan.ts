@@ -13,6 +13,8 @@ export interface WorkOrderPlanSuggestionDto {
   plannedEndAt: string
   remainingQuantity: number
   capacityPerHour: number
+  /** The equipment's efficiency, null for 100 (docs/domain/equipment.md E8); productionHours is at capacity times this. */
+  efficiencyPercent?: number | null
   productionHours: number
   changeoverHours: number
   /** Production plus changeover: the available time between the start and the end. */

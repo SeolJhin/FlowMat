@@ -8,7 +8,9 @@ public enum NodeType {
     EQUIPMENT,
     STORAGE,
     INPUT,
-    OUTPUT;
+    OUTPUT,
+    /** A gateway that does no work: the server passes it at once to one of its connections (ADR-006). */
+    EXCLUSIVE;
 
     public static String normalize(String value) {
         if (value == null || value.isBlank()) {

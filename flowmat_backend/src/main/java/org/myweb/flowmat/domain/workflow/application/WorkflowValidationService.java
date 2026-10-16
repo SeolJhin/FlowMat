@@ -7,6 +7,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import lombok.RequiredArgsConstructor;
 import org.myweb.flowmat.domain.catalog.application.publicapi.CatalogQuery;
 import org.myweb.flowmat.domain.project.application.ProjectAccessService;
@@ -146,6 +147,7 @@ public class WorkflowValidationService {
                     "Process " + process.getProcessId() + " has no connection."));
             }
         }
+        gatewayIssues(activeProcesses, usableConnections, issues);
         if (hasCycle(processIds, usableConnections)) {
             issues.add(issue("warning", "CYCLE", null, null, null,
                 "Workflow contains a directed cycle; automatic execution must define loop semantics."));
@@ -156,6 +158,63 @@ public class WorkflowValidationService {
             .toList();
         int errors = (int) sorted.stream().filter(issue -> issue.severity().equals("error")).count();
         return new WorkflowValidationResponse(errors, sorted.size() - errors, sorted);
+    }
+
+    /**
+     * Exclusive gateways (docs/architecture/adr/ADR-006-operation-types.md): at most one default connection each, and only
+     * they have one; each needs an incoming connection, since it passes on what an earlier step gives it.
+     */
+    private static void gatewayIssues(List<Process> processes, List<ProcessConnection> connections,
+        List<WorkflowValidationIssue> issues) {
+        Set<String> gateways = new HashSet<>();
+        for (Process process : processes) {
+            if ("exclusive".equalsIgnoreCase(process.getNodeType())) gateways.add(process.getProcessId());
+        }
+        Map<String, List<ProcessConnection>> outgoing = new HashMap<>();
+        Set<String> withInput = new HashSet<>();
+        for (ProcessConnection connection : connections) {
+            outgoing.computeIfAbsent(connection.getFromProcessId(), ignored -> new ArrayList<>()).add(connection);
+            withInput.add(connection.getToProcessId());
+            if (connection.isDefaultRoute() && !gateways.contains(connection.getFromProcessId())) {
+                issues.add(issue("error", "DEFAULT_ROUTE_OUTSIDE_GATEWAY", null, null, connection.getConnectionId(),
+                    "Connection " + connection.getConnectionId() + " is a default connection, but only an Exclusive gateway has one."));
+            }
+        }
+        for (String gateway : gateways) {
+            List<ProcessConnection> out = outgoing.getOrDefault(gateway, List.of());
+            long defaults = out.stream().filter(ProcessConnection::isDefaultRoute).count();
+            if (defaults > 1) {
+                issues.add(issue("error", "GATEWAY_DEFAULTS", gateway, null, null,
+                    "Exclusive gateway " + gateway + " has " + defaults + " default connections; keep at most one."));
+            }
+            if (!withInput.contains(gateway)) {
+                issues.add(issue("error", "GATEWAY_WITHOUT_INPUT", gateway, null, null,
+                    "Exclusive gateway " + gateway + " has no incoming connection; it passes on what an earlier step gives it."));
+            }
+            if (out.size() < 2) {
+                issues.add(issue("warning", "GATEWAY_SINGLE_ROUTE", gateway, null, null,
+                    "Exclusive gateway " + gateway + " has fewer than two outgoing connections, so it has nothing to choose."));
+            }
+            Set<Integer> seen = new HashSet<>();
+            Set<Integer> ties = new TreeSet<>();
+            for (ProcessConnection connection : out) {
+                if (connection.isDefaultRoute()) {
+                    if (text(connection.getConditionExpr())) {
+                        issues.add(issue("warning", "DEFAULT_ROUTE_CONDITION_IGNORED", null, null, connection.getConnectionId(),
+                            "Default connection " + connection.getConnectionId() + " is taken only when no other connection's "
+                                + "condition holds, so its own condition is not used."));
+                    }
+                    continue;
+                }
+                int priority = connection.getPriority() == null ? 0 : connection.getPriority();
+                if (!seen.add(priority)) ties.add(priority);
+            }
+            for (Integer priority : ties) {
+                issues.add(issue("warning", "GATEWAY_PRIORITY_TIE", gateway, null, null,
+                    "Exclusive gateway " + gateway + " has more than one connection with priority " + priority
+                        + "; the one drawn first is tried first."));
+            }
+        }
     }
 
     private boolean unknownUnit(String unit) {

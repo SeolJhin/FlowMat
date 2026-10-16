@@ -55,6 +55,7 @@ public class FlowRunStepService {
     private final IdGenerator idGenerator;
     private final ObjectMapper objectMapper;
     private final FlowRunService runService;
+    private final FlowRunRouter router;
     private final JdbcTemplate jdbc;
 
     @Transactional
@@ -168,8 +169,8 @@ public class FlowRunStepService {
         FlowRunStepAttempt attempt = runningAttempt(step, request == null ? null : request.attemptNo());
         JsonNode output = request != null && request.outputSnapshot() != null
             ? request.outputSnapshot() : objectMapper.createObjectNode();
-        List<FlowRunGraph.Decision> decisions = "graph".equals(run.getExecutionMode())
-            ? graph(run).preview(step.getNodeId(), output) : List.of();
+        FlowRunGraph graph = "graph".equals(run.getExecutionMode()) ? graph(run) : null;
+        List<FlowRunGraph.Decision> decisions = graph == null ? List.of() : graph.preview(step.getNodeId(), output);
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         attempt.setStatus("completed");
         attempt.setEndedAt(now);
@@ -179,15 +180,11 @@ public class FlowRunStepService {
         attemptRepository.save(attempt);
         stepRepository.saveAndFlush(step);
         appendEvent(runId, stepId, "step_completed", readJson(step.getOutputSnapshot()));
-        for (FlowRunGraph.Decision decision : decisions) {
-            if (decision.willRoute()) {
-                createRoutedStep(runId, stepId,
-                    new FlowRunGraph.Route(decision.connectionId(), decision.targetNodeId()), output);
-            } else {
-                appendEvent(runId, stepId, "connection_filtered", objectMapper.createObjectNode()
-                    .put("connectionId", decision.connectionId())
-                    .put("targetNodeId", decision.targetNodeId())
-                    .put("reason", "condition_false"));
+        if (graph != null) {
+            // An Exclusive gateway on the way that finds no connection fails the run (ADR-006 decision 3).
+            String failure = router.follow(runId, graph, stepId, decisions, output, accessService.requireCurrentUserId());
+            if (failure != null) {
+                runService.failLocked(run, FlowRunRouter.NO_ROUTE, failure, null);
             }
         }
         return response(step);
@@ -427,24 +424,6 @@ public class FlowRunStepService {
 
     private FlowRunGraph graph(FlowRun run) {
         return FlowRunGraph.from(snapshot(run));
-    }
-
-    private void createRoutedStep(String runId, String sourceStepId, FlowRunGraph.Route route, JsonNode input) {
-        long nextSequence = stepRepository.countByFlowRunId(runId) + 1;
-        if (nextSequence > Integer.MAX_VALUE) {
-            throw new BusinessException(ErrorCode.CONFLICT, "Flow run has too many steps.");
-        }
-        FlowRunStep step = new FlowRunStep();
-        step.setStepId(idGenerator.generate());
-        step.setFlowRunId(runId);
-        step.setNodeId(route.targetNodeId());
-        step.setSourceConnectionId(route.connectionId());
-        step.setSourceStepId(sourceStepId);
-        step.setStatus("planned");
-        step.setSequenceNo((int) nextSequence);
-        step.setInputSnapshot(writeJson(input));
-        stepRepository.saveAndFlush(step);
-        appendEvent(runId, step.getStepId(), "step_created", input);
     }
 
     private FlowRunStep requireStep(String runId, String stepId) {

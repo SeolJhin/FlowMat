@@ -109,10 +109,10 @@ DB 제약: 요일 형식 CHECK, 정지 종류 CHECK, `ends_at > starts_at`, 삭�
 
 | # | 규칙 | 거절 응답 |
 |---|---|---|
-| P1 | 필요 시간 = 남은 수량 ÷ 시간당 산출(소수 2자리 올림) + 앞 작업지시에서의 전환 시간. 남은 수량과 전환 시간은 준비 점검과 같은 규칙 | 목표 수량 없음 409 `Set a target quantity first.`, 다 만듦 409, 시간당 산출 없음 409 `Equipment … has no capacity per hour, so how long the order takes is unknown.` |
+| P1 | 필요 시간 = 남은 수량 ÷ (시간당 산출 × 효율, 2ea [설비](equipment.md) E9)(소수 2자리 올림) + 앞 작업지시에서의 전환 시간. 남은 수량과 전환 시간은 준비 점검과 같은 규칙 | 목표 수량 없음 409 `Set a target quantity first.`, 다 만듦 409, 시간당 산출 없음 409 `Equipment … has no capacity per hour, so how long the order takes is unknown.` |
 | P2 | 시작은 `from` 이후 첫 가용 시각(교대 안, 휴일·정지 밖)이고, 끝은 그때부터 가용 시간이 필요 시간만큼 쌓이는 시각을 분 단위로 올린 것. 달력이 없으면 항상 가동 | `from`부터 366일 안에 모자라면 409 `Equipment … does not have N h available in the 366 days from …` |
 | P3 | `from`을 안 주면 계획 시작이 아직 앞이면 그 시각, 아니면 지금(다음 분) | 시각대 없는 값 400 |
-| P4 | 같은 설비에 **승인·진행 중** 작업지시의 계획 기간과 겹치면 그 작업지시가 끝나는 시각부터 다시 찾음(`movedPast`). 초안은 아직 계획이 아니라 비켜 가지 않음(준비 점검의 `schedule`과 같은 기준) | |
+| P4 | 같은 설비에 **승인·진행 중** 작업지시의 계획 기간과 겹치면 그 작업지시가 끝나는 시각부터 다시 찾음(`movedPast`). 초안은 아직 계획이 아니라 비켜 가지 않음(준비 점검의 `schedule`과 같은 기준). 동시 작업 설비는 비켜 가지 않음([설비](equipment.md) E13) | |
 | P5 | 전환 시간은 제안된 시작 직전에 시작하는 작업지시(승인·진행·완료) 기준. 비켜 간 뒤 앞 작업지시가 바뀌면 그 전환 시간으로 다시 계산 | |
 | P6 | 설비가 없거나 삭제·비활성이면, 또는 완료·취소된 작업지시면 제안하지 않음. 정비 중인 설비는 제안함(준비 점검이 실패로 보임) | 409 |
 | P7 | 프로젝트 읽기 권한 | 403 |
@@ -127,6 +127,8 @@ DB 제약: 요일 형식 CHECK, 정지 종류 CHECK, `ends_at > starts_at`, 삭�
 | P16 | 응답 `{workOrderIds, changeoverMinutes, givenChangeoverMinutes, groups: [{equipmentId, after, workOrderIds, changeoverMinutes, givenChangeoverMinutes}]}`. 아무것도 저장하지 않는다. 화면 **Suggest order**(2개 이상 고르면): 체크 순서를 바꾸고 `Reordered for fewer changeovers: 20 min instead of 120 min.` 또는 `The ticked order already has the fewest changeovers: N min.`, 체크를 바꾸면 안내가 사라진다. 날짜는 그다음 **Suggest dates**(P8). 납기·부하 균형은 보지 않는다 | |
 | P17 | **승인 작업지시 함께 일정 변경**(2026-10-13, 2ds, 정책 C): **Plan several orders**의 답에 승인 작업지시가 있고 보는 사람이 프로젝트 소유자면 **Reason** 한 칸과 **Reschedule N approved orders**. 답의 순서대로 하나씩 기존 owner reschedule(`POST /work-orders/{id}/reschedules`, 지금 기간을 `expected…`로 보내 그 사이 바뀌었으면 409, 같은 내용 재시도는 같은 `requestId`)로 제안 기간에 옮긴다. 하나가 거절되면 멈추고 `… N rescheduled before it.`, 다시 누르면 남은 것만 보낸다. 끝나면 `Rescheduled N approved orders.` 소유자가 아니면 `Only the project owner can reschedule the approved orders.` 서버 변경 없음 | 정책 C의 거절 그대로 |
 | P18 | **인력**(2026-10-14, 2dx): 작업지시에 인력이 있으면 그 사람들이 모두 일하는 시간에만 생산 시간을 세고, 인력을 이미 잡은 다른 승인·진행 중 작업지시를 비킨다. 응답 `waitedForCrew`·`crewMovedPast`. [작업자 달력](worker-calendar.md) WC24–WC28 | 409 `… and the crew do not have N h available together …` |
+| P19 | **효율**(2026-10-17, 2ea): 생산 시간은 시간당 산출 × 효율로 센다. 전환 시간은 효율로 늘리거나 줄이지 않는다. 응답 `efficiencyPercent`(100이면 null), `capacityPerHour`는 정격. [설비](equipment.md) E8–E11 | |
+| P20 | **동시 작업**(2026-10-17, 2ec): 여러 작업지시를 함께 하는 설비는 P4·P9에서 겹치는 작업지시를 비켜 가지 않는다(`movedPast` 없음). 인력은 그대로 비켜 간다. 전환 시간은 그대로. [설비](equipment.md) E12–E15 | |
 
 예: 09:00–17:00 월–금, 시간당 10, 100개 → 10시간. 2030-01-07(월) 0시부터 → 월 09:00 → 화 11:00. 화 09–10시 정비 → 화 12:00. 월 13–15시에 승인된 작업지시가 있으면 15:00부터 → 수 10:00.
 

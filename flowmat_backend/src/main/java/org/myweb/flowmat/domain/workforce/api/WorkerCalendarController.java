@@ -2,6 +2,7 @@ package org.myweb.flowmat.domain.workforce.api;
 
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.myweb.flowmat.domain.workforce.api.dto.request.WorkerDayCopyRequest;
 import org.myweb.flowmat.domain.workforce.api.dto.request.WorkerDayOffRequest;
 import org.myweb.flowmat.domain.workforce.api.dto.request.WorkerDayRequest;
 import org.myweb.flowmat.domain.workforce.api.dto.request.WorkerShiftsRequest;
@@ -78,6 +79,14 @@ public class WorkerCalendarController {
                                                         @PathVariable("date") String date,
                                                         @RequestParam(value = "through", required = false) String through) {
         return ApiResponse.ok(service.clearDay(projectId, userId, date, through));
+    }
+
+    /** The worker's own dates copied to another worker, replacing those dates there; their other dates stay (WC41). */
+    @PostMapping("/{userId}/days/copy")
+    public ApiResponse<WorkerCalendarResponse> copyDays(@PathVariable("projectId") String projectId,
+                                                        @PathVariable("userId") String userId,
+                                                        @RequestBody(required = false) WorkerDayCopyRequest request) {
+        return ApiResponse.ok(service.copyDays(projectId, userId, request));
     }
 
     @GetMapping("/{userId}/availability")

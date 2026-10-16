@@ -7,6 +7,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -19,6 +20,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity
             .status(e.getErrorCode().getStatus())
             .body(ApiResponse.error(resolveBusinessMessage(e)));
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingRequestParameter(MissingServletRequestParameterException e) {
+        return ResponseEntity
+            .status(ErrorCode.BAD_REQUEST.getStatus())
+            .body(ApiResponse.error(e.getParameterName() + " is required."));
     }
 
     @ExceptionHandler(BindException.class)

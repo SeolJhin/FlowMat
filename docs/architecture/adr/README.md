@@ -7,7 +7,7 @@
 | [ADR-003](ADR-003-resource-port-contract.md) | Resource·Port 계약과 실행 Core | **Accepted(원칙)** 2026-10-02 + Registry **Experimental** | ProcessIo는 Port Contract, `itemId`는 선택적 binding, `schemaJson`은 정의 시점 계약, 실행값은 FlowRunStep snapshot, Resource 슈퍼테이블 없음. 정확한 `resourceType` 값 목록은 Experimental registry. 후속 ADR-005에서 backend VALIDATED / 제품 PARTIALLY VALIDATED와 계측 필드 선택 정책을 분리 |
 | [ADR-004](ADR-004-flow-run-execution-policy.md) | Flow Run 실행 정책(FM-RUN-005) | **Accepted** 2026-10-05 | 노드 정책·연결 실패 정책, TIMEOUT 실패, 외부 executor 지연 start, workflowRevision + node 동시성 |
 | [ADR-005](ADR-005-port-measurement-and-validation.md) | Port 계측·검증 수준 후속 결정 | **Accepted** 2026-10-05 | 비제조 quantity/unit 선택, 실행 요건 분리, backend VALIDATED / 제품 PARTIALLY VALIDATED |
-| [ADR-006](ADR-006-operation-types.md) | 노드 종류(Operation Type)와 분기·합류(FM-PLAN-001) | **Proposed** 2026-10-11 | 권장: 일을 하지 않는 게이트웨이 노드(Exclusive·Join)부터, Join은 이번 실행에서 출발한 갈래 기준, 게이트웨이만 서버가 완료, 시간 정책은 계획 쪽. 수용 기준 미확정 |
+| [ADR-006](ADR-006-operation-types.md) | 노드 종류(Operation Type)와 분기·합류(FM-PLAN-001) | **Accepted** 2026-10-17(1단계 Exclusive 로컬 구현 2eb) | 일을 하지 않는 게이트웨이 노드, 1단계 Exclusive만(priority 순 첫 연결, 기본 연결 최대 하나, 없으면 실패), 게이트웨이만 서버가 완료(system 이벤트), 시간 정책은 계획 쪽. Join·Subflow·수량 분할은 후속(Join 미승인) |
 | [editor ADR-0001](../../editor/adr-0001-flowmat-editor-core-boundary.md) | 에디터 Core 경계 | Accepted 2026-08-12 | 순수 TypeScript editor core를 React Flow와 분리한다 |
 
 ## 규칙

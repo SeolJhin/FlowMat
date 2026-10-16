@@ -58,7 +58,7 @@ ADR-001~003(Architecture Decision Freeze)과 재고·BOM·LOT 계약의 구현 �
 | FlowRun 범용성을 "검증됨"으로 바꿀지 | 9-(a) 통합 테스트 통과(2026-10-03). 결정 8은 아직 "목표" | 사용자 결정. 화면까지 포함한 vertical slice를 더 요구할지 함께 정한다 |
 | 공통 Resource contract | 없음(R5) | 두 종류 이상의 비제조 흐름에서 같은 검증·lifecycle이 반복될 때(원문 §51) |
 | 노드 실행기(Flow Run이 노드를 스스로 실행)와 실행 정책(시간 제한·재시도 간격·동시 실행 제한, FM-RUN-005) | 외부 보고 방식만 있음, 연결 실패 시 고정 3회 즉시 재시도 | 실행 정책은 [ADR-004](adr/ADR-004-flow-run-execution-policy.md) **Proposed**(2026-10-03): 정책은 노드에, 기본값은 지금 동작, 재시도 간격은 외부 보고 모델 위에서, 시간 제한만 서버 감시. 수용 기준 5개를 의사결정자가 닫아야 구현한다. 노드 실행기는 여전히 별도 결정(원문 §45 보완 (b), 2026-09-24 인계의 D7) |
-| 노드 종류(Operation Type)·배타 선택·합류(FM-PLAN-001) | 없음. 통과한 연결마다 별도 단계(GR-04) | [ADR-006](adr/ADR-006-operation-types.md) Proposed(2026-10-11) 수용 기준을 사용자가 정한 뒤 |
+| 노드 종류(Operation Type)·배타 선택·합류(FM-PLAN-001) | Exclusive 게이트웨이(2eb, V85 로컬 검증, [연결 계약](../domain/process-port-connection-contract.md) GR-13–GR-20). 그 밖의 노드는 통과한 연결마다 별도 단계(GR-04) | [ADR-006](adr/ADR-006-operation-types.md) **Accepted**(2026-10-17 사용자 결정): 게이트웨이 노드, 1단계 Exclusive. Join은 미승인 |
 | 실행 정책 편집 화면 | 2026-10-11 사용자 결정: 노드 인스펙터(구현 2di, [EP13](../domain/flow-run-execution-policy.md)) | 정해짐 — ADR-004 "결정하지 않은 것"의 이 항목은 이 결정으로 닫는다(ADR 본문은 고치지 않음) |
 | 실사 차이 금액의 단가 기준 | 2026-10-12 사용자 결정: 오늘 단가와 실사 당시 이력 단가를 둘 다 보인다(구현 2dp, [CH1–CH4](../domain/stock-count.md)) | 정해짐 — DECISIONS-2026-10-05 §1의 "실사 금액 정책까지 자동 변경하지 않는다"가 남긴 항목을 이 결정으로 닫는다(DECISIONS 본문은 고치지 않음) |
 | 작업지시 순서 제안·실사 계획의 위치 잠금 | 2026-10-12 사용자 결정: 순서는 설비별 전환 최소로 제안(구현 2dq, [P13–P16](../domain/equipment-schedule.md)). 실사 계획의 위치 잠금(실사 결정 메모의 C)은 넣지 않는다 | 정해짐. 납기·부하를 함께 보는 최적화는 따로 정할 일 |

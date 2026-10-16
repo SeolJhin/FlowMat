@@ -15,12 +15,13 @@ import { HolidaysPanel } from './HolidaysPanel'
 
 const emptyForm = { equipmentCode: '', equipmentName: '', equipmentType: '', equipmentStatus: 'active' }
 
-const DETAIL_FIELDS: { key: keyof EquipmentDetailsForm; label: string; number?: boolean }[] = [
+const DETAIL_FIELDS: { key: Exclude<keyof EquipmentDetailsForm, 'concurrentWorkOrders'>; label: string; number?: boolean }[] = [
   { key: 'manufacturer', label: 'Manufacturer' },
   { key: 'modelName', label: 'Model' },
   { key: 'serialNo', label: 'Serial no.' },
   { key: 'location', label: 'Location' },
   { key: 'capacityPerHour', label: 'Capacity / hour', number: true },
+  { key: 'efficiencyPercent', label: 'Efficiency %', number: true },
   { key: 'powerKwh', label: 'Power kWh', number: true },
   { key: 'waterLiter', label: 'Water L', number: true },
 ]
@@ -138,7 +139,8 @@ export function EquipmentPanel({ projectId }: { projectId: string }) {
           <th>Per hour</th><th>Actions</th></tr></thead>
         <tbody>{shown.map((equipment) => <tr key={equipment.equipmentId}>
           <td>{equipment.equipmentCode ?? '—'}</td><td>{equipment.equipmentName}</td>
-          <td>{equipment.equipmentType}</td><td>{equipment.equipmentStatus}</td>
+          <td>{equipment.equipmentType}</td><td>{equipment.equipmentStatus}
+            {equipment.details?.concurrentWorkOrders && <div className="inspector-hint">side by side</div>}</td>
           <td>{makerModel(equipment.details) || '—'}
             {equipment.details?.serialNo && <div className="inspector-hint">S/N {equipment.details.serialNo}</div>}</td>
           <td>{equipment.details?.location ?? '—'}</td>
@@ -183,6 +185,9 @@ export function EquipmentPanel({ projectId }: { projectId: string }) {
           value={details[field.key]}
           {...(field.number ? { type: 'number', min: 0, step: 'any', inputMode: 'decimal' as const } : { maxLength: 100 })}
           onChange={(event) => setDetails({ ...details, [field.key]: event.target.value })} /></label>)}
+        <label><input type="checkbox" checked={details.concurrentWorkOrders}
+          onChange={(event) => setDetails({ ...details, concurrentWorkOrders: event.target.checked })} /> Runs several work orders at once</label>
+        <span className="inspector-hint">Plans then let its work orders overlap, and the load board does not call it overloaded.</span>
       </fieldset>
       {save.isError && <p role="alert">{errorMessage(save.error)}</p>}
       <button type="submit" disabled={save.isPending}>{save.isPending ? 'Saving...' : 'Save'}</button>

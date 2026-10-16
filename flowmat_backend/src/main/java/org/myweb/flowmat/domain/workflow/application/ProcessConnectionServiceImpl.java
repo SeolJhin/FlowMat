@@ -111,6 +111,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         connection.setDelayTimeSec(defaultIfNull(request.delayTimeSec(), BigDecimal.ZERO));
         connection.setLossRate(defaultIfNull(request.lossRate(), BigDecimal.ZERO));
         connection.setPriority(request.priority() != null ? request.priority() : 0);
+        connection.setDefaultRouteYn(Boolean.TRUE.equals(request.defaultRoute()) ? "Y" : "N");
         connection.setDeletedYn(NOT_DELETED);
         connection.setVersion(1);
         connection.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
@@ -203,6 +204,9 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
         }
         if (request.priority() != null) {
             connection.setPriority(integerOrZero(request.priority()));
+        }
+        if (request.defaultRoute() != null) {
+            connection.setDefaultRouteYn(request.defaultRoute() ? "Y" : "N");
         }
         connection.setVersion(connection.getVersion() + 1);
         connection.setVersionNonce(ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE));
@@ -411,6 +415,7 @@ public class ProcessConnectionServiceImpl implements ProcessConnectionService {
             connection.getConditionExpr(),
             connection.getCapacity(),
             connection.getFailurePolicy(),
+            connection.isDefaultRoute(),
             connection.getVersion(),
             connection.getVersionNonce()
         );

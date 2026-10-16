@@ -149,6 +149,22 @@ public class EquipmentServiceImpl implements EquipmentService {
         equipment.setPowerKwh(nonNegative(details.powerKwh(), "powerKwh"));
         equipment.setWaterLiter(nonNegative(details.waterLiter(), "waterLiter"));
         equipment.setLocation(optional(details.location()));
+        equipment.setEfficiencyPercent(efficiency(details.efficiencyPercent()));
+        equipment.setConcurrentWorkOrdersYn(Boolean.TRUE.equals(details.concurrentWorkOrders()) ? "Y" : "N");
+    }
+
+    /** Above 0 to 100 with up to two decimals; null keeps the rated output (E8). */
+    private static BigDecimal efficiency(BigDecimal value) {
+        if (value == null) {
+            return null;
+        }
+        if (value.signum() <= 0 || value.compareTo(BigDecimal.valueOf(100)) > 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "efficiencyPercent must be above 0 and at most 100.");
+        }
+        if (value.stripTrailingZeros().scale() > 2) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "efficiencyPercent takes at most 2 decimals.");
+        }
+        return value;
     }
 
     private static BigDecimal nonNegative(BigDecimal value, String name) {
@@ -160,6 +176,7 @@ public class EquipmentServiceImpl implements EquipmentService {
         return new EquipmentResponse(equipment.getEquipmentId(), equipment.getProjectId(), equipment.getEquipmentCode(),
             equipment.getEquipmentName(), equipment.getEquipmentType(), equipment.getEquipmentStatus(),
             new EquipmentDetails(equipment.getManufacturer(), equipment.getModelName(), equipment.getSerialNo(),
-                equipment.getCapacityPerHour(), equipment.getPowerKwh(), equipment.getWaterLiter(), equipment.getLocation()));
+                equipment.getCapacityPerHour(), equipment.getPowerKwh(), equipment.getWaterLiter(), equipment.getLocation(),
+                equipment.getEfficiencyPercent(), "Y".equals(equipment.getConcurrentWorkOrdersYn())));
     }
 }

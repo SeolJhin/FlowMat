@@ -102,8 +102,9 @@ public class EquipmentLoadService {
         BigDecimal hourlyCost
     ) {
         EquipmentWindow window = window(equipment.equipmentId(), from, to);
+        // At the output it really reaches (docs/domain/equipment.md E9); changeover minutes are not scaled.
         BigDecimal rate = equipment.capacityPerHour() != null && equipment.capacityPerHour().signum() > 0
-            ? equipment.capacityPerHour()
+            ? equipment.effectiveCapacityPerHour()
             : null;
         BigDecimal planned = BigDecimal.ZERO;
         BigDecimal drafts = BigDecimal.ZERO;
@@ -150,8 +151,10 @@ public class EquipmentLoadService {
         BigDecimal available = window.availableHours();
         BigDecimal percent = available.signum() > 0 ? planned.multiply(HUNDRED).divide(available, 1, RoundingMode.HALF_UP) : null;
         return new EquipmentLoadResponse.Row(equipment.equipmentId(), equipment.equipmentCode(), equipment.equipmentName(),
-            equipment.equipmentStatus(), equipment.capacityPerHour(), window.calendarSet(), available, window.downtimeHours(),
-            planned, drafts, percent, planned.compareTo(available) > 0, unplanned, unmeasured, shown,
+            equipment.equipmentStatus(), equipment.capacityPerHour(), equipment.efficiencyPercent(), equipment.concurrentWorkOrders(),
+            window.calendarSet(), available, window.downtimeHours(),
+            // Orders running side by side may need more hours than the equipment has without overloading it (E12).
+            planned, drafts, percent, !equipment.concurrentWorkOrders() && planned.compareTo(available) > 0, unplanned, unmeasured, shown,
             changeovers(equipment.equipmentId(), inWindowOrders, mine));
     }
 

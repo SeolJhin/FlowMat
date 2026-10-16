@@ -11,6 +11,15 @@ export interface WorkerShiftDto {
   /** ISO days, 1 (Monday) to 7 (Sunday). */
   workDays: number[]
   hours: number
+  /** The rota week it runs in; 1 without a rota (docs/domain/worker-calendar.md WC44). Older answers leave it out. */
+  rotaWeek?: number
+}
+
+/** How a worker's shifts repeat (WC44): every {@code weeks} weeks from the Monday startsOn; currentWeek is today's. */
+export interface WorkerRotaDto {
+  weeks: number
+  startsOn: string
+  currentWeek: number
 }
 
 export interface WorkerDayOffDto {
@@ -43,9 +52,11 @@ export interface WorkerCalendarDto {
   daysOff: WorkerDayOffDto[]
   /** Dates with their own shifts from 31 days ago on (WC29). */
   days?: WorkerDayDto[]
+  /** Null or left out for one week (WC44). */
+  rota?: WorkerRotaDto | null
 }
 
-export type WorkerShiftInput = { shiftStart: string; shiftEnd: string; workDays: number[] }
+export type WorkerShiftInput = { shiftStart: string; shiftEnd: string; workDays: number[]; rotaWeek?: number }
 
 /** One date's shifts, or none for a day without work; a range with the same shifts when throughDate is given. */
 export interface WorkerDayInput {
@@ -79,9 +90,11 @@ function useRefresh(projectId: string) {
 export function useSetWorkerShiftsMutation(projectId: string) {
   const onSuccess = useRefresh(projectId)
   return useMutation({
-    mutationFn: async ({ userId, shifts }: { userId: string; shifts: WorkerShiftInput[] }) =>
+    mutationFn: async ({ userId, shifts, rota }: {
+      userId: string; shifts: WorkerShiftInput[]; rota?: { weeks: number; startsOn: string } | null
+    }) =>
       unwrapApiResponse(await httpClient.put<ApiEnvelope<WorkerCalendarDto>>(
-        `${base(projectId)}/${encodeURIComponent(userId)}/shifts`, { shifts })),
+        `${base(projectId)}/${encodeURIComponent(userId)}/shifts`, rota ? { shifts, rota } : { shifts })),
     onSuccess,
   })
 }
@@ -112,6 +125,20 @@ export function useRemoveWorkerDayMutation(projectId: string) {
     mutationFn: async ({ userId, date }: { userId: string; date: string }) =>
       unwrapApiResponse(await httpClient.delete<ApiEnvelope<WorkerCalendarDto>>(
         `${base(projectId)}/${encodeURIComponent(userId)}/days/${encodeURIComponent(date)}`)),
+    onSuccess,
+  })
+}
+
+/**
+ * Copies a worker's own dates to another worker, replacing those dates there; their other dates stay
+ * (docs/domain/worker-calendar.md WC41). The answer is the other worker's calendar.
+ */
+export function useCopyWorkerDaysMutation(projectId: string) {
+  const onSuccess = useRefresh(projectId)
+  return useMutation({
+    mutationFn: async ({ userId, ...input }: { userId: string; toUserId: string; fromDate?: string; throughDate?: string }) =>
+      unwrapApiResponse(await httpClient.post<ApiEnvelope<WorkerCalendarDto>>(
+        `${base(projectId)}/${encodeURIComponent(userId)}/days/copy`, input)),
     onSuccess,
   })
 }

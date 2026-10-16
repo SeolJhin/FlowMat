@@ -12,7 +12,9 @@ describe('detailsForm', () => {
   it('shows recorded details as text and missing ones as empty', () => {
     expect(detailsForm(details)).toEqual({
       manufacturer: 'Acme', modelName: 'M-200', serialNo: '', capacityPerHour: '120.5', powerKwh: '0', waterLiter: '', location: 'Line 1',
+      efficiencyPercent: '', concurrentWorkOrders: false,
     })
+    expect(detailsForm({ ...details, efficiencyPercent: 85 }).efficiencyPercent).toBe('85')
     expect(detailsForm(undefined)).toEqual(EMPTY_DETAILS_FORM)
   })
 })
@@ -20,7 +22,7 @@ describe('detailsForm', () => {
 describe('detailsPayload', () => {
   it('trims text, reads numbers and clears empty fields', () => {
     expect(detailsPayload({ ...detailsForm(details), manufacturer: '  ', location: ' Line 2 ', waterLiter: ' 3 ' })).toEqual({
-      details: { ...details, manufacturer: null, location: 'Line 2', waterLiter: 3 },
+      details: { ...details, manufacturer: null, location: 'Line 2', waterLiter: 3, efficiencyPercent: null, concurrentWorkOrders: false },
       error: null,
     })
   })
@@ -28,6 +30,23 @@ describe('detailsPayload', () => {
   it('names the first number field that is not a number of 0 or more', () => {
     expect(detailsPayload({ ...EMPTY_DETAILS_FORM, powerKwh: '-1' }).error).toBe('Power kWh must be a number of 0 or more.')
     expect(detailsPayload({ ...EMPTY_DETAILS_FORM, capacityPerHour: 'fast' }).error).toBe('Capacity / hour must be a number of 0 or more.')
+  })
+
+  it('takes an efficiency above 0 and at most 100', () => {
+    expect(detailsPayload({ ...EMPTY_DETAILS_FORM, efficiencyPercent: '85' }).details?.efficiencyPercent).toBe(85)
+    for (const bad of ['0', '100.5', 'quick']) {
+      expect(detailsPayload({ ...EMPTY_DETAILS_FORM, efficiencyPercent: bad }).error).toBe('Efficiency % must be above 0 and at most 100.')
+    }
+    expect(perHour({ ...details, efficiencyPercent: 85 })).toContain('85% efficient')
+    expect(perHour({ ...details, efficiencyPercent: 100 })).not.toContain('efficient')
+  })
+})
+
+describe('side by side', () => {
+  it('carries whether several work orders may run at once (E12)', () => {
+    expect(detailsForm({ ...details, concurrentWorkOrders: true }).concurrentWorkOrders).toBe(true)
+    expect(detailsPayload({ ...EMPTY_DETAILS_FORM, concurrentWorkOrders: true }).details?.concurrentWorkOrders).toBe(true)
+    expect(detailsPayload(EMPTY_DETAILS_FORM).details?.concurrentWorkOrders).toBe(false)
   })
 })
 
